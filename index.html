@@ -172,6 +172,7 @@
         #firebaseConfigModal .form-group { margin-bottom: 12px; }
         #firebaseConfigModal .form-group label { font-size: 0.9em; }
         #firebaseConfigModal .form-group input { font-size: 0.9em; padding: 10px; }
+        #firebaseConfigModal .modal-buttons .btn { flex-grow: 1; }
 
         /* Consolidated Card Styles */
         .investment-header-summary { text-align: right; }
@@ -341,6 +342,7 @@
         async function startApp() {
             // Setup non-Firebase UI elements first
             document.getElementById('transactionDate').valueAsDate = new Date();
+            document.getElementById('firebaseConfigFileInput').addEventListener('change', handleConfigFileImport);
             loadTheme();
             loadApiKeys();
             loadAutoRefreshInterval();
@@ -480,6 +482,42 @@
         
         function closeFirebaseConfigModal() {
             document.getElementById('firebaseConfigModal').style.display = 'none';
+        }
+
+        function handleConfigFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                try {
+                    // Find the JSON part of the string
+                    const startIndex = text.indexOf('{');
+                    const endIndex = text.lastIndexOf('}');
+                    if (startIndex === -1 || endIndex === -1) {
+                        throw new Error("Could not find a JSON object in the file.");
+                    }
+                    const jsonString = text.substring(startIndex, endIndex + 1);
+                    const config = JSON.parse(jsonString);
+
+                    // Validate that all keys are present
+                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    const hasAllKeys = requiredKeys.every(key => config[key]);
+                    if (!hasAllKeys) {
+                         throw new Error("The JSON object is missing required Firebase keys.");
+                    }
+                    
+                    // If valid, save and reload
+                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
+                    closeFirebaseConfigModal();
+                    location.reload();
+
+                } catch (error) {
+                    alert("Failed to import configuration from file. Error: " + error.message);
+                }
+            };
+            reader.readAsText(file);
         }
 
         window.saveFirebaseConfig = function() {
@@ -1308,12 +1346,12 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
             
-            const totalGroupValue = holdings.reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
+            const totalGroupValue = holdings.reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || h.averagePurchasePrice)), 0);
             const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
             const totalGroupGainLoss = totalGroupValue - totalGroupCost;
             const totalGroupReturnPercentage = totalGroupCost > 0 ? (totalGroupGainLoss / totalGroupCost) : 0;
             let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
-                if (h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
+                if (h.currentPrice && h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
                     return sum + (h.currentPrice - h.previousClosePrice) * h.totalShares;
                 }
                 return sum;
@@ -1347,8 +1385,8 @@
                 if (isCashA && !isCashB) return -1; 
                 if (!isCashA && isCashB) return 1;  
 
-                const valueA = holdingsBySymbol[a].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
-                const valueB = holdingsBySymbol[b].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
+                const valueA = holdingsBySymbol[a].reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || 0)), 0);
+                const valueB = holdingsBySymbol[b].reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || 0)), 0);
                 return valueB - valueA;
             });
 
@@ -1382,21 +1420,22 @@
         }
         
         function renderIndividualHolding(h) {
-            const currentValue = h.totalShares * h.currentPrice;
-            const totalGainLoss = currentValue - h.totalCost;
-            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const hasLivePrice = h.currentPrice !== null && h.currentPrice > 0;
+            const displayPrice = h.currentPrice || h.averagePurchasePrice;
+            const currentValue = h.totalShares * displayPrice;
+            
+            const totalGainLoss = hasLivePrice ? currentValue - h.totalCost : 0;
+            const totalReturnPercentage = hasLivePrice && h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
             const annualIncome = (h.dividend || 0) * h.totalShares;
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
             let todayGainLossAmount = 0;
             let todayGainLossPercentage = 0;
-            let isTodayGainLossCalculable = false;
-
-            if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
+            
+            if (hasLivePrice && h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
                 const previousCloseValue = h.previousClosePrice * h.totalShares;
                 todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * h.totalShares;
                 todayGainLossPercentage = previousCloseValue > 0 ? (todayGainLossAmount / previousCloseValue) : 0;
-                isTodayGainLossCalculable = true;
             }
 
             let headerHtml = '';
@@ -1409,9 +1448,9 @@
                         <div style="color: #666; font-size: 0.9em;">${h.name}</div>
                     </div>
                     <div class="investment-header-summary">
-                        <div class="detail-value">${formatCurrency(h.currentPrice)}</div>
+                        <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
                         <div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">
-                           ${isTodayGainLossCalculable ? `${formatCurrency(h.currentPrice - h.previousClosePrice)} (${formatPercentage(todayGainLossPercentage)})` : 'N/A'}
+                           ${hasLivePrice ? `${formatCurrency(h.currentPrice - h.previousClosePrice)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
                         </div>
                     </div>
                 `;
@@ -1428,14 +1467,14 @@
                 `;
                 detailsHtml = `
                     <div class="detail-item"><div class="detail-label">Shares</div><div class="detail-value">${h.totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
-                    <div class="detail-item"><div class="detail-label">Purchase Price</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${formatCurrency(h.currentPrice)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total Invested</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Current Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatCurrency(todayGainLossAmount) : 'N/A'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatPercentage(todayGainLossPercentage) : 'N/A'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Avg. Cost</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
                     <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
@@ -1489,17 +1528,18 @@
         function renderConsolidatedHolding(symbol, accountType, holdings) {
             const totalShares = holdings.reduce((sum, h) => sum + h.totalShares, 0);
             const totalCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
+            const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
             const currentPrice = holdings[0]?.currentPrice || 0;
             const previousClosePrice = holdings[0]?.previousClosePrice || 0;
             const totalValue = totalShares * currentPrice;
             const avgCostBasis = totalShares > 0 ? totalCost / totalShares : 0;
             
-            const overallPL = totalValue - totalCost;
-            const overallPLPercent = totalCost > 0 ? overallPL / totalCost : 0;
+            const overallPL = hasLivePrice ? totalValue - totalCost : 0;
+            const overallPLPercent = hasLivePrice && totalCost > 0 ? overallPL / totalCost : 0;
 
             let todayPL = 0;
             let todayPLPercent = 0;
-            if (previousClosePrice > 0) {
+            if (hasLivePrice && previousClosePrice > 0) {
                 todayPL = (currentPrice - previousClosePrice) * totalShares;
                 const previousTotalValue = previousClosePrice * totalShares;
                 if (previousTotalValue > 0) {
@@ -1562,15 +1602,15 @@
                         <div style="color: var(--text-color-secondary); font-size: 0.9em;">${holdings[0].name} • Multiple Platforms</div>
                     </div>
                     <div class="investment-header-summary">
-                         <div class="detail-value" style="font-size: 1.4em;">${formatCurrency(currentPrice)}</div>
-                         <div class="detail-value ${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})</div>
+                         <div class="detail-value" style="font-size: 1.4em;">${hasLivePrice ? formatCurrency(currentPrice) : '...'}</div>
+                         <div class="detail-value ${todayPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
                     </div>
                 </div>
 
                 <div class="investment-details">
                     <div class="consolidated-summary">
                         <div class="summary-item"><span>Total Shares:</span> <span>${totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span></div>
-                        <div class="summary-item"><span>Total Value:</span> <span>${formatCurrency(totalValue)}</span></div>
+                        <div class="summary-item"><span>Total Value:</span> <span>${hasLivePrice ? formatCurrency(totalValue) : '...'}</span></div>
                         <div class="summary-item"><span>Avg. Cost Basis:</span> <span>${formatCurrency(avgCostBasis)}</span></div>
                     </div>
 
@@ -1580,8 +1620,8 @@
                     </div>
                     
                     <div class="consolidated-footer">
-                        <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(todayPL)}</span></div>
+                        <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
                     </div>
                      ${transactionsHtml}
                 </div>
@@ -1776,12 +1816,12 @@
             const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
             const accountData = portfolioHoldings.reduce((acc, h) => {
-                const val = h.totalShares * h.currentPrice;
+                const val = h.totalShares * (h.currentPrice || h.averagePurchasePrice);
                 if(h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => { 
-                 const val = h.totalShares * h.currentPrice;
+                 const val = h.totalShares * (h.currentPrice || h.averagePurchasePrice);
                  if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc; 
             }, {});
             
@@ -2030,7 +2070,13 @@
                 <label for="fbAppId">appId</label>
                 <input type="text" id="fbAppId" placeholder="Enter your appId">
             </div>
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
+                Or, import the configuration from a text or JSON file.
+            </p>
+            <input type="file" id="firebaseConfigFileInput" accept=".json,.txt" style="display: none;">
             <div class="modal-buttons" style="margin-top: 20px;">
+                 <button class="btn btn-cancel" onclick="document.getElementById('firebaseConfigFileInput').click()">Import from File</button>
                  <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
             </div>
         </div>
