@@ -165,9 +165,11 @@
         .btn-confirm { background: linear-gradient(45deg, #27ae60, #2ecc71); }
         .btn-cancel { background: linear-gradient(45deg, #95a5a6, #7f8c8d); }
         #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content { text-align: left; }
-        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group, #firebaseConfigModal .form-group { margin-bottom: 12px; }
+        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group { margin-bottom: 12px; }
         #editHoldingModal .form-group small { color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block; }
-        #firebaseConfigModal textarea { min-height: 200px; font-family: monospace; font-size: 0.9em; }
+        #firebaseConfigModal .form-group { margin-bottom: 12px; }
+        #firebaseConfigModal .form-group label { font-size: 0.9em; }
+        #firebaseConfigModal .form-group input { font-size: 0.9em; padding: 10px; }
 
         /* Consolidated Card Styles */
         .investment-header-summary { text-align: right; }
@@ -272,6 +274,1679 @@
     </style>
 </head>
 <body>
+    <script type="module">
+        // Firebase App (the core Firebase SDK) is always required and must be listed first
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, query, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // --- GLOBAL APP STATE ---
+        const LOCAL_STORAGE_FIREBASE_CONFIG_KEY = 'myPortfolioFirebaseConfig_v4';
+        const FIRESTORE_DATA_DOC = 'portfolioData';
+        const FIRESTORE_UI_STATE_DOC = 'uiState';
+        const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
+
+        const THEME_KEY = 'myPortfolioTheme_v4';
+        const AUTO_REFRESH_STATE_KEY = 'myPortfolioAutoRefreshState_v4';
+        const FINNHUB_API_KEY_STORAGE = 'myPortfolioFinnhubKey_v4';
+        const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
+        const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
+        const CORS_PROXY = "https://corsproxy.io/?";
+
+        let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
+        let ALPHA_VANTAGE_API_KEY = '4XPI78V9CKRS7F47';
+        const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
+
+        let firebaseApp, db, auth, userId;
+        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache;
+
+        let portfolioData = { 
+            username: '', 
+            transactions: []
+        };
+        let uiState = {
+            expandedGroups: {},
+            expandedTransactions: {}
+        };
+        let priceCache = {};
+        
+        let currentHoldings = [];
+        let totalRealizedGainLoss = 0;
+        let isSymbolValidated = false;
+        let accountChart, investmentChart, historicalChart, dividendChart;
+        let isAddFormExpanded = false;
+        let autoRefreshIntervalId = null;
+        let isAutoRefreshEnabled = true;
+        let autoRefreshIntervalSeconds = 120;
+
+        let currentSort = 'default';
+        let currentFilter = 'all';
+        let currentSearchTerm = '';
+        let activeChartFilter = 'All';
+        let validationTimeout = null;
+        let lastEditedField = 'shares';
+
+        // --- INITIALIZATION ---
+
+        window.addEventListener('DOMContentLoaded', startApp);
+        
+        async function startApp() {
+            // Setup non-Firebase UI elements first
+            document.getElementById('transactionDate').valueAsDate = new Date();
+            loadTheme();
+            loadApiKeys();
+            loadAutoRefreshInterval();
+            loadAutoRefreshState();
+
+            // Set up event listeners
+            document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
+            document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
+            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
+            document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
+
+            // Attempt to initialize Firebase
+            await initializeFirebase();
+        }
+
+        async function initializeFirebase() {
+            const storedConfig = localStorage.getItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
+            if (!storedConfig) {
+                showFirebaseConfigModal();
+                return;
+            }
+
+            try {
+                const firebaseConfig = JSON.parse(storedConfig);
+                firebaseApp = initializeApp(firebaseConfig);
+                db = getFirestore(firebaseApp);
+                auth = getAuth(firebaseApp);
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        await setupFirestoreListeners();
+                        updateDataStatus(true);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                updateDataStatus('error', "Config Error. Please Reset Connection.");
+                showFirebaseConfigModal(true); // Show modal with error state
+            }
+        }
+        
+        async function setupFirestoreListeners() {
+            if (!userId) return;
+
+            // Clean up old listeners before attaching new ones
+            if (unsubscribePortfolio) unsubscribePortfolio();
+            if (unsubscribeUiState) unsubscribeUiState();
+            if (unsubscribePriceCache) unsubscribePriceCache();
+
+            const userDocRef = doc(db, 'users', userId);
+            const portfolioColRef = collection(userDocRef, 'data');
+
+            // Listener for portfolio data
+            const portfolioDocRef = doc(portfolioColRef, FIRESTORE_DATA_DOC);
+            unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    portfolioData = docSnap.data();
+                } else {
+                    // First time user, create the document
+                    setDoc(portfolioDocRef, portfolioData);
+                }
+                updateDisplay();
+                if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
+            }, (error) => console.error("Error listening to portfolio:", error));
+            
+            // Listener for UI state
+            const uiStateDocRef = doc(portfolioColRef, FIRESTORE_UI_STATE_DOC);
+            unsubscribeUiState = onSnapshot(uiStateDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    uiState = docSnap.data();
+                }
+                 // No need to create, it's optional
+            });
+
+            // Listener for price cache
+            const priceCacheDocRef = doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC);
+            unsubscribePriceCache = onSnapshot(priceCacheDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    priceCache = docSnap.data();
+                }
+                 // No need to create, it's optional
+            });
+
+             await refreshAllPrices();
+        }
+
+        // --- MODALS (Confirmation, Firebase Config, Edit, etc.) ---
+
+        function showConfirmationModal(message, onConfirm, onCancel) {
+            const modal = document.getElementById('confirmationModal');
+            const messageEl = document.getElementById('modalMessage');
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+            const cancelBtn = document.getElementById('modalCancelBtn');
+
+            messageEl.textContent = message;
+            modal.style.display = 'flex';
+
+            const newConfirmBtn = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+            
+            const newCancelBtn = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+            if (onConfirm) {
+                newConfirmBtn.style.display = 'inline-block';
+                newCancelBtn.style.display = 'inline-block';
+                newConfirmBtn.textContent = 'Confirm';
+                newCancelBtn.textContent = 'Cancel';
+                newConfirmBtn.onclick = () => {
+                    modal.style.display = 'none';
+                    onConfirm();
+                };
+                newCancelBtn.onclick = () => {
+                    modal.style.display = 'none';
+                    if (onCancel) onCancel();
+                };
+            } else {
+                newConfirmBtn.style.display = 'inline-block';
+                newCancelBtn.style.display = 'none';
+                newConfirmBtn.textContent = 'OK';
+                newConfirmBtn.onclick = () => {
+                    modal.style.display = 'none';
+                };
+            }
+        }
+        
+        function showFirebaseConfigModal(isErrorState = false) {
+            const modal = document.getElementById('firebaseConfigModal');
+            const errorMsg = document.getElementById('firebaseConfigError');
+            errorMsg.style.display = isErrorState ? 'block' : 'none';
+            modal.style.display = 'flex';
+        }
+        
+        function closeFirebaseConfigModal() {
+            document.getElementById('firebaseConfigModal').style.display = 'none';
+        }
+
+        window.saveFirebaseConfig = function() {
+            const config = {
+                apiKey: document.getElementById('fbApiKey').value.trim(),
+                authDomain: document.getElementById('fbAuthDomain').value.trim(),
+                projectId: document.getElementById('fbProjectId').value.trim(),
+                storageBucket: document.getElementById('fbStorageBucket').value.trim(),
+                messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
+                appId: document.getElementById('fbAppId').value.trim()
+            };
+
+            // Basic validation
+            if (Object.values(config).some(v => !v)) {
+                alert("All fields are required. Please check your values from the Firebase console.");
+                return;
+            }
+            
+            try {
+                localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
+                closeFirebaseConfigModal();
+                location.reload(); // Easiest way to force a full re-initialization
+            } catch (error) {
+                alert("Failed to save configuration. Please try again.");
+            }
+        }
+        
+        window.resetFirebaseConnection = function() {
+            showConfirmationModal("Are you sure? This will clear your current connection settings and reload the page.", () => {
+                 localStorage.removeItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
+                 location.reload();
+            });
+        }
+        
+        // --- Core Data Calculation Logic ---
+        function calculateHoldingsAndCash() {
+            const holdings = {};
+            let realizedGains = 0;
+            const sortedTransactions = [...(portfolioData.transactions || [])].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+            const taxLots = {}; // symbol + account + platform combo: [{shares, price, date}]
+
+            sortedTransactions.forEach(t => {
+                const shares = parseFloat(t.shares);
+                const price = parseFloat(t.price);
+                const type = t.transactionType.toUpperCase();
+                
+                const positionKey = `${t.symbol}|||${t.accountType}|||${t.platform}`;
+
+                if (type === 'BUY') {
+                    if (!t.symbol || isNaN(shares) || isNaN(price)) return;
+                    if (!taxLots[positionKey]) taxLots[positionKey] = [];
+                    taxLots[positionKey].push({ shares, price, date: t.date, transaction: t });
+                } else if (type === 'SELL') {
+                    if (!t.symbol || isNaN(shares) || isNaN(price)) return;
+                    let sharesToSell = shares;
+                    if (!taxLots[positionKey]) taxLots[positionKey] = []; // Should not happen
+
+                    while (sharesToSell > 0 && taxLots[positionKey].length > 0) {
+                        const lot = taxLots[positionKey][0];
+                        const sharesFromLot = Math.min(sharesToSell, lot.shares);
+                        
+                        if (t.accountType !== WATCHLIST_ACCOUNT_TYPE) {
+                             realizedGains += sharesFromLot * (price - lot.price);
+                        }
+                        
+                        lot.shares -= sharesFromLot;
+                        sharesToSell -= sharesFromLot;
+                        
+                        if (lot.shares < 0.0001) {
+                            taxLots[positionKey].shift(); // Remove empty lot
+                        }
+                    }
+                }
+            });
+
+            Object.entries(taxLots).forEach(([positionKey, lots]) => {
+                if (lots.length > 0) {
+                    let totalShares = 0;
+                    let totalCost = 0;
+                    lots.forEach(lot => {
+                        totalShares += lot.shares;
+                        totalCost += lot.shares * lot.price;
+                    });
+                    
+                    if (totalShares > 0.00001) {
+                        const firstTransaction = lots[0].transaction;
+                        const [symbol, accountType, platform] = positionKey.split('|||');
+                        holdings[positionKey] = {
+                            symbol: symbol,
+                            name: firstTransaction.name,
+                            type: firstTransaction.type,
+                            accountType: accountType,
+                            platform: platform,
+                            dividend: firstTransaction.dividend,
+                            totalShares: totalShares,
+                            totalCost: totalCost,
+                            averagePurchasePrice: totalCost / totalShares,
+                            transactions: portfolioData.transactions.filter(t => t.symbol === symbol && t.accountType === accountType && t.platform === platform)
+                        };
+                    }
+                }
+            });
+
+            totalRealizedGainLoss = realizedGains;
+            
+            currentHoldings = Object.values(holdings).map(h => {
+                const cachedInfo = priceCache[h.symbol] || {};
+                if (h.type === 'CASH' || h.type === 'Money Market') {
+                    h.currentPrice = 1.0;
+                }
+                else if (cachedInfo.manualPrice != null && cachedInfo.manualPrice >= 0) {
+                    h.currentPrice = cachedInfo.manualPrice;
+                } else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
+                    h.currentPrice = cachedInfo.currentPrice;
+                } else {
+                    h.currentPrice = h.averagePurchasePrice; // Fallback
+                }
+                h.previousClosePrice = cachedInfo.previousClosePrice || null;
+                return h;
+            });
+        }
+        
+        function buildPortfolioHistoryFromTransactions() {
+            const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            if (nonWatchlistTransactions.length === 0) {
+                return [];
+            }
+            
+            const dailySnapshots = {};
+            const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+            const allSymbols = [...new Set(sorted.filter(t => t.symbol && !t.symbol.startsWith('_CASH')).map(t => t.symbol))];
+
+            if (allSymbols.length === 0 && sorted.every(t => t.symbol.startsWith('_CASH'))) {
+                 return []; // Only cash transactions, no history line needed yet.
+            }
+
+            const firstDate = new Date(sorted[0].date);
+            const today = new Date();
+            let portfolioHistory = [];
+
+            for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateString = d.toISOString().split('T')[0];
+                const transactionsUpToDate = sorted.filter(t => new Date(t.date).toISOString().split('T')[0] <= dateString);
+                
+                let dailyTotalValue = 0;
+                const tempHoldings = {};
+                
+                transactionsUpToDate.forEach(t => {
+                    const shares = parseFloat(t.shares) || 0;
+                    const type = t.transactionType.toUpperCase();
+                    if (!t.symbol) return;
+                    const symbol = t.symbol.toUpperCase();
+
+                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0 };
+                    
+                    if (type === 'BUY') {
+                        tempHoldings[symbol].totalShares += shares;
+                    } else if (type === 'SELL') {
+                        tempHoldings[symbol].totalShares -= shares;
+                    }
+                });
+
+                Object.entries(tempHoldings).forEach(([symbol, holding]) => {
+                    const price = priceCache[symbol]?.currentPrice || 1; // Use latest known price for historical estimate
+                    dailyTotalValue += holding.totalShares * price;
+                });
+                
+                dailySnapshots[dateString] = dailyTotalValue;
+            }
+
+            portfolioHistory = Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
+            return portfolioHistory;
+        }
+
+        // --- Data Persistence Functions ---
+        async function saveDataToFirestore() {
+            if (!userId) return;
+            try {
+                const userDocRef = doc(db, 'users', userId);
+                const portfolioColRef = collection(userDocRef, 'data');
+                const batch = writeBatch(db);
+
+                batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
+                batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
+                batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                
+                await batch.commit();
+                updateDataStatus(true);
+            } catch(e) {
+                console.error("Error saving to Firestore:", e);
+                updateDataStatus('error', "Save Failed");
+            }
+        }
+
+        async function clearAllData() {
+            showConfirmationModal('Are you sure you want to clear ALL transaction data from the cloud? This cannot be undone.', async () => {
+                if (!userId) return;
+                
+                // Reset local state
+                portfolioData = { username: '', transactions: [] };
+                uiState = { expandedGroups: {}, expandedTransactions: {} };
+                priceCache = {};
+                
+                // Clear documents in Firestore
+                const userDocRef = doc(db, 'users', userId);
+                const portfolioColRef = collection(userDocRef, 'data');
+                await setDoc(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
+                await setDoc(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
+                await setDoc(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                
+                updateDisplay();
+                updateDataStatus(false, "Data cleared");
+            });
+        }
+
+        // --- API & Price Fetching ---
+        function loadApiKeys() {
+            // Load from storage but fall back to hardcoded values
+            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
+            ALPHA_VANTAGE_API_KEY = localStorage.getItem(ALPHA_VANTAGE_API_KEY_STORAGE) || '4XPI78V9CKRS7F47';
+        }
+        
+        function loadAutoRefreshInterval() {
+            const storedInterval = localStorage.getItem(REFRESH_INTERVAL_KEY);
+            autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 120;
+        }
+
+        function saveSettings() {
+            FINNHUB_API_KEY = document.getElementById('finnhubApiKeyInput').value.trim();
+            ALPHA_VANTAGE_API_KEY = document.getElementById('alphaVantageApiKeyInput').value.trim();
+            let newInterval = parseInt(document.getElementById('autoRefreshIntervalInput').value.trim(), 10);
+            
+            if (isNaN(newInterval) || newInterval < 30) {
+                showConfirmationModal("Invalid interval. Please enter a number that is 30 or greater.", null);
+                return;
+            }
+            autoRefreshIntervalSeconds = newInterval;
+
+            localStorage.setItem(FINNHUB_API_KEY_STORAGE, FINNHUB_API_KEY);
+            localStorage.setItem(ALPHA_VANTAGE_API_KEY_STORAGE, ALPHA_VANTAGE_API_KEY);
+            localStorage.setItem(REFRESH_INTERVAL_KEY, autoRefreshIntervalSeconds);
+            
+            showConfirmationModal("Settings have been saved successfully.", null);
+            closeSettingsModal();
+            
+            // Restart the auto-refresh with the new interval
+            stopAutoRefresh();
+            startAutoRefresh();
+        }
+
+        async function fetchPrice(holding) {
+            if (holding.type === 'CASH' || holding.type === 'Money Market') {
+                return { currentPrice: 1.0, previousClosePrice: 1.0 };
+            }
+            let priceData = await fetchPriceFromFinnhub(holding.symbol);
+            if ((!priceData || !priceData.currentPrice || priceData.currentPrice === 0) && holding.type === 'Mutual Fund') {
+                console.warn(`Finnhub failed for Mutual Fund ${holding.symbol}. Trying Alpha Vantage.`);
+                priceData = await fetchPriceFromAlphaVantage(holding.symbol);
+            }
+            if (!priceData || priceData.currentPrice === null || priceData.currentPrice === 0) {
+                return { currentPrice: null, previousClosePrice: null };
+            }
+            return priceData;
+        }
+
+        async function refreshAllPrices(forceRefresh = false) {
+            calculateHoldingsAndCash();
+            if (currentHoldings.length === 0) {
+                updateDisplay();
+                return;
+            }
+            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
+            refreshButton.textContent = 'Refreshing...'; refreshButton.disabled = true; updateDataStatus('loading');
+
+            const today = new Date().toISOString().split('T')[0];
+
+            for (const holding of currentHoldings) {
+                let priceData;
+
+                // For Mutual Funds, only fetch if forced or if data is stale
+                if (holding.type === 'Mutual Fund') {
+                    const cachedData = priceCache[holding.symbol];
+                    if (!forceRefresh && cachedData && cachedData.lastFetchDate === today && cachedData.currentPrice) {
+                        console.log(`Using cached price for ${holding.symbol} from ${cachedData.lastFetchDate}`);
+                        continue; // Skip the fetch for this symbol
+                    }
+                }
+
+                priceData = await fetchPrice(holding);
+
+                if (priceData && priceData.currentPrice !== null) {
+                    if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                    priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                    priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    if (holding.type === 'Mutual Fund') {
+                        priceCache[holding.symbol].lastFetchDate = today;
+                    }
+                }
+            }
+            
+            await saveDataToFirestore(); 
+            updateDisplay();
+            refreshButton.textContent = 'Refresh Now'; refreshButton.disabled = false;
+        }
+        
+        async function validateWithAlphaVantage(symbol) {
+            const statusEl = document.getElementById('symbolValidationStatus');
+            if (!ALPHA_VANTAGE_API_KEY) {
+                statusEl.textContent = '⚠️';
+                statusEl.title = 'Alpha Vantage API Key is missing for mutual fund lookup.';
+                isSymbolValidated = false;
+                return;
+            }
+
+            try {
+                const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.Information || data.Note) {
+                    statusEl.textContent = '⚠️';
+                    statusEl.title = 'Alpha Vantage API limit reached (25/day). Please try again tomorrow or use a premium key.';
+                    isSymbolValidated = false;
+                    return;
+                }
+                
+                const match = data.bestMatches?.find(item => item['1. symbol'] === symbol);
+
+                if (match) {
+                    statusEl.textContent = '✅';
+                    statusEl.title = `Validated: ${match['2. name']}`;
+                    document.getElementById('name').value = match['2. name'];
+                    if (match['3. type'] === 'Mutual Fund') {
+                        document.getElementById('type').value = 'Mutual Fund';
+                    }
+                    isSymbolValidated = true;
+                } else {
+                    statusEl.textContent = '❌';
+                    statusEl.title = 'Symbol not found on Finnhub or Alpha Vantage.';
+                    isSymbolValidated = false;
+                }
+            } catch (error) {
+                console.error("Alpha Vantage validation error:", error);
+                statusEl.textContent = '⚠️';
+                statusEl.title = 'API Error during Alpha Vantage validation.';
+                isSymbolValidated = false;
+            }
+        }
+
+        function validateSymbol() {
+            clearTimeout(validationTimeout);
+            validationTimeout = setTimeout(async () => {
+                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+                const statusEl = document.getElementById('symbolValidationStatus');
+                isSymbolValidated = false; 
+
+                if (!symbol) {
+                    statusEl.textContent = '';
+                    statusEl.title = '';
+                    return;
+                }
+                statusEl.textContent = '...';
+                statusEl.title = 'Validating...';
+                
+                const mmRegex = /^[A-Z]{3,5}XX$/;
+                if (mmRegex.test(symbol)) {
+                    statusEl.textContent = '✅';
+                    statusEl.title = `Validated: ${symbol} (Money Market)`;
+                    document.getElementById('type').value = 'Money Market';
+                    isSymbolValidated = true;
+                    return; 
+                }
+
+                if (!FINNHUB_API_KEY) {
+                    statusEl.textContent = '⚠️';
+                    statusEl.title = 'Finnhub API Key is missing.';
+                    return;
+                }
+
+                try {
+                    const url = `${CORS_PROXY}https://finnhub.io/api/v1/search?q=${symbol}&token=${FINNHUB_API_KEY}`;
+                    const response = await fetch(url);
+
+                    if (!response.ok) {
+                        if (response.status === 429) {
+                            statusEl.textContent = '⚠️';
+                            statusEl.title = 'Finnhub API limit reached. Please wait a moment and try again, or use a premium key.';
+                        } else {
+                            const errorText = await response.text();
+                            console.error("CORS/Network Error:", errorText);
+                            statusEl.textContent = '⚠️';
+                            statusEl.title = `Network Error: ${response.statusText}. The proxy service may be down.`;
+                        }
+                        isSymbolValidated = false;
+                        return;
+                    }
+                    
+                    const data = await response.json();
+                    
+                    const match = data.result?.find(item => item.symbol === symbol);
+                    
+                    if (match) {
+                        statusEl.textContent = '✅';
+                        statusEl.title = `Validated: ${match.description}`;
+                        document.getElementById('name').value = match.description.split(' ').slice(0, 3).join(' '); 
+                        if (match.description.toUpperCase().includes('MONEY MARKET')) {
+                            document.getElementById('type').value = 'Money Market';
+                        }
+                        isSymbolValidated = true;
+                    } else {
+                        await validateWithAlphaVantage(symbol);
+                    }
+                } catch (error) {
+                    console.error("Symbol validation error:", error);
+                    statusEl.textContent = '⚠️';
+                    statusEl.title = 'API Error during validation. Check the browser console for details.';
+                    isSymbolValidated = false;
+                }
+            }, 750); 
+        }
+        
+        // --- Form Interaction Logic ---
+        function updateTransactionFields(editedField) {
+            const sharesInput = document.getElementById('shares');
+            const priceInput = document.getElementById('price');
+            const amountInput = document.getElementById('totalAmount');
+
+            if (editedField === 'shares' || editedField === 'price') {
+                lastEditedField = 'shares';
+            } else if (editedField === 'amount') {
+                lastEditedField = 'amount';
+            }
+            
+            const shares = parseFloat(sharesInput.value);
+            const price = parseFloat(priceInput.value);
+            const amount = parseFloat(amountInput.value);
+
+            if (lastEditedField === 'shares') {
+                if (!isNaN(shares) && !isNaN(price) && price > 0) {
+                    amountInput.value = (shares * price).toFixed(2);
+                } else if (sharesInput.value === '') {
+                    amountInput.value = '';
+                }
+            } else { 
+                if (!isNaN(amount) && !isNaN(price) && price > 0) {
+                    sharesInput.value = (amount / price).toFixed(8); 
+                } else if (amountInput.value === '') {
+                    sharesInput.value = '';
+                }
+            }
+        }
+
+        // --- Transaction CRUD Operations ---
+        function logTransaction() {
+            const transactionType = document.getElementById('transactionType').value;
+            const accountType = document.getElementById('accountType').value;
+            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+
+            if (!accountType || !document.getElementById('platform').value) {
+                showConfirmationModal("Account Type and Platform are required for all transactions.", null);
+                return;
+            }
+
+            if ((transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND' || transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') && !symbol) {
+                 showConfirmationModal('Symbol is required for this transaction type.', null);
+                 return;
+            }
+            
+            if (!isSymbolValidated && accountType !== '529 College Saving' && (transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND')) {
+                showConfirmationModal(
+                    `Symbol "${symbol}" is not validated. This could be due to API limits or an untracked asset. Do you want to log this transaction anyway?`,
+                    () => { // onConfirm
+                        const statusEl = document.getElementById('symbolValidationStatus');
+                        statusEl.textContent = '✍️';
+                        statusEl.title = 'Manually added';
+                        isSymbolValidated = true; 
+                        proceedWithTransactionLogging();
+                    }
+                );
+            } else {
+                proceedWithTransactionLogging();
+            }
+        }
+
+        async function proceedWithTransactionLogging() {
+            const transactionType = document.getElementById('transactionType').value;
+            const accountType = document.getElementById('accountType').value;
+            const platform = document.getElementById('platform').value;
+            const type = document.getElementById('type').value;
+
+            calculateHoldingsAndCash(); 
+
+            const transactionsToAdd = [];
+            let mainTransaction = {
+                id: Date.now(),
+                transactionType: transactionType,
+                date: document.getElementById('transactionDate').value,
+                accountType: accountType,
+                platform: platform,
+            };
+
+            if (transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') {
+                const amount = parseFloat(document.getElementById('amount').value);
+                if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid amount.", null); return; }
+                
+                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+                
+                mainTransaction.transactionType = (transactionType === 'DEPOSIT') ? 'BUY' : 'SELL';
+                mainTransaction.symbol = symbol;
+                mainTransaction.name = document.getElementById('name').value.trim() || symbol;
+                mainTransaction.shares = amount; // For cash funds, amount = shares
+                mainTransaction.price = 1;
+                mainTransaction.type = 'CASH'; // Assume deposits/withdrawals are cash-equivalents
+                transactionsToAdd.push(mainTransaction);
+
+            } else { // BUY, SELL, DIVIDEND
+                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+                const shares = parseFloat(document.getElementById('shares').value);
+                const price = parseFloat(document.getElementById('price').value);
+                const cost = shares * price;
+
+                if ((transactionType === 'BUY' || transactionType === 'SELL') && (!symbol || isNaN(shares) || shares <= 0 || isNaN(price) || price < 0)) {
+                    showConfirmationModal("Symbol, Shares, and Price must be valid positive numbers.", null); return;
+                }
+                
+                if(transactionType === 'DIVIDEND') {
+                     const amount = parseFloat(document.getElementById('amount').value);
+                     if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid dividend amount.", null); return; }
+                     
+                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'));
+                     if (cashFund) {
+                         mainTransaction.transactionType = 'BUY';
+                         mainTransaction.symbol = cashFund.symbol;
+                         mainTransaction.name = `Dividend from ${document.getElementById('symbol').value.trim().toUpperCase()}`;
+                         mainTransaction.shares = amount;
+                         mainTransaction.price = 1;
+                         mainTransaction.type = cashFund.type;
+                         transactionsToAdd.push(mainTransaction);
+                     } else {
+                         showConfirmationModal(`No cash/money market fund found in ${accountType} on ${platform} to deposit dividend. Please add a cash fund (e.g., SPAXX) first.`, null);
+                         return;
+                     }
+                } else { // BUY or SELL
+                    Object.assign(mainTransaction, {
+                        symbol: symbol, name: document.getElementById('name').value.trim() || symbol, shares: shares, price: price,
+                        dividend: parseFloat(document.getElementById('dividend').value) || 0, type: type
+                    });
+                    transactionsToAdd.push(mainTransaction);
+                }
+                
+                const isMoneyMarket = type === 'CASH' || type === 'Money Market';
+                const isRetirementOr529 = accountType === '401(k)' || accountType === '529 College Saving';
+
+                if (transactionType === 'BUY' && !isMoneyMarket && !isRetirementOr529 && accountType !== WATCHLIST_ACCOUNT_TYPE) {
+                    const fundingAccountType = accountType;
+                    const fundingPlatform = platform;
+                    
+                    const cashAndMoneyMarketHoldings = currentHoldings.filter(h => 
+                        h.accountType === fundingAccountType && 
+                        h.platform === fundingPlatform &&
+                        (h.type === 'CASH' || h.type === 'Money Market')
+                    );
+                    const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + h.totalShares, 0);
+
+                    if (availableCash < cost) {
+                        showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${fundingPlatform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
+                        return; 
+                    }
+                    
+                    const sourceFund = cashAndMoneyMarketHoldings.sort((a,b) => b.totalShares - a.totalShares)[0];
+                    if (sourceFund) {
+                         transactionsToAdd.unshift({ // Add SELL to the beginning of the list to be processed first
+                            id: Date.now() - 1,
+                            transactionType: 'SELL', date: mainTransaction.date, accountType: fundingAccountType,
+                            platform: sourceFund.platform, symbol: sourceFund.symbol, name: sourceFund.name, shares: cost, price: 1, type: sourceFund.type
+                        });
+                    }
+                }
+                 if(transactionType === 'SELL' && !isMoneyMarket && !isRetirementOr529) {
+                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'));
+                     if (cashFund) {
+                         transactionsToAdd.push({
+                            id: Date.now() + 1, transactionType: 'BUY', date: mainTransaction.date, accountType: accountType,
+                            platform: cashFund.platform, symbol: cashFund.symbol, name: cashFund.name, shares: cost, price: 1, type: cashFund.type
+                         });
+                     }
+                 }
+            }
+            
+            portfolioData.transactions.push(...transactionsToAdd);
+            await saveDataToFirestore();
+            clearForm();
+        }
+        
+        async function removeTransaction(id) {
+            showConfirmationModal('Are you sure you want to remove this transaction?', async () => {
+                portfolioData.transactions = portfolioData.transactions.filter(t => t.id != id);
+                await saveDataToFirestore();
+            });
+        }
+        
+        async function removeHolding(symbol, accountType, platform) {
+             showConfirmationModal(`Are you sure you want to delete ${symbol} from ${accountType} - ${platform} and all its associated transactions? This cannot be undone.`, async () => {
+                portfolioData.transactions = portfolioData.transactions.filter(t => !(t.symbol === symbol && t.accountType === accountType && t.platform === platform));
+                await saveDataToFirestore();
+            });
+        }
+
+        function clearForm() {
+            document.getElementById('symbol').value = ''; 
+            document.getElementById('name').value = ''; 
+            document.getElementById('shares').value = '';
+            document.getElementById('price').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('totalAmount').value = '';
+            document.getElementById('symbolValidationStatus').textContent = '';
+        }
+
+        async function toggleGroup(groupName) { 
+            uiState.expandedGroups[groupName] = !uiState.expandedGroups[groupName]; 
+            await saveDataToFirestore(); 
+            renderInvestments(); 
+        }
+
+		async function toggleAddForm() { 
+            isAddFormExpanded = !isAddFormExpanded; 
+            document.getElementById('addFormContent').style.display = isAddFormExpanded ? 'block' : 'none'; 
+            document.getElementById('addFormToggleIcon').innerHTML = isAddFormExpanded ? '&#9660;' : '&#9658;'; 
+            // This is local-only state, not synced.
+        }
+        
+        function openSettingsModal() {
+            document.getElementById('finnhubApiKeyInput').value = FINNHUB_API_KEY;
+            document.getElementById('alphaVantageApiKeyInput').value = ALPHA_VANTAGE_API_KEY;
+            document.getElementById('autoRefreshIntervalInput').value = autoRefreshIntervalSeconds;
+            document.getElementById('settingsModal').style.display = 'flex';
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settingsModal').style.display = 'none';
+        }
+
+        function handleAccountTypeChange() {
+            const accountType = document.getElementById('accountType').value;
+            const transactionTypeValue = document.getElementById('transactionType').value;
+            const fundingGroup = document.getElementById('fundingSourceGroup');
+
+            if (accountType === '529 College Saving' && transactionTypeValue === 'BUY') {
+                populateFundingSources();
+                fundingGroup.style.display = 'block';
+            } else {
+                fundingGroup.style.display = 'none';
+            }
+        }
+
+        function populateFundingSources() {
+            const fundingSelect = document.getElementById('fundingSource');
+            fundingSelect.innerHTML = '';
+            const allAccounts = [...new Set(portfolioData.transactions.map(t => t.accountType))];
+            const fundableAccounts = allAccounts.filter(acc => acc === 'Regular Brokerage');
+            
+            if(fundableAccounts.length > 0) {
+                 fundableAccounts.forEach(acc => {
+                    const option = document.createElement('option');
+                    option.value = acc;
+                    option.textContent = acc;
+                    fundingSelect.appendChild(option);
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No Brokerage account to fund from';
+                fundingSelect.appendChild(option);
+            }
+        }
+        
+        function toggleTransactionFields() {
+            const type = document.getElementById('transactionType').value;
+            const cashFields = document.querySelectorAll('.cash-field');
+            const transactionFields = document.querySelectorAll('.transaction-field');
+            const buySellFields = document.querySelectorAll('.buy-sell-field');
+
+            if (type === 'DEPOSIT' || type === 'WITHDRAWAL') {
+                cashFields.forEach(f => f.style.display = 'block');
+                buySellFields.forEach(f => f.style.display = 'none');
+                document.getElementById('symbol').parentElement.style.display = 'block';
+                document.getElementById('name').parentElement.style.display = 'block';
+            } else if (type === 'DIVIDEND') {
+                cashFields.forEach(f => f.style.display = 'block');
+                buySellFields.forEach(f => f.style.display = 'none');
+                document.getElementById('symbol').parentElement.style.display = 'block';
+                document.getElementById('name').parentElement.style.display = 'block';
+
+            } else { // BUY or SELL
+                cashFields.forEach(f => f.style.display = 'none');
+                transactionFields.forEach(f => f.style.display = 'block');
+            }
+            handleAccountTypeChange();
+        }
+
+        // --- Calculation and Rendering Logic ---
+        function calculateOverallStats() {
+            let totalCostBasis = 0, totalValue = 0, totalDailyGainLoss = 0, estimatedAnnualIncome = 0;
+            
+            let bestPerformer = { symbol: 'N/A', gain: -Infinity };
+            let worstPerformer = { symbol: 'N/A', gain: Infinity };
+            
+            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+
+            portfolioHoldings.forEach(h => {
+                totalCostBasis += h.totalCost;
+                const currentValue = h.totalShares * h.currentPrice;
+                totalValue += currentValue;
+                if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
+                    totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
+                }
+                if (h.dividend > 0) estimatedAnnualIncome += h.totalShares * h.dividend;
+
+                const unrealizedGain = currentValue - h.totalCost;
+                if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+            });
+            const totalUnrealizedGainLoss = totalValue - totalCostBasis;
+            return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
+        }
+        
+        function updateStats() {
+            const stats = calculateOverallStats();
+            document.getElementById('totalValue').textContent = formatCurrency(stats.totalValue);
+            document.getElementById('totalInvested').textContent = formatCurrency(stats.totalCostBasis);
+            const unrealizedEl = document.getElementById('unrealizedGainLoss');
+            unrealizedEl.textContent = formatCurrency(stats.totalUnrealizedGainLoss);
+            unrealizedEl.className = 'stat-value ' + (stats.totalUnrealizedGainLoss >= 0 ? 'positive' : 'negative');
+            const realizedEl = document.getElementById('realizedGainLoss');
+            realizedEl.textContent = formatCurrency(totalRealizedGainLoss);
+            realizedEl.className = 'stat-value ' + (totalRealizedGainLoss >= 0 ? 'positive' : 'negative');
+            const todayEl = document.getElementById('todayPortfolioGainLoss');
+            todayEl.textContent = formatCurrency(stats.totalDailyGainLoss);
+            todayEl.className = 'stat-value ' + (stats.totalDailyGainLoss >= 0 ? 'positive' : 'negative');
+            document.getElementById('estimatedAnnualIncome').textContent = formatCurrency(stats.estimatedAnnualIncome);
+            document.getElementById('portfolioYieldOnCost').textContent = formatPercentage(stats.portfolioYieldOnCost);
+
+            document.getElementById('bestPerformerValue').textContent = formatCurrency(stats.bestPerformer.gain);
+            document.getElementById('bestPerformerSymbol').textContent = stats.bestPerformer.symbol;
+            document.getElementById('bestPerformerValue').className = 'stat-value ' + (stats.bestPerformer.gain >= 0 ? 'positive' : 'negative');
+
+            document.getElementById('worstPerformerValue').textContent = formatCurrency(stats.worstPerformer.gain);
+            document.getElementById('worstPerformerSymbol').textContent = stats.worstPerformer.symbol;
+            document.getElementById('worstPerformerValue').className = 'stat-value ' + (stats.worstPerformer.gain >= 0 ? 'positive' : 'negative');
+        }
+
+        function renderInvestments() {
+            const container = document.getElementById('investmentsList');
+            container.innerHTML = '';
+            
+            let holdingsToRender = [...currentHoldings];
+            const searchTerm = currentSearchTerm.toLowerCase();
+            
+            if (searchTerm) {
+                holdingsToRender = holdingsToRender.filter(h => 
+                    h.symbol.toLowerCase().includes(searchTerm) || h.name.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            if (currentFilter !== 'all') {
+                holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
+            }
+
+            const groupedByAccount = {};
+            holdingsToRender.forEach(h => {
+                if (!groupedByAccount[h.accountType]) groupedByAccount[h.accountType] = [];
+                groupedByAccount[h.accountType].push(h);
+            });
+            
+            const accountOrder = ['Regular Brokerage', 'Roth IRA', '401(k)', '529 College Saving', 'Yahoo Finance'];
+            const sortedAccountTypes = Object.keys(groupedByAccount).sort((a,b) => {
+                const indexA = accountOrder.indexOf(a);
+                const indexB = accountOrder.indexOf(b);
+                if (indexA === -1) return 1;
+                if (indexB === -1) return -1;
+                return indexA - indexB;
+            });
+
+
+            if (sortedAccountTypes.length === 0) {
+                 container.innerHTML = `<div class="empty-state">📊<p>No holdings found. Log a transaction or clear your filters.</p></div>`; 
+                 return; 
+            }
+
+            sortedAccountTypes.forEach(accountType => {
+                container.innerHTML += renderInvestmentGroup(accountType, groupedByAccount[accountType]);
+            });
+        }
+
+        function renderInvestmentGroup(groupName, holdings) {
+            const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
+            
+            const totalGroupValue = holdings.reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
+            const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
+            const totalGroupGainLoss = totalGroupValue - totalGroupCost;
+            const totalGroupReturnPercentage = totalGroupCost > 0 ? (totalGroupGainLoss / totalGroupCost) : 0;
+            let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
+                if (h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
+                    return sum + (h.currentPrice - h.previousClosePrice) * h.totalShares;
+                }
+                return sum;
+            }, 0);
+
+            let groupStatsHtml = '';
+            if (isWatchlist) {
+                groupStatsHtml = `<div class="group-stat-item"><div class="detail-label">Tracking ${holdings.length} symbols</div></div>`;
+            } else {
+                groupStatsHtml = `
+                    <div class="group-stat-item"><div class="detail-label">Value</div><div class="detail-value">${formatCurrency(totalGroupValue)}</div></div>
+                    <div class="group-stat-item"><div class="detail-label">G/L</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupGainLoss)}</div></div>
+                    <div class="group-stat-item"><div class="detail-label">G/L %</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalGroupReturnPercentage)}</div></div>
+                    <div class="group-stat-item"><div class="detail-label">Today</div><div class="detail-value ${totalGroupDailyGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupDailyGainLoss)}</div></div>
+                `;
+            }
+
+            const holdingsBySymbol = {};
+            holdings.forEach(h => {
+                if (!holdingsBySymbol[h.symbol]) holdingsBySymbol[h.symbol] = [];
+                holdingsBySymbol[h.symbol].push(h);
+            });
+            
+            const sortedSymbols = Object.keys(holdingsBySymbol).sort((a, b) => {
+                const holdingsA = holdingsBySymbol[a][0];
+                const holdingsB = holdingsBySymbol[b][0];
+
+                const isCashA = holdingsA.type === 'CASH' || holdingsA.type === 'Money Market';
+                const isCashB = holdingsB.type === 'CASH' || holdingsB.type === 'Money Market';
+
+                if (isCashA && !isCashB) return -1; 
+                if (!isCashA && isCashB) return 1;  
+
+                const valueA = holdingsBySymbol[a].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
+                const valueB = holdingsBySymbol[b].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
+                return valueB - valueA;
+            });
+
+
+            let contentHtml = '';
+            sortedSymbols.forEach(symbol => {
+                const symbolHoldings = holdingsBySymbol[symbol];
+                if (isWatchlist || symbolHoldings.length === 1) {
+                    contentHtml += renderIndividualHolding(symbolHoldings[0]);
+                } else {
+                    contentHtml += renderConsolidatedHolding(symbol, groupName, symbolHoldings);
+                }
+            });
+            
+            const isExpanded = !!uiState.expandedGroups[groupName];
+
+            return `
+                <div class="investment-group ${isExpanded ? 'expanded' : ''}">
+                    <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
+                         <div class="group-summary">
+                            <div class="group-title">${groupName}</div>
+                            <div class="group-stats">${groupStatsHtml}</div>
+                        </div>
+                        <span class="toggle-icon">${isExpanded ? '&#9660;' : '&#9658;'}</span>
+                    </div>
+                    <div class="investment-group-content">
+                        ${contentHtml}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderIndividualHolding(h) {
+            const currentValue = h.totalShares * h.currentPrice;
+            const totalGainLoss = currentValue - h.totalCost;
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const annualIncome = (h.dividend || 0) * h.totalShares;
+            const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
+            const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
+            let todayGainLossAmount = 0;
+            let todayGainLossPercentage = 0;
+            let isTodayGainLossCalculable = false;
+
+            if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
+                const previousCloseValue = h.previousClosePrice * h.totalShares;
+                todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * h.totalShares;
+                todayGainLossPercentage = previousCloseValue > 0 ? (todayGainLossAmount / previousCloseValue) : 0;
+                isTodayGainLossCalculable = true;
+            }
+
+            let headerHtml = '';
+            let detailsHtml = '';
+
+            if (isWatchlist) {
+                headerHtml = `
+                     <div class="investment-header-info">
+                        <div class="investment-symbol">${h.symbol}</div>
+                        <div style="color: #666; font-size: 0.9em;">${h.name}</div>
+                    </div>
+                    <div class="investment-header-summary">
+                        <div class="detail-value">${formatCurrency(h.currentPrice)}</div>
+                        <div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">
+                           ${isTodayGainLossCalculable ? `${formatCurrency(h.currentPrice - h.previousClosePrice)} (${formatPercentage(todayGainLossPercentage)})` : 'N/A'}
+                        </div>
+                    </div>
+                `;
+            } else {
+                 headerHtml = `
+                    <div class="investment-header-info">
+                        <div class="investment-symbol">${h.symbol}<span class="account-badge ${getAccountBadgeClass(h.accountType)}">${h.platform}</span></div>
+                        <div style="color: var(--text-color-secondary); font-size: 0.9em;">${h.name} • ${h.type}</div>
+                    </div>
+                    <div class="investment-header-actions">
+                        <button class="btn btn-edit" onclick="event.stopPropagation(); openHoldingEditModal('${h.symbol}', '${h.accountType}', '${h.platform}')">Edit</button>
+                        <button class="btn btn-danger" onclick="event.stopPropagation(); removeHolding('${h.symbol}', '${h.accountType}', '${h.platform}')">Remove</button>
+                    </div>
+                `;
+                detailsHtml = `
+                    <div class="detail-item"><div class="detail-label">Shares</div><div class="detail-value">${h.totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
+                    <div class="detail-item"><div class="detail-label">Purchase Price</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${formatCurrency(h.currentPrice)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Total Invested</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Current Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Total G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Total Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatCurrency(todayGainLossAmount) : 'N/A'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatPercentage(todayGainLossPercentage) : 'N/A'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
+                `;
+            }
+
+            const uniqueKey = `${h.symbol}|||${h.accountType}|||${h.platform}`;
+            const isHistoryExpanded = !!uiState.expandedTransactions[uniqueKey];
+            const transactionsHtml = `
+                <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
+                    <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
+                        <h4>Transaction History</h4>
+                        <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
+                    </div>
+                    <div class="transaction-table-container">
+                        <table class="transaction-table">
+                            <thead>
+                                <tr><th>Date</th><th>Type</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                ${(h.transactions || []).sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
+                                    <tr>
+                                        <td>${t.date}</td>
+                                        <td>${t.transactionType}</td>
+                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
+                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
+                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
+                                        <td class="transaction-actions">
+                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
+                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            return `<div class="investment-item">
+                <div class="investment-header">
+                    ${headerHtml}
+                </div>
+                <div class="investment-details">
+                   ${detailsHtml}
+                </div>
+                ${isWatchlist ? '' : transactionsHtml}
+            </div>`;
+        }
+
+        function renderConsolidatedHolding(symbol, accountType, holdings) {
+            const totalShares = holdings.reduce((sum, h) => sum + h.totalShares, 0);
+            const totalCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
+            const currentPrice = holdings[0]?.currentPrice || 0;
+            const previousClosePrice = holdings[0]?.previousClosePrice || 0;
+            const totalValue = totalShares * currentPrice;
+            const avgCostBasis = totalShares > 0 ? totalCost / totalShares : 0;
+            
+            const overallPL = totalValue - totalCost;
+            const overallPLPercent = totalCost > 0 ? overallPL / totalCost : 0;
+
+            let todayPL = 0;
+            let todayPLPercent = 0;
+            if (previousClosePrice > 0) {
+                todayPL = (currentPrice - previousClosePrice) * totalShares;
+                const previousTotalValue = previousClosePrice * totalShares;
+                if (previousTotalValue > 0) {
+                     todayPLPercent = todayPL / previousTotalValue;
+                }
+            }
+
+            const allTransactions = holdings.flatMap(h => h.transactions);
+
+            const purchasesHtml = holdings.map(h => `
+                <div class="purchase-item">
+                    <span>Shares: ${h.totalShares.toLocaleString(undefined, {maximumFractionDigits: 4})} @ ${formatCurrency(h.averagePurchasePrice)} on: <strong>${h.platform}</strong></span>
+                    <div class="purchase-item-actions">
+                        <button class="btn btn-edit" onclick="event.stopPropagation(); openHoldingEditModal('${h.symbol}', '${h.accountType}', '${h.platform}')">Edit</button>
+                        <button class="btn btn-danger" onclick="event.stopPropagation(); removeHolding('${h.symbol}', '${h.accountType}', '${h.platform}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            const uniqueKey = `${symbol}|||${accountType}`;
+            const isHistoryExpanded = !!uiState.expandedTransactions[uniqueKey];
+            const transactionsHtml = `
+                <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
+                     <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
+                        <h4>Transaction History</h4>
+                        <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
+                    </div>
+                    <div class="transaction-table-container">
+                        <table class="transaction-table">
+                            <thead>
+                               <tr><th>Date</th><th>Type</th><th>Platform</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                ${allTransactions.sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
+                                    <tr>
+                                        <td>${t.date}</td>
+                                        <td>${t.transactionType}</td>
+                                        <td>${t.platform}</td>
+                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
+                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
+                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
+                                        <td class="transaction-actions">
+                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
+                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+
+            return `
+            <div class="investment-item consolidated">
+                <div class="investment-header">
+                     <div class="investment-header-info">
+                        <div class="investment-symbol">${symbol}</div>
+                        <div style="color: var(--text-color-secondary); font-size: 0.9em;">${holdings[0].name} • Multiple Platforms</div>
+                    </div>
+                    <div class="investment-header-summary">
+                         <div class="detail-value" style="font-size: 1.4em;">${formatCurrency(currentPrice)}</div>
+                         <div class="detail-value ${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})</div>
+                    </div>
+                </div>
+
+                <div class="investment-details">
+                    <div class="consolidated-summary">
+                        <div class="summary-item"><span>Total Shares:</span> <span>${totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span></div>
+                        <div class="summary-item"><span>Total Value:</span> <span>${formatCurrency(totalValue)}</span></div>
+                        <div class="summary-item"><span>Avg. Cost Basis:</span> <span>${formatCurrency(avgCostBasis)}</span></div>
+                    </div>
+
+                    <div class="purchase-breakdown">
+                        <h4>Purchases in ${accountType}:</h4>
+                        ${purchasesHtml}
+                    </div>
+                    
+                    <div class="consolidated-footer">
+                        <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(todayPL)}</span></div>
+                    </div>
+                     ${transactionsHtml}
+                </div>
+            </div>
+            `;
+        }
+
+        // --- Main Update Function ---
+        function updateDisplay() {
+            calculateHoldingsAndCash();
+            const portfolioHistory = buildPortfolioHistoryFromTransactions();
+            updateUserNameDisplay();
+            updateStats();
+            filterChart(activeChartFilter, portfolioHistory);
+            populatePlatformFilter();
+            renderInvestments();
+        }
+        
+        // --- MODAL Functions for Editing Data ---
+        
+        function openEditModal(transactionId) {
+            const transaction = portfolioData.transactions.find(t => t.id == transactionId);
+            if (!transaction) return;
+
+            const modal = document.getElementById('editTransactionModal');
+            document.getElementById('editTransactionId').value = transactionId;
+            document.getElementById('editTransactionDate').value = transaction.date;
+            
+            const fieldsContainer = document.getElementById('editTransactionFields');
+            fieldsContainer.innerHTML = ''; // Clear old fields
+
+            const type = transaction.transactionType.toUpperCase();
+            
+            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
+                const amount = transaction.shares; // For these types, shares IS the amount
+                fieldsContainer.innerHTML = `
+                    <div class="form-group">
+                        <label>Amount</label>
+                        <input type="number" id="editAmount" step="any" value="${amount || ''}">
+                    </div>
+                `;
+            } else {
+                 fieldsContainer.innerHTML = `
+                    <div class="form-group">
+                        <label>Shares</label>
+                        <input type="number" id="editShares" step="any" value="${transaction.shares || ''}">
+                    </div>
+                     <div class="form-group">
+                        <label>Price</label>
+                        <input type="number" id="editPrice" step="any" value="${transaction.price || ''}">
+                    </div>
+                `;
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editTransactionModal').style.display = 'none';
+        }
+        
+        async function saveTransactionEdit() {
+            const transactionId = document.getElementById('editTransactionId').value;
+            const transactionIndex = portfolioData.transactions.findIndex(t => t.id == transactionId);
+            if (transactionIndex === -1) return;
+
+            const transaction = portfolioData.transactions[transactionIndex];
+            transaction.date = document.getElementById('editTransactionDate').value;
+            const type = transaction.transactionType.toUpperCase();
+
+            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
+                const amount = parseFloat(document.getElementById('editAmount').value);
+                transaction.shares = amount;
+                transaction.price = 1;
+            } else {
+                transaction.shares = parseFloat(document.getElementById('editShares').value);
+                transaction.price = parseFloat(document.getElementById('editPrice').value);
+            }
+
+            await saveDataToFirestore();
+            closeEditModal();
+        }
+        
+        function openHoldingEditModal(symbol, accountType, platform) {
+            const positionKey = `${symbol}|||${accountType}|||${platform}`;
+            const holding = currentHoldings.find(h => `${h.symbol}|||${h.accountType}|||${h.platform}` === positionKey);
+            if (!holding) return;
+
+            const modal = document.getElementById('editHoldingModal');
+            document.getElementById('editHoldingSymbol').value = symbol;
+            document.getElementById('editHoldingAccountTypeKey').value = accountType;
+            document.getElementById('editHoldingPlatformKey').value = platform;
+            document.getElementById('editHoldingSymbolDisplay').value = `${symbol} (${accountType} - ${platform})`;
+            
+            document.getElementById('editHoldingTotalShares').value = holding.totalShares;
+            document.getElementById('editHoldingAvgPrice').value = holding.averagePurchasePrice;
+
+            const manualPriceInput = document.getElementById('editHoldingManualPrice');
+            const cachedInfo = priceCache[symbol] || {};
+            manualPriceInput.value = cachedInfo.manualPrice || '';
+            
+            modal.style.display = 'flex';
+        }
+
+        function closeHoldingEditModal() {
+            document.getElementById('editHoldingModal').style.display = 'none';
+        }
+        
+        async function saveHoldingEdit() {
+            const symbol = document.getElementById('editHoldingSymbol').value;
+            const accountType = document.getElementById('editHoldingAccountTypeKey').value;
+            const platform = document.getElementById('editHoldingPlatformKey').value;
+
+            const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
+            
+            const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
+            const newAvgPrice = parseFloat(document.getElementById('editHoldingAvgPrice').value);
+            const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
+
+            if (!priceCache[symbol]) priceCache[symbol] = {};
+            if (!isNaN(newManualPrice) && newManualPrice >= 0) {
+                priceCache[symbol].manualPrice = newManualPrice;
+                priceCache[symbol].currentPrice = newManualPrice;
+            } else {
+                delete priceCache[symbol].manualPrice;
+            }
+
+            if (holding) {
+                const sharesChanged = Math.abs(newTotalShares - holding.totalShares) > 0.00001;
+                const priceChanged = Math.abs(newAvgPrice - holding.averagePurchasePrice) > 0.00001;
+
+                if (sharesChanged || priceChanged) {
+                    const confirmationMessage = `This will replace all existing transactions for ${symbol} in this position with a single summary transaction. Are you sure?`;
+                    showConfirmationModal(confirmationMessage, async () => {
+                        const otherTransactions = portfolioData.transactions.filter(t => !(t.symbol === symbol && t.accountType === accountType && t.platform === platform));
+                        
+                        const summaryTransaction = {
+                            id: Date.now(),
+                            transactionType: 'BUY',
+                            date: new Date().toISOString().split('T')[0],
+                            symbol: symbol, 
+                            name: holding.name, 
+                            shares: newTotalShares, 
+                            price: newAvgPrice,
+                            dividend: holding.dividend, 
+                            type: holding.type, 
+                            accountType: accountType, 
+                            platform: platform,
+                        };
+
+                        portfolioData.transactions = [...otherTransactions, summaryTransaction];
+                        await saveDataToFirestore();
+                    });
+                } else {
+                    await saveDataToFirestore(); // Save manual price change
+                }
+            }
+            
+            closeHoldingEditModal();
+        }
+        
+        async function toggleTransactionHistory(key) { 
+            uiState.expandedTransactions[key] = !uiState.expandedTransactions[key]; 
+            await saveDataToFirestore();
+            renderInvestments(); 
+        }
+
+        // --- Utility and Charting Functions ---
+        function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
+        function formatPercentage(value) { return (value * 100).toFixed(2) + '%'; }
+        function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
+        function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); filterChart(activeChartFilter, buildPortfolioHistoryFromTransactions()); }
+        function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
+        async function updateUserName() { portfolioData.username = document.getElementById('userNameInput').value.trim(); await saveDataToFirestore(); }
+        function updateUserNameDisplay() { const el = document.getElementById('userNameDisplay'); el.textContent = portfolioData.username ? `for ${portfolioData.username}` : ''; document.getElementById('userNameInput').value = portfolioData.username; }
+        function getAccountBadgeClass(accountType) { const map = { 'Regular Brokerage': 'account-regular', 'Roth IRA': 'account-roth', '401(k)': 'account-401k', '529 College Saving': 'account-529', 'Yahoo Finance': 'account-yahoo' }; return map[accountType] || 'account-regular'; }
+        function populatePlatformFilter() {
+            const select = document.getElementById('filterPlatform');
+            if(!portfolioData.transactions) return;
+            const platforms = new Set(portfolioData.transactions.map(t => t.platform).filter(Boolean));
+            while (select.options.length > 1) select.remove(1);
+            platforms.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; select.appendChild(o); });
+            select.value = currentFilter;
+        }
+        
+        function updateCharts(dataPoints) {
+            const chartData = dataPoints || [];
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const gridColor = currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+            const labelColor = currentTheme === 'dark' ? '#f5f5f5' : '#333';
+            if(accountChart) accountChart.destroy(); if(investmentChart) investmentChart.destroy(); if(historicalChart) historicalChart.destroy(); if(dividendChart) dividendChart.destroy();
+
+            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+
+            const accountData = portfolioHoldings.reduce((acc, h) => {
+                const val = h.totalShares * h.currentPrice;
+                if(h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                return acc;
+            }, {});
+            const investmentData = portfolioHoldings.reduce((acc, h) => { 
+                 const val = h.totalShares * h.currentPrice;
+                 if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc; 
+            }, {});
+            
+            if(Object.keys(accountData).length > 0) {
+                 const accountColors = {'Regular Brokerage': '#3498db', 'Roth IRA': '#e74c3c', '401(k)': '#f39c12', '529 College Saving': '#9b59b6', 'Yahoo Finance': '#20c997'};
+                 accountChart = new Chart(document.getElementById('accountChart').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
+            }
+             if(Object.keys(investmentData).length > 0) {
+                 const investmentColors = {'Stock': '#2ecc71', 'ETF': '#3498db', 'Market Index': '#1abc9c', 'Bond': '#f39c12', 'Mutual Fund': '#9b59b6', 'Cryptocurrency': '#e67e22', 'Other': '#95a5a6', 'CASH': '#4CAF50', 'Money Market': '#4CAF50', '401k': '#f39c12'};
+                 investmentChart = new Chart(document.getElementById('investmentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
+            }
+            if (chartData && chartData.length > 0) {
+                 historicalChart = new Chart(document.getElementById('historicalChart').getContext('2d'), { type: 'line', data: { labels: chartData.map(dp => new Date(dp.date).toLocaleDateString()), datasets: [{ label: 'Portfolio Value', data: chartData.map(dp => dp.value), borderColor: 'var(--accent-color-1)', backgroundColor: 'rgba(109, 40, 217, 0.1)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, x: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
+            }
+            const dividendData = portfolioHoldings.map(h => {
+                const totalShares = h.totalShares;
+                return { symbol: h.symbol, income: totalShares * h.dividend };
+            }).filter(d => d.income > 0).sort((a,b) => b.income - a.income);
+
+            if (dividendData.length > 0) {
+                 dividendChart = new Chart(document.getElementById('dividendChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: dividendData.map(d => d.symbol),
+                        datasets: [{ label: 'Annual Income', data: dividendData.map(d => d.income), backgroundColor: 'rgba(39, 174, 96, 0.6)', borderColor: 'rgba(39, 174, 96, 1)', borderWidth: 1 }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true, maintainAspectRatio: false,
+                        scales: { x: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, y: { ticks: { color: labelColor }, grid: { color: gridColor } } },
+                        plugins: { legend: { display: false } }
+                    }
+                 });
+            }
+        }
+        
+        function saveAutoRefreshState() { localStorage.setItem(AUTO_REFRESH_STATE_KEY, JSON.stringify(isAutoRefreshEnabled)); }
+        function loadAutoRefreshState() { const s = localStorage.getItem(AUTO_REFRESH_STATE_KEY); isAutoRefreshEnabled = s !== null ? JSON.parse(s) : true; }
+        function updateAutoRefreshButton() { const btn = document.getElementById('toggleAutoRefreshBtn'); if (isAutoRefreshEnabled) { btn.textContent = 'Pause Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #f39c12, #e67e22)'; } else { btn.textContent = 'Resume Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #27ae60, #2ecc71)'; } }
+        function startAutoRefresh() { 
+            if (autoRefreshIntervalId !== null) clearInterval(autoRefreshIntervalId); 
+            isAutoRefreshEnabled = true; 
+            autoRefreshIntervalId = setInterval(() => refreshAllPrices(false), autoRefreshIntervalSeconds * 1000); 
+            updateAutoRefreshButton(); 
+            saveAutoRefreshState(); 
+        }
+        function stopAutoRefresh() { if (autoRefreshIntervalId !== null) { clearInterval(autoRefreshIntervalId); autoRefreshIntervalId = null; } isAutoRefreshEnabled = false; updateAutoRefreshButton(); saveAutoRefreshState(); }
+        function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
+        async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { return { currentPrice: null, previousClosePrice: null }; } }
+        
+        async function fetchPriceFromAlphaVantage(symbol) { 
+            if (!ALPHA_VANTAGE_API_KEY) return { currentPrice: null, previousClosePrice: null }; 
+            try { 
+                const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+                const r = await fetch(url); 
+                const d = await r.json(); 
+
+                if (d.Information || d.Note) {
+                    console.warn(`Alpha Vantage API limit reached for ${symbol}. Price not updated.`);
+                    return { currentPrice: null, previousClosePrice: null };
+                }
+
+                const ts = d['Time Series (Daily)']; 
+                if (ts) { 
+                    const dates = Object.keys(ts); 
+                    return { 
+                        currentPrice: parseFloat(ts[dates[0]]['4. close']), 
+                        previousClosePrice: dates[1] ? parseFloat(ts[dates[1]]['4. close']) : null 
+                    }; 
+                } 
+                return { currentPrice: null, previousClosePrice: null }; 
+            } catch (e) { 
+                return { currentPrice: null, previousClosePrice: null }; 
+            } 
+        }
+
+        function updateDataStatus(isSaved, msg = "") { 
+            const el = document.getElementById('dataStatus'); 
+            el.classList.remove('saved', 'loading', 'error'); 
+            if (isSaved === true) { 
+                el.textContent = '☁️ Synced'; el.classList.add('saved'); 
+            } else if (isSaved === 'loading') { 
+                el.textContent = '🔄 Syncing...'; el.classList.add('loading'); 
+            } else if (isSaved === 'error') {
+                el.textContent = `⚠️ Error: ${msg}`; el.classList.add('error'); 
+            } else {
+                el.textContent = '...';
+            }
+        }
+        
+        function filterChart(period, portfolioHistory) {
+            activeChartFilter = period;
+            document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = Array.from(document.querySelectorAll('.chart-filter-btn')).find(b => b.textContent === period);
+            if(activeBtn) activeBtn.classList.add('active');
+            
+            const now = new Date();
+            let startDate;
+
+            switch (period) {
+                case '1M': startDate = new Date(new Date().setMonth(now.getMonth() - 1)); break;
+                case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
+                case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
+                case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
+                default: updateCharts(portfolioHistory); return;
+            }
+
+            const filteredData = portfolioHistory.filter(dp => new Date(dp.date) >= startDate);
+            updateCharts(filteredData);
+        }
+        
+        // --- Import/Export Functions ---
+        function exportCSV() {
+            if (!portfolioData.transactions || portfolioData.transactions.length === 0) {
+                 showConfirmationModal("No transactions to export.", null);
+                 return;
+            }
+            const csv = Papa.unparse(portfolioData.transactions);
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+        
+        function triggerCsvImport() { 
+            document.getElementById('csvFileInput').click(); 
+        }
+
+        function handleCsvImport(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: false,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        console.error("CSV Parsing Errors:", results.errors);
+                        showConfirmationModal("Error parsing CSV file. Some rows may be malformed. Check console for details.", null);
+                    }
+                    if (results.data.length === 0) {
+                        showConfirmationModal("Import failed: CSV file is empty or contains no valid data rows.", null);
+                        return;
+                    }
+
+                    let transactionsToImport = results.data.map((row, index) => {
+                        const cleanedRow = {};
+                        for (const key in row) {
+                            cleanedRow[key] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+                        }
+                        // Manual type conversion
+                        cleanedRow.id = parseFloat(cleanedRow.id) || Date.now() + index;
+                        cleanedRow.shares = parseFloat(cleanedRow.shares) || 0;
+                        cleanedRow.price = parseFloat(cleanedRow.price) || 0;
+                        cleanedRow.dividend = parseFloat(cleanedRow.dividend) || 0;
+                        cleanedRow.amount = parseFloat(cleanedRow.amount) || null;
+                        
+                        return cleanedRow;
+                    });
+
+                    showConfirmationModal(`You are about to import ${transactionsToImport.length} transactions. This will overwrite ALL current data in the cloud. Continue?`, async () => {
+                        portfolioData.transactions = transactionsToImport;
+                        await saveDataToFirestore();
+                        showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
+                    });
+                },
+                error: (err) => showConfirmationModal(`A critical error occurred during import: ${err.message}`, null),
+                finally: () => e.target.value = null 
+            });
+        }
+        
+        // Make functions globally accessible for inline HTML onclick handlers
+        window.toggleTheme = toggleTheme;
+        window.openSettingsModal = openSettingsModal;
+        window.closeSettingsModal = closeSettingsModal;
+        window.saveSettings = saveSettings;
+        window.toggleAutoRefresh = toggleAutoRefresh;
+        window.refreshAllPrices = refreshAllPrices;
+        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions());
+        window.toggleAddForm = toggleAddForm;
+        window.toggleTransactionFields = toggleTransactionFields;
+        window.validateSymbol = validateSymbol;
+        window.handleAccountTypeChange = handleAccountTypeChange;
+        window.updateTransactionFields = updateTransactionFields;
+        window.logTransaction = logTransaction;
+        window.exportCSV = exportCSV;
+        window.triggerCsvImport = triggerCsvImport;
+        window.clearAllData = clearAllData;
+        window.updateUserName = updateUserName;
+        window.toggleGroup = toggleGroup;
+        window.removeHolding = removeHolding;
+        window.openHoldingEditModal = openHoldingEditModal;
+        window.closeHoldingEditModal = closeHoldingEditModal;
+        window.saveHoldingEdit = saveHoldingEdit;
+        window.toggleTransactionHistory = toggleTransactionHistory;
+        window.openEditModal = openEditModal;
+        window.closeEditModal = closeEditModal;
+        window.saveTransactionEdit = saveTransactionEdit;
+        window.removeTransaction = removeTransaction;
+    </script>
+
     <!-- MODALS -->
     <div id="confirmationModal" class="modal-overlay">
         <div class="modal-content">
@@ -286,12 +1961,37 @@
     <div id="firebaseConfigModal" class="modal-overlay">
         <div class="modal-content">
             <h3>Firebase Configuration Required</h3>
-            <p class="modal-message" style="font-size: 0.9em; text-align: left;">To sync your data across devices, this app needs to connect to your own free Firebase database. Please follow the setup guide to get your configuration object and paste it below.</p>
-            <div class="form-group">
-                <label for="firebaseConfigInput">Firebase Config Object (JSON)</label>
-                <textarea id="firebaseConfigInput" placeholder="Paste your firebaseConfig object here..."></textarea>
+            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
+                To connect to your private cloud database, please enter the configuration values from your Firebase project settings.
+            </p>
+            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid #ffaaaa; color: #D8000C; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                Your previous connection attempt failed. Please double-check your values.
             </div>
-            <div class="modal-buttons">
+            <div class="form-group">
+                <label for="fbApiKey">apiKey</label>
+                <input type="text" id="fbApiKey" placeholder="Enter your apiKey">
+            </div>
+            <div class="form-group">
+                <label for="fbAuthDomain">authDomain</label>
+                <input type="text" id="fbAuthDomain" placeholder="Enter your authDomain">
+            </div>
+            <div class="form-group">
+                <label for="fbProjectId">projectId</label>
+                <input type="text" id="fbProjectId" placeholder="Enter your projectId">
+            </div>
+            <div class="form-group">
+                <label for="fbStorageBucket">storageBucket</label>
+                <input type="text" id="fbStorageBucket" placeholder="Enter your storageBucket">
+            </div>
+            <div class="form-group">
+                <label for="fbMessagingSenderId">messagingSenderId</label>
+                <input type="text" id="fbMessagingSenderId" placeholder="Enter your messagingSenderId">
+            </div>
+            <div class="form-group">
+                <label for="fbAppId">appId</label>
+                <input type="text" id="fbAppId" placeholder="Enter your appId">
+            </div>
+            <div class="modal-buttons" style="margin-top: 20px;">
                  <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
             </div>
         </div>
@@ -364,9 +2064,14 @@
                 <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 120">
                 <small>Minimum 30 seconds to respect API limits.</small>
             </div>
-            <div class="modal-buttons">
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+             <div class="form-group">
+                <label>Firebase Connection</label>
+                <button class="btn btn-cancel" onclick="resetFirebaseConnection()">Reset Connection</button>
+                <small>Use this if you need to enter a new Firebase configuration.</small>
+            </div>
+            <div class="modal-buttons" style="margin-top: 20px;">
                  <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
-                 <button class="btn btn-cancel" onclick="resetFirebaseConfig()">Reset Connection</button>
             </div>
         </div>
     </div>
@@ -375,14 +2080,13 @@
         <div class="header">
             <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
             <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
-            <div class="data-status" id="dataStatus">💾 Connecting...</div>
+            <div class="data-status" id="dataStatus">...</div>
             <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
             <p>Track your investments with a detailed transaction log</p>
             <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
                 <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
                 <input type="text" id="userNameInput" placeholder="Enter your name" oninput="updateUserName()" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
             </div>
-             <div id="userIdDisplay" style="margin-top: 10px; color: var(--text-color-secondary); font-size: 0.8em; word-break: break-all;"></div>
         </div>
 
         <div class="stats-grid">
@@ -493,7 +2197,7 @@
                         </select>
                     </div>
                 </div>
-                <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>No transactions logged yet. Add your first transaction to begin!</p> </div> </div>
+                <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
             </div>
         </div>
         
@@ -502,1447 +2206,9 @@
             <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
-            <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Data from Cloud</button>
+            <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
-    
-    <!-- Firebase SDK -->
-    <script type="module">
-        // Import Firebase modules
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- App Configuration ---
-        const THEME_KEY = 'myPortfolioTheme_v3';
-        const FIREBASE_CONFIG_KEY = 'myPortfolioFirebaseConfig_v1';
-        const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
-        const CORS_PROXY = "https://corsproxy.io/?";
-
-        // --- Firebase Globals ---
-        let db, auth, userId, dataUnsubscribe;
-
-        // --- App State ---
-        let appData = {
-            portfolio: {
-                username: '',
-                transactions: []
-            },
-            settings: {
-                finnhubApiKey: 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0',
-                alphaVantageApiKey: '4XPI78V9CKRS7F47',
-                autoRefreshInterval: 120,
-                autoRefreshEnabled: true
-            },
-            uiState: {
-                expandedGroups: {},
-                expandedTransactions: {},
-                isAddFormExpanded: false
-            },
-            priceCache: {}
-        };
-        
-        let currentHoldings = [];
-        let totalRealizedGainLoss = 0;
-        
-        let isSymbolValidated = false;
-        let accountChart, investmentChart, historicalChart, dividendChart;
-        let autoRefreshIntervalId = null;
-        let isDataLoaded = false;
-        
-        let currentSort = 'default';
-        let currentFilter = 'all';
-        let currentSearchTerm = '';
-        let activeChartFilter = 'All';
-        let validationTimeout = null;
-        let lastEditedField = 'shares'; // To track user input between shares and amount
-        
-        // --- Firebase Initialization ---
-        function initializeFirebase() {
-            const configStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
-            if (!configStr) {
-                openFirebaseConfigModal();
-                updateDataStatus('error', 'Config needed');
-                return;
-            }
-
-            try {
-                const firebaseConfig = JSON.parse(configStr);
-                if (!firebaseConfig.apiKey) {
-                    throw new Error("Invalid Firebase config object.");
-                }
-                
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
-                        setupRealtimeListener(userId);
-                    } else {
-                        try {
-                            await signInAnonymously(auth);
-                        } catch (error) {
-                            console.error("Anonymous sign-in failed:", error);
-                            updateDataStatus('error', 'Auth Error');
-                        }
-                    }
-                });
-            } catch (error) {
-                 console.error("Error initializing Firebase:", error);
-                 updateDataStatus('error', 'Config Error');
-                 openFirebaseConfigModal();
-            }
-        }
-        
-        function setupRealtimeListener(uid) {
-            if (dataUnsubscribe) dataUnsubscribe(); 
-
-            const dataRef = doc(db, 'investment_tracker_users', uid);
-
-            dataUnsubscribe = onSnapshot(dataRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const dataFromDb = docSnap.data();
-                    appData.portfolio = { ...appData.portfolio, ...dataFromDb.portfolio };
-                    appData.settings = { ...appData.settings, ...dataFromDb.settings };
-                    appData.uiState = { ...appData.uiState, ...dataFromDb.uiState };
-                    appData.priceCache = dataFromDb.priceCache || {};
-
-                    if (!Array.isArray(appData.portfolio.transactions)) {
-                        appData.portfolio.transactions = [];
-                    }
-                } else {
-                    console.log("No data found, creating new document.");
-                    saveDataToFirestore();
-                }
-
-                if (!isDataLoaded) {
-                    isDataLoaded = true;
-                    initializeAppUI();
-                }
-                
-                updateDisplay();
-                updateDataStatus('saved');
-            }, (error) => {
-                console.error("Firestore listener error: ", error);
-                updateDataStatus('error', 'Sync Error');
-            });
-        }
-        
-        async function saveDataToFirestore() {
-            if (!userId) return;
-             updateDataStatus('loading');
-            try {
-                const dataRef = doc(db, 'investment_tracker_users', userId);
-                await setDoc(dataRef, appData, { merge: true });
-                 updateDataStatus('saved');
-            } catch (error) {
-                console.error("Error saving data to Firestore: ", error);
-                updateDataStatus('error', 'Save Error');
-            }
-        }
-        
-        // --- Initialization on DOM Load ---
-        document.addEventListener('DOMContentLoaded', () => {
-            loadTheme();
-            initializeFirebase();
-        });
-
-        function initializeAppUI() {
-            document.getElementById('transactionDate').valueAsDate = new Date();
-            document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
-            document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
-            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
-            document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
-
-            handleAccountTypeChange();
-            
-            if (appData.uiState.isAddFormExpanded) {
-                toggleAddForm(true); 
-            }
-            
-            if (appData.settings.autoRefreshEnabled) {
-                startAutoRefresh();
-            } else {
-                updateAutoRefreshButton();
-            }
-            refreshAllPrices();
-        }
-
-        // --- Core Data Calculation Logic ---
-        function calculateHoldingsAndCash() {
-            const holdings = {};
-            let realizedGains = 0;
-            const sortedTransactions = [...appData.portfolio.transactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            const taxLots = {}; // symbol + account + platform combo: [{shares, price, date}]
-
-            sortedTransactions.forEach(t => {
-                const shares = parseFloat(t.shares);
-                const price = parseFloat(t.price);
-                const type = t.transactionType.toUpperCase();
-                
-                const positionKey = `${t.symbol}|||${t.accountType}|||${t.platform}`;
-
-                if (type === 'BUY') {
-                    if (!t.symbol || isNaN(shares) || isNaN(price)) return;
-                    if (!taxLots[positionKey]) taxLots[positionKey] = [];
-                    taxLots[positionKey].push({ shares, price, date: t.date, transaction: t });
-                } else if (type === 'SELL') {
-                    if (!t.symbol || isNaN(shares) || isNaN(price)) return;
-                    let sharesToSell = shares;
-                    if (!taxLots[positionKey]) taxLots[positionKey] = []; 
-
-                    while (sharesToSell > 0 && taxLots[positionKey].length > 0) {
-                        const lot = taxLots[positionKey][0];
-                        const sharesFromLot = Math.min(sharesToSell, lot.shares);
-                        
-                        if (t.accountType !== WATCHLIST_ACCOUNT_TYPE) {
-                             realizedGains += sharesFromLot * (price - lot.price);
-                        }
-                        
-                        lot.shares -= sharesFromLot;
-                        sharesToSell -= sharesFromLot;
-                        
-                        if (lot.shares < 0.0001) {
-                            taxLots[positionKey].shift();
-                        }
-                    }
-                }
-            });
-
-            Object.entries(taxLots).forEach(([positionKey, lots]) => {
-                if (lots.length > 0) {
-                    let totalShares = 0;
-                    let totalCost = 0;
-                    lots.forEach(lot => {
-                        totalShares += lot.shares;
-                        totalCost += lot.shares * lot.price;
-                    });
-                    
-                    if (totalShares > 0.00001) {
-                        const firstTransaction = lots[0].transaction;
-                        const [symbol, accountType, platform] = positionKey.split('|||');
-                        holdings[positionKey] = {
-                            symbol: symbol,
-                            name: firstTransaction.name,
-                            type: firstTransaction.type,
-                            accountType: accountType,
-                            platform: platform,
-                            dividend: firstTransaction.dividend,
-                            totalShares: totalShares,
-                            totalCost: totalCost,
-                            averagePurchasePrice: totalCost / totalShares,
-                            transactions: appData.portfolio.transactions.filter(t => t.symbol === symbol && t.accountType === accountType && t.platform === platform)
-                        };
-                    }
-                }
-            });
-
-            totalRealizedGainLoss = realizedGains;
-            
-            currentHoldings = Object.values(holdings).map(h => {
-                const cachedInfo = appData.priceCache[h.symbol] || {};
-                if (h.type === 'CASH' || h.type === 'Money Market') {
-                    h.currentPrice = 1.0;
-                }
-                else if (cachedInfo.manualPrice != null && cachedInfo.manualPrice >= 0) {
-                    h.currentPrice = cachedInfo.manualPrice;
-                } else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
-                    h.currentPrice = cachedInfo.currentPrice;
-                } else {
-                    h.currentPrice = h.averagePurchasePrice; // Fallback
-                }
-                h.previousClosePrice = cachedInfo.previousClosePrice || null;
-                return h;
-            });
-        }
-        
-        function buildPortfolioHistoryFromTransactions() {
-            const nonWatchlistTransactions = appData.portfolio.transactions.filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
-            if (nonWatchlistTransactions.length === 0) {
-                return [];
-            }
-            
-            const dailySnapshots = {};
-            const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            
-            const firstDate = new Date(sorted[0].date);
-            const today = new Date();
-
-            for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
-                const dateString = d.toISOString().split('T')[0];
-                const transactionsUpToDate = sorted.filter(t => new Date(t.date).toISOString().split('T')[0] <= dateString);
-                
-                let dailyTotalValue = 0;
-                const tempHoldings = {};
-                
-                transactionsUpToDate.forEach(t => {
-                    const shares = parseFloat(t.shares) || 0;
-                    const type = t.transactionType.toUpperCase();
-                    if (!t.symbol) return;
-                    const symbol = t.symbol.toUpperCase();
-
-                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0 };
-                    
-                    if (type === 'BUY') {
-                        tempHoldings[symbol].totalShares += shares;
-                    } else if (type === 'SELL') {
-                        tempHoldings[symbol].totalShares -= shares;
-                    }
-                });
-
-                Object.entries(tempHoldings).forEach(([symbol, holding]) => {
-                    const price = appData.priceCache[symbol]?.currentPrice || 1; // Use latest known price for historical estimate
-                    dailyTotalValue += holding.totalShares * price;
-                });
-                
-                dailySnapshots[dateString] = dailyTotalValue;
-            }
-            return Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
-        }
-
-        function clearAllData() {
-            showConfirmationModal('Are you sure you want to clear ALL transaction data from the cloud? This cannot be undone.', async () => {
-                appData.portfolio.transactions = [];
-                appData.portfolio.username = '';
-                appData.priceCache = {};
-                await saveDataToFirestore();
-                updateDataStatus('info', 'Data cleared');
-            });
-        }
-
-        // --- API & Price Fetching ---
-        async function fetchPrice(holding) {
-            if (holding.type === 'CASH' || holding.type === 'Money Market') {
-                return { currentPrice: 1.0, previousClosePrice: 1.0 };
-            }
-            let priceData = await fetchPriceFromFinnhub(holding.symbol);
-            if ((!priceData || !priceData.currentPrice || priceData.currentPrice === 0) && holding.type === 'Mutual Fund') {
-                console.warn(`Finnhub failed for Mutual Fund ${holding.symbol}. Trying Alpha Vantage.`);
-                priceData = await fetchPriceFromAlphaVantage(holding.symbol);
-            }
-            if (!priceData || priceData.currentPrice === null || priceData.currentPrice === 0) {
-                return { currentPrice: null, previousClosePrice: null };
-            }
-            return priceData;
-        }
-
-        async function refreshAllPrices(forceRefresh = false) {
-            calculateHoldingsAndCash();
-            if (currentHoldings.length === 0) {
-                updateDisplay();
-                return;
-            }
-            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
-            refreshButton.textContent = 'Refreshing...'; refreshButton.disabled = true; updateDataStatus('loading');
-
-            const today = new Date().toISOString().split('T')[0];
-            let cacheUpdated = false;
-
-            for (const holding of currentHoldings) {
-                let priceData;
-
-                if (holding.type === 'Mutual Fund') {
-                    const cachedData = appData.priceCache[holding.symbol];
-                    if (!forceRefresh && cachedData && cachedData.lastFetchDate === today && cachedData.currentPrice) {
-                        console.log(`Using cached price for ${holding.symbol} from ${cachedData.lastFetchDate}`);
-                        continue;
-                    }
-                }
-                
-                priceData = await fetchPrice(holding);
-                
-                if (priceData && priceData.currentPrice !== null) {
-                    if (!appData.priceCache[holding.symbol]) appData.priceCache[holding.symbol] = {};
-                    appData.priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                    appData.priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
-                    if (holding.type === 'Mutual Fund') {
-                        appData.priceCache[holding.symbol].lastFetchDate = today;
-                    }
-                    cacheUpdated = true;
-                }
-            }
-            
-            if (cacheUpdated) {
-                await saveDataToFirestore();
-            } else {
-                updateDisplay();
-            }
-            
-            refreshButton.textContent = 'Refresh Now'; 
-            refreshButton.disabled = false;
-        }
-        
-        async function validateWithAlphaVantage(symbol) {
-            const statusEl = document.getElementById('symbolValidationStatus');
-            const apiKey = appData.settings.alphaVantageApiKey;
-
-            if (!apiKey) {
-                statusEl.textContent = '⚠️';
-                statusEl.title = 'Alpha Vantage API Key is missing for mutual fund lookup.';
-                isSymbolValidated = false;
-                return;
-            }
-
-            try {
-                const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbol}&apikey=${apiKey}`;
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data.Information || data.Note) {
-                    statusEl.textContent = '⚠️';
-                    statusEl.title = 'Alpha Vantage API limit reached. Please try again later.';
-                    isSymbolValidated = false;
-                    return;
-                }
-                
-                const match = data.bestMatches?.find(item => item['1. symbol'] === symbol);
-
-                if (match) {
-                    statusEl.textContent = '✅';
-                    statusEl.title = `Validated: ${match['2. name']}`;
-                    document.getElementById('name').value = match['2. name'];
-                    if (match['3. type'] === 'Mutual Fund') {
-                        document.getElementById('type').value = 'Mutual Fund';
-                    }
-                    isSymbolValidated = true;
-                } else {
-                    statusEl.textContent = '❌';
-                    statusEl.title = 'Symbol not found.';
-                    isSymbolValidated = false;
-                }
-            } catch (error) {
-                console.error("Alpha Vantage validation error:", error);
-                statusEl.textContent = '⚠️';
-                statusEl.title = 'API Error during validation.';
-                isSymbolValidated = false;
-            }
-        }
-
-        function validateSymbol() {
-            clearTimeout(validationTimeout);
-            validationTimeout = setTimeout(async () => {
-                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-                const statusEl = document.getElementById('symbolValidationStatus');
-                isSymbolValidated = false; 
-                const apiKey = appData.settings.finnhubApiKey;
-
-                if (!symbol) {
-                    statusEl.textContent = '';
-                    statusEl.title = '';
-                    return;
-                }
-                statusEl.textContent = '...';
-                statusEl.title = 'Validating...';
-                
-                if (/^[A-Z]{3,5}XX$/.test(symbol)) {
-                    statusEl.textContent = '✅';
-                    statusEl.title = `Validated: ${symbol} (Money Market)`;
-                    document.getElementById('type').value = 'Money Market';
-                    isSymbolValidated = true;
-                    return; 
-                }
-
-                if (!apiKey) {
-                    statusEl.textContent = '⚠️';
-                    statusEl.title = 'Finnhub API Key is missing.';
-                    return;
-                }
-
-                try {
-                    const url = `${CORS_PROXY}https://finnhub.io/api/v1/search?q=${symbol}&token=${apiKey}`;
-                    const response = await fetch(url);
-
-                    if (!response.ok) {
-                         statusEl.textContent = '⚠️';
-                         statusEl.title = `Network Error: ${response.statusText}.`;
-                         isSymbolValidated = false;
-                         return;
-                    }
-                    
-                    const data = await response.json();
-                    const match = data.result?.find(item => item.symbol === symbol);
-                    
-                    if (match) {
-                        statusEl.textContent = '✅';
-                        statusEl.title = `Validated: ${match.description}`;
-                        document.getElementById('name').value = match.description.split(' ').slice(0, 3).join(' '); 
-                        if (match.description.toUpperCase().includes('MONEY MARKET')) {
-                            document.getElementById('type').value = 'Money Market';
-                        }
-                        isSymbolValidated = true;
-                    } else {
-                        await validateWithAlphaVantage(symbol);
-                    }
-                } catch (error) {
-                    console.error("Symbol validation error:", error);
-                    statusEl.textContent = '⚠️';
-                    statusEl.title = 'API Error during validation.';
-                    isSymbolValidated = false;
-                }
-            }, 750); 
-        }
-        
-        // --- Form Interaction Logic ---
-        function updateTransactionFields(editedField) {
-            const sharesInput = document.getElementById('shares');
-            const priceInput = document.getElementById('price');
-            const amountInput = document.getElementById('totalAmount');
-
-            if (editedField === 'shares' || editedField === 'price') lastEditedField = 'shares';
-            else if (editedField === 'amount') lastEditedField = 'amount';
-            
-            const shares = parseFloat(sharesInput.value);
-            const price = parseFloat(priceInput.value);
-            const amount = parseFloat(amountInput.value);
-
-            if (lastEditedField === 'shares') {
-                if (!isNaN(shares) && !isNaN(price) && price > 0) amountInput.value = (shares * price).toFixed(2);
-                else if (sharesInput.value === '') amountInput.value = '';
-            } else { 
-                if (!isNaN(amount) && !isNaN(price) && price > 0) sharesInput.value = (amount / price).toFixed(8); 
-                else if (amountInput.value === '') sharesInput.value = '';
-            }
-        }
-
-
-        // --- Transaction CRUD Operations ---
-        function logTransaction() {
-            const transactionType = document.getElementById('transactionType').value;
-            const accountType = document.getElementById('accountType').value;
-            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-
-            if (!accountType || !document.getElementById('platform').value) {
-                showConfirmationModal("Account Type and Platform are required.", null);
-                return;
-            }
-
-            if ((transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND' || transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') && !symbol) {
-                 showConfirmationModal('Symbol is required for this transaction type.', null);
-                 return;
-            }
-            
-            if (!isSymbolValidated && accountType !== '529 College Saving' && (transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND')) {
-                showConfirmationModal(
-                    `Symbol "${symbol}" is not validated. Log anyway?`,
-                    () => { 
-                        const statusEl = document.getElementById('symbolValidationStatus');
-                        statusEl.textContent = '✍️';
-                        statusEl.title = 'Manually added';
-                        isSymbolValidated = true; 
-                        proceedWithTransactionLogging();
-                    }
-                );
-            } else {
-                proceedWithTransactionLogging();
-            }
-        }
-
-        function proceedWithTransactionLogging() {
-            const transactionType = document.getElementById('transactionType').value;
-            const accountType = document.getElementById('accountType').value;
-            const platform = document.getElementById('platform').value;
-            const type = document.getElementById('type').value;
-
-            calculateHoldingsAndCash(); 
-
-            const transactionsToAdd = [];
-            let mainTransaction = {
-                id: Date.now(),
-                transactionType: transactionType,
-                date: document.getElementById('transactionDate').value,
-                accountType: accountType,
-                platform: platform,
-            };
-
-            if (transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') {
-                const amount = parseFloat(document.getElementById('amount').value);
-                if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid amount.", null); return; }
-                
-                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-                
-                mainTransaction.transactionType = (transactionType === 'DEPOSIT') ? 'BUY' : 'SELL';
-                mainTransaction.symbol = symbol;
-                mainTransaction.name = document.getElementById('name').value.trim() || symbol;
-                mainTransaction.shares = amount;
-                mainTransaction.price = 1;
-                mainTransaction.type = 'CASH';
-                transactionsToAdd.push(mainTransaction);
-
-            } else { 
-                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-                const shares = parseFloat(document.getElementById('shares').value);
-                const price = parseFloat(document.getElementById('price').value);
-                const cost = shares * price;
-
-                if ((transactionType === 'BUY' || transactionType === 'SELL') && (!symbol || isNaN(shares) || shares <= 0 || isNaN(price) || price < 0)) {
-                    showConfirmationModal("Symbol, Shares, and Price must be valid positive numbers.", null); return;
-                }
-                
-                if(transactionType === 'DIVIDEND') {
-                     const amount = parseFloat(document.getElementById('amount').value);
-                     if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid dividend amount.", null); return; }
-                     
-                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'));
-                     if (cashFund) {
-                         mainTransaction.transactionType = 'BUY';
-                         mainTransaction.symbol = cashFund.symbol;
-                         mainTransaction.name = `Dividend from ${document.getElementById('symbol').value.trim().toUpperCase()}`;
-                         mainTransaction.shares = amount;
-                         mainTransaction.price = 1;
-                         mainTransaction.type = cashFund.type;
-                         transactionsToAdd.push(mainTransaction);
-                     } else {
-                         showConfirmationModal(`No cash/money market fund found in ${accountType} on ${platform} to deposit dividend.`, null);
-                         return;
-                     }
-                } else { // BUY or SELL
-                    Object.assign(mainTransaction, {
-                        symbol: symbol, name: document.getElementById('name').value.trim() || symbol, shares: shares, price: price,
-                        dividend: parseFloat(document.getElementById('dividend').value) || 0, type: type
-                    });
-                    transactionsToAdd.push(mainTransaction);
-                }
-                
-                const isMoneyMarket = type === 'CASH' || type === 'Money Market';
-                const isRetirementOr529 = accountType === '401(k)' || accountType === '529 College Saving';
-
-                if (transactionType === 'BUY' && !isMoneyMarket && !isRetirementOr529 && accountType !== WATCHLIST_ACCOUNT_TYPE) {
-                    const availableCash = currentHoldings.filter(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'))
-                                                    .reduce((sum, h) => sum + h.totalShares, 0);
-
-                    if (availableCash < cost) {
-                        showConfirmationModal(`Transaction Failed: Insufficient buying power. Purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available.`, null);
-                        return; 
-                    }
-                    
-                    const sourceFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'));
-                    if (sourceFund) {
-                         transactionsToAdd.unshift({
-                            id: Date.now() - 1,
-                            transactionType: 'SELL', date: mainTransaction.date, accountType: accountType,
-                            platform: sourceFund.platform, symbol: sourceFund.symbol, name: sourceFund.name, shares: cost, price: 1, type: sourceFund.type
-                        });
-                    }
-                }
-                 if(transactionType === 'SELL' && !isMoneyMarket && !isRetirementOr529) {
-                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (h.type === 'CASH' || h.type === 'Money Market'));
-                     if (cashFund) {
-                         transactionsToAdd.push({
-                            id: Date.now() + 1, transactionType: 'BUY', date: mainTransaction.date, accountType: accountType,
-                            platform: cashFund.platform, symbol: cashFund.symbol, name: cashFund.name, shares: cost, price: 1, type: cashFund.type
-                         });
-                     }
-                 }
-            }
-            
-            appData.portfolio.transactions.push(...transactionsToAdd);
-            saveDataToFirestore();
-            clearForm();
-        }
-        
-        function removeTransaction(id) {
-            showConfirmationModal('Are you sure you want to remove this transaction?', () => {
-                appData.portfolio.transactions = appData.portfolio.transactions.filter(t => t.id != id);
-                saveDataToFirestore();
-            });
-        }
-        
-        function removeHolding(symbol, accountType, platform) {
-             showConfirmationModal(`Are you sure you want to delete ${symbol} from ${accountType} - ${platform} and all its transactions?`, () => {
-                appData.portfolio.transactions = appData.portfolio.transactions.filter(t => !(t.symbol === symbol && t.accountType === accountType && t.platform === platform));
-                saveDataToFirestore();
-            });
-        }
-
-        function clearForm() {
-            document.getElementById('symbol').value = ''; 
-            document.getElementById('name').value = ''; 
-            document.getElementById('shares').value = '';
-            document.getElementById('price').value = '';
-            document.getElementById('amount').value = '';
-            document.getElementById('totalAmount').value = '';
-            document.getElementById('symbolValidationStatus').textContent = '';
-        }
-        
-        function toggleGroup(groupName) { 
-            appData.uiState.expandedGroups[groupName] = !appData.uiState.expandedGroups[groupName]; 
-            saveDataToFirestore();
-        }
-
-		function toggleAddForm(forceOpen = false) {
-            if (forceOpen) {
-                appData.uiState.isAddFormExpanded = true;
-            } else {
-                appData.uiState.isAddFormExpanded = !appData.uiState.isAddFormExpanded;
-                saveDataToFirestore();
-            }
-            document.getElementById('addFormContent').style.display = appData.uiState.isAddFormExpanded ? 'block' : 'none'; 
-            document.getElementById('addFormToggleIcon').innerHTML = appData.uiState.isAddFormExpanded ? '&#9660;' : '&#9658;'; 
-        }
-        
-        function openSettingsModal() {
-            document.getElementById('finnhubApiKeyInput').value = appData.settings.finnhubApiKey;
-            document.getElementById('alphaVantageApiKeyInput').value = appData.settings.alphaVantageApiKey;
-            document.getElementById('autoRefreshIntervalInput').value = appData.settings.autoRefreshInterval;
-            document.getElementById('settingsModal').style.display = 'flex';
-        }
-
-        function closeSettingsModal() {
-            document.getElementById('settingsModal').style.display = 'none';
-        }
-
-        async function saveSettings() {
-            appData.settings.finnhubApiKey = document.getElementById('finnhubApiKeyInput').value.trim();
-            appData.settings.alphaVantageApiKey = document.getElementById('alphaVantageApiKeyInput').value.trim();
-            let newInterval = parseInt(document.getElementById('autoRefreshIntervalInput').value.trim(), 10);
-            
-            if (isNaN(newInterval) || newInterval < 30) {
-                showConfirmationModal("Invalid interval. Must be a number >= 30.", null);
-                return;
-            }
-            appData.settings.autoRefreshInterval = newInterval;
-
-            await saveDataToFirestore();
-            
-            showConfirmationModal("Settings have been saved.", null);
-            closeSettingsModal();
-            
-            stopAutoRefresh();
-            startAutoRefresh();
-        }
-
-
-        function handleAccountTypeChange() {
-            const accountType = document.getElementById('accountType').value;
-            const transactionTypeValue = document.getElementById('transactionType').value;
-            const fundingGroup = document.getElementById('fundingSourceGroup');
-
-            if (accountType === '529 College Saving' && transactionTypeValue === 'BUY') {
-                populateFundingSources();
-                fundingGroup.style.display = 'block';
-            } else {
-                fundingGroup.style.display = 'none';
-            }
-        }
-
-        function populateFundingSources() {
-            const fundingSelect = document.getElementById('fundingSource');
-            fundingSelect.innerHTML = '';
-            const fundableAccounts = [...new Set(appData.portfolio.transactions.map(t => t.accountType))]
-                                        .filter(acc => acc === 'Regular Brokerage');
-            
-            if(fundableAccounts.length > 0) {
-                 fundableAccounts.forEach(acc => {
-                    const option = document.createElement('option');
-                    option.value = acc;
-                    option.textContent = acc;
-                    fundingSelect.appendChild(option);
-                });
-            } else {
-                const option = document.createElement('option');
-                option.value = '';
-                option.textContent = 'No Brokerage account to fund from';
-                fundingSelect.appendChild(option);
-            }
-        }
-        
-        function toggleTransactionFields() {
-            const type = document.getElementById('transactionType').value;
-            const cashFields = document.querySelectorAll('.cash-field');
-            const buySellFields = document.querySelectorAll('.buy-sell-field');
-
-            const symbolParent = document.getElementById('symbol').parentElement;
-            const nameParent = document.getElementById('name').parentElement;
-
-            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
-                cashFields.forEach(f => f.style.display = 'block');
-                buySellFields.forEach(f => f.style.display = 'none');
-                symbolParent.style.display = 'block';
-                nameParent.style.display = 'block';
-            } else { // BUY or SELL
-                cashFields.forEach(f => f.style.display = 'none');
-                buySellFields.forEach(f => f.style.display = 'block');
-                symbolParent.style.display = 'block';
-                nameParent.style.display = 'block';
-            }
-            handleAccountTypeChange();
-        }
-
-        // --- Calculation and Rendering Logic ---
-        function calculateOverallStats() {
-            let totalCostBasis = 0, totalValue = 0, totalDailyGainLoss = 0, estimatedAnnualIncome = 0;
-            let bestPerformer = { symbol: 'N/A', gain: -Infinity };
-            let worstPerformer = { symbol: 'N/A', gain: Infinity };
-            
-            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
-
-            portfolioHoldings.forEach(h => {
-                totalCostBasis += h.totalCost;
-                const currentValue = h.totalShares * h.currentPrice;
-                totalValue += currentValue;
-                if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
-                    totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
-                }
-                if (h.dividend > 0) estimatedAnnualIncome += h.totalShares * h.dividend;
-
-                const unrealizedGain = currentValue - h.totalCost;
-                if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
-            });
-            const totalUnrealizedGainLoss = totalValue - totalCostBasis;
-            return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
-        }
-        
-        function updateStats() {
-            const stats = calculateOverallStats();
-            document.getElementById('totalValue').textContent = formatCurrency(stats.totalValue);
-            document.getElementById('totalInvested').textContent = formatCurrency(stats.totalCostBasis);
-            const unrealizedEl = document.getElementById('unrealizedGainLoss');
-            unrealizedEl.textContent = formatCurrency(stats.totalUnrealizedGainLoss);
-            unrealizedEl.className = 'stat-value ' + (stats.totalUnrealizedGainLoss >= 0 ? 'positive' : 'negative');
-            const realizedEl = document.getElementById('realizedGainLoss');
-            realizedEl.textContent = formatCurrency(totalRealizedGainLoss);
-            realizedEl.className = 'stat-value ' + (totalRealizedGainLoss >= 0 ? 'positive' : 'negative');
-            const todayEl = document.getElementById('todayPortfolioGainLoss');
-            todayEl.textContent = formatCurrency(stats.totalDailyGainLoss);
-            todayEl.className = 'stat-value ' + (stats.totalDailyGainLoss >= 0 ? 'positive' : 'negative');
-            document.getElementById('estimatedAnnualIncome').textContent = formatCurrency(stats.estimatedAnnualIncome);
-            document.getElementById('portfolioYieldOnCost').textContent = formatPercentage(stats.portfolioYieldOnCost);
-
-            document.getElementById('bestPerformerValue').textContent = formatCurrency(stats.bestPerformer.gain);
-            document.getElementById('bestPerformerSymbol').textContent = stats.bestPerformer.symbol;
-            document.getElementById('bestPerformerValue').className = 'stat-value ' + (stats.bestPerformer.gain >= 0 ? 'positive' : 'negative');
-
-            document.getElementById('worstPerformerValue').textContent = formatCurrency(stats.worstPerformer.gain);
-            document.getElementById('worstPerformerSymbol').textContent = stats.worstPerformer.symbol;
-            document.getElementById('worstPerformerValue').className = 'stat-value ' + (stats.worstPerformer.gain >= 0 ? 'positive' : 'negative');
-        }
-
-        function renderInvestments() {
-            const container = document.getElementById('investmentsList');
-            container.innerHTML = '';
-            
-            let holdingsToRender = [...currentHoldings];
-            const searchTerm = currentSearchTerm.toLowerCase();
-            
-            if (searchTerm) {
-                holdingsToRender = holdingsToRender.filter(h => 
-                    h.symbol.toLowerCase().includes(searchTerm) || h.name.toLowerCase().includes(searchTerm)
-                );
-            }
-
-            if (currentFilter !== 'all') {
-                holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
-            }
-
-            const groupedByAccount = {};
-            holdingsToRender.forEach(h => {
-                if (!groupedByAccount[h.accountType]) groupedByAccount[h.accountType] = [];
-                groupedByAccount[h.accountType].push(h);
-            });
-            
-            const accountOrder = ['Regular Brokerage', 'Roth IRA', '401(k)', '529 College Saving', 'Yahoo Finance'];
-            const finalAccountOrder = accountOrder.filter(acc => groupedByAccount[acc]);
-
-            if (finalAccountOrder.length === 0) {
-                 container.innerHTML = `<div class="empty-state">📊<p>No holdings found. Log a transaction or clear your filters.</p></div>`; 
-                 return; 
-            }
-
-            finalAccountOrder.forEach(accountType => {
-                container.innerHTML += renderInvestmentGroup(accountType, groupedByAccount[accountType]);
-            });
-        }
-        
-        function renderInvestmentGroup(groupName, holdings) {
-            const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
-            
-            const totalGroupValue = holdings.reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
-            const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
-            const totalGroupGainLoss = totalGroupValue - totalGroupCost;
-            const totalGroupReturnPercentage = totalGroupCost > 0 ? (totalGroupGainLoss / totalGroupCost) : 0;
-            let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
-                if (h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
-                    return sum + (h.currentPrice - h.previousClosePrice) * h.totalShares;
-                }
-                return sum;
-            }, 0);
-
-            let groupStatsHtml = '';
-            if (isWatchlist) {
-                groupStatsHtml = `<div class="group-stat-item"><div class="detail-label">Tracking ${holdings.length} symbols</div></div>`;
-            } else {
-                groupStatsHtml = `
-                    <div class="group-stat-item"><div class="detail-label">Value</div><div class="detail-value">${formatCurrency(totalGroupValue)}</div></div>
-                    <div class="group-stat-item"><div class="detail-label">G/L</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupGainLoss)}</div></div>
-                    <div class="group-stat-item"><div class="detail-label">G/L %</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalGroupReturnPercentage)}</div></div>
-                    <div class="group-stat-item"><div class="detail-label">Today</div><div class="detail-value ${totalGroupDailyGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupDailyGainLoss)}</div></div>
-                `;
-            }
-
-            const holdingsBySymbol = {};
-            holdings.forEach(h => {
-                if (!holdingsBySymbol[h.symbol]) holdingsBySymbol[h.symbol] = [];
-                holdingsBySymbol[h.symbol].push(h);
-            });
-            
-            const sortedSymbols = Object.keys(holdingsBySymbol).sort((a, b) => {
-                const holdingsA = holdingsBySymbol[a][0];
-                const holdingsB = holdingsBySymbol[b][0];
-
-                if ((holdingsA.type === 'CASH' || holdingsA.type === 'Money Market') && !(holdingsB.type === 'CASH' || holdingsB.type === 'Money Market')) return -1;
-                if (!(holdingsA.type === 'CASH' || holdingsA.type === 'Money Market') && (holdingsB.type === 'CASH' || holdingsB.type === 'Money Market')) return 1;
-
-                const valueA = holdingsBySymbol[a].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
-                const valueB = holdingsBySymbol[b].reduce((sum, h) => sum + (h.totalShares * h.currentPrice), 0);
-                return valueB - valueA;
-            });
-
-            let contentHtml = sortedSymbols.map(symbol => {
-                const symbolHoldings = holdingsBySymbol[symbol];
-                return (isWatchlist || symbolHoldings.length === 1) 
-                    ? renderIndividualHolding(symbolHoldings[0]) 
-                    : renderConsolidatedHolding(symbol, groupName, symbolHoldings);
-            }).join('');
-            
-            const isExpanded = !!appData.uiState.expandedGroups[groupName];
-
-            return `
-                <div class="investment-group ${isExpanded ? 'expanded' : ''}">
-                    <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
-                         <div class="group-summary">
-                            <div class="group-title">${groupName}</div>
-                            <div class="group-stats">${groupStatsHtml}</div>
-                        </div>
-                        <span class="toggle-icon">${isExpanded ? '&#9660;' : '&#9658;'}</span>
-                    </div>
-                    <div class="investment-group-content">
-                        ${contentHtml}
-                    </div>
-                </div>
-            `;
-        }
-        
-        function renderIndividualHolding(h) {
-            const currentValue = h.totalShares * h.currentPrice;
-            const totalGainLoss = currentValue - h.totalCost;
-            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
-            const annualIncome = (h.dividend || 0) * h.totalShares;
-            const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
-            const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
-            
-            let todayGainLossAmount = 0, todayGainLossPercentage = 0, isTodayGainLossCalculable = false;
-
-            if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
-                todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * h.totalShares;
-                todayGainLossPercentage = (h.previousClosePrice * h.totalShares > 0) ? (todayGainLossAmount / (h.previousClosePrice * h.totalShares)) : 0;
-                isTodayGainLossCalculable = true;
-            }
-
-            let headerHtml = '', detailsHtml = '';
-
-            if (isWatchlist) {
-                headerHtml = `
-                     <div class="investment-header-info">
-                        <div class="investment-symbol">${h.symbol}</div>
-                        <div style="color: #666; font-size: 0.9em;">${h.name}</div>
-                    </div>
-                    <div class="investment-header-summary">
-                        <div class="detail-value">${formatCurrency(h.currentPrice)}</div>
-                        <div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">
-                           ${isTodayGainLossCalculable ? `${formatCurrency(h.currentPrice - h.previousClosePrice)} (${formatPercentage(todayGainLossPercentage)})` : 'N/A'}
-                        </div>
-                    </div>
-                `;
-            } else {
-                 headerHtml = `
-                    <div class="investment-header-info">
-                        <div class="investment-symbol">${h.symbol}<span class="account-badge ${getAccountBadgeClass(h.accountType)}">${h.platform}</span></div>
-                        <div style="color: var(--text-color-secondary); font-size: 0.9em;">${h.name} • ${h.type}</div>
-                    </div>
-                    <div class="investment-header-actions">
-                        <button class="btn btn-edit" onclick="event.stopPropagation(); openHoldingEditModal('${h.symbol}', '${h.accountType}', '${h.platform}')">Edit</button>
-                        <button class="btn btn-danger" onclick="event.stopPropagation(); removeHolding('${h.symbol}', '${h.accountType}', '${h.platform}')">Remove</button>
-                    </div>
-                `;
-                detailsHtml = `
-                    <div class="detail-item"><div class="detail-label">Shares</div><div class="detail-value">${h.totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
-                    <div class="detail-item"><div class="detail-label">Purchase Price</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${formatCurrency(h.currentPrice)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total Invested</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Current Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Total Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatCurrency(todayGainLossAmount) : 'N/A'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${isTodayGainLossCalculable ? formatPercentage(todayGainLossPercentage) : 'N/A'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
-                `;
-            }
-
-            const uniqueKey = `${h.symbol}|||${h.accountType}|||${h.platform}`;
-            const isHistoryExpanded = !!appData.uiState.expandedTransactions[uniqueKey];
-            const transactionsHtml = `
-                <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
-                    <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
-                        <h4>Transaction History</h4>
-                        <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
-                    </div>
-                    <div class="transaction-table-container">
-                        <table class="transaction-table">
-                            <thead><tr><th>Date</th><th>Type</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr></thead>
-                            <tbody>
-                                ${(h.transactions || []).sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
-                                    <tr>
-                                        <td>${t.date}</td><td>${t.transactionType}</td>
-                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
-                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
-                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
-                                        <td class="transaction-actions">
-                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
-                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-            
-            return `<div class="investment-item">
-                <div class="investment-header">${headerHtml}</div>
-                <div class="investment-details">${detailsHtml}</div>
-                ${isWatchlist ? '' : transactionsHtml}
-            </div>`;
-        }
-
-        function renderConsolidatedHolding(symbol, accountType, holdings) {
-            const totalShares = holdings.reduce((sum, h) => sum + h.totalShares, 0);
-            const totalCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
-            const currentPrice = holdings[0]?.currentPrice || 0;
-            const previousClosePrice = holdings[0]?.previousClosePrice || 0;
-            const totalValue = totalShares * currentPrice;
-            const avgCostBasis = totalShares > 0 ? totalCost / totalShares : 0;
-            
-            const overallPL = totalValue - totalCost;
-            const overallPLPercent = totalCost > 0 ? overallPL / totalCost : 0;
-
-            let todayPL = 0, todayPLPercent = 0;
-            if (previousClosePrice > 0) {
-                todayPL = (currentPrice - previousClosePrice) * totalShares;
-                if (previousClosePrice * totalShares > 0) todayPLPercent = todayPL / (previousClosePrice * totalShares);
-            }
-
-            const allTransactions = holdings.flatMap(h => h.transactions);
-
-            const purchasesHtml = holdings.map(h => `
-                <div class="purchase-item">
-                    <span>Shares: ${h.totalShares.toLocaleString(undefined, {maximumFractionDigits: 4})} @ ${formatCurrency(h.averagePurchasePrice)} on: <strong>${h.platform}</strong></span>
-                    <div class="purchase-item-actions">
-                        <button class="btn btn-edit" onclick="event.stopPropagation(); openHoldingEditModal('${h.symbol}', '${h.accountType}', '${h.platform}')">Edit</button>
-                        <button class="btn btn-danger" onclick="event.stopPropagation(); removeHolding('${h.symbol}', '${h.accountType}', '${h.platform}')">Delete</button>
-                    </div>
-                </div>
-            `).join('');
-            
-            const uniqueKey = `${symbol}|||${accountType}`;
-            const isHistoryExpanded = !!appData.uiState.expandedTransactions[uniqueKey];
-            const transactionsHtml = `
-                <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
-                     <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
-                        <h4>Transaction History</h4>
-                        <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
-                    </div>
-                    <div class="transaction-table-container">
-                        <table class="transaction-table">
-                            <thead><tr><th>Date</th><th>Type</th><th>Platform</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr></thead>
-                            <tbody>
-                                ${allTransactions.sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
-                                    <tr>
-                                        <td>${t.date}</td><td>${t.transactionType}</td><td>${t.platform}</td>
-                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
-                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
-                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
-                                        <td class="transaction-actions">
-                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
-                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-
-
-            return `
-            <div class="investment-item consolidated">
-                <div class="investment-header">
-                     <div class="investment-header-info">
-                        <div class="investment-symbol">${symbol}</div>
-                        <div style="color: var(--text-color-secondary); font-size: 0.9em;">${holdings[0].name} • Multiple Platforms</div>
-                    </div>
-                    <div class="investment-header-summary">
-                         <div class="detail-value" style="font-size: 1.4em;">${formatCurrency(currentPrice)}</div>
-                         <div class="detail-value ${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})</div>
-                    </div>
-                </div>
-                <div class="investment-details">
-                    <div class="consolidated-summary">
-                        <div class="summary-item"><span>Total Shares:</span> <span>${totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span></div>
-                        <div class="summary-item"><span>Total Value:</span> <span>${formatCurrency(totalValue)}</span></div>
-                        <div class="summary-item"><span>Avg. Cost Basis:</span> <span>${formatCurrency(avgCostBasis)}</span></div>
-                    </div>
-                    <div class="purchase-breakdown">
-                        <h4>Purchases in ${accountType}:</h4>
-                        ${purchasesHtml}
-                    </div>
-                    <div class="consolidated-footer">
-                        <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPL >= 0 ? 'positive' : 'negative'}">${formatCurrency(todayPL)}</span></div>
-                    </div>
-                     ${transactionsHtml}
-                </div>
-            </div>
-            `;
-        }
-
-        // --- Main Update Function ---
-        function updateDisplay() {
-            if (!isDataLoaded) return;
-            calculateHoldingsAndCash();
-            updateUserNameDisplay();
-            updateStats();
-            const portfolioHistory = buildPortfolioHistoryFromTransactions();
-            filterChart(activeChartFilter, portfolioHistory); 
-            populatePlatformFilter();
-            renderInvestments();
-        }
-        
-        // --- MODAL Functions ---
-        function openFirebaseConfigModal() {
-            document.getElementById('firebaseConfigModal').style.display = 'flex';
-        }
-        
-        function saveFirebaseConfig() {
-            const configInput = document.getElementById('firebaseConfigInput');
-            const configStr = configInput.value;
-            try {
-                const config = JSON.parse(configStr);
-                if (!config.apiKey) {
-                    throw new Error("API Key is missing from the config.");
-                }
-                localStorage.setItem(FIREBASE_CONFIG_KEY, configStr);
-                document.getElementById('firebaseConfigModal').style.display = 'none';
-                configInput.value = ''; // Clear after save
-                initializeFirebase(); // Re-initialize with the new config
-            } catch (e) {
-                showConfirmationModal("The provided text is not a valid Firebase configuration object. Please copy it exactly from the Firebase console.", null);
-                console.error("Invalid Firebase config:", e);
-            }
-        }
-        
-        function showConfirmationModal(message, onConfirm, onCancel) {
-            const modal = document.getElementById('confirmationModal');
-            const messageEl = document.getElementById('modalMessage');
-            const confirmBtn = document.getElementById('modalConfirmBtn');
-            const cancelBtn = document.getElementById('modalCancelBtn');
-
-            messageEl.textContent = message;
-            modal.style.display = 'flex';
-
-            const newConfirmBtn = confirmBtn.cloneNode(true);
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
-            
-            const newCancelBtn = cancelBtn.cloneNode(true);
-            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-
-            if (onConfirm) {
-                newConfirmBtn.style.display = 'inline-block';
-                newCancelBtn.style.display = 'inline-block';
-                newConfirmBtn.textContent = 'Confirm';
-                newCancelBtn.textContent = 'Cancel';
-                newConfirmBtn.onclick = () => { modal.style.display = 'none'; onConfirm(); };
-                newCancelBtn.onclick = () => { modal.style.display = 'none'; if (onCancel) onCancel(); };
-            } else {
-                newConfirmBtn.style.display = 'inline-block';
-                newCancelBtn.style.display = 'none';
-                newConfirmBtn.textContent = 'OK';
-                newConfirmBtn.onclick = () => { modal.style.display = 'none'; };
-            }
-        }
-        
-        function openEditModal(transactionId) {
-            const transaction = appData.portfolio.transactions.find(t => t.id == transactionId);
-            if (!transaction) return;
-
-            const modal = document.getElementById('editTransactionModal');
-            document.getElementById('editTransactionId').value = transactionId;
-            document.getElementById('editTransactionDate').value = transaction.date;
-            
-            const fieldsContainer = document.getElementById('editTransactionFields');
-            const type = transaction.transactionType.toUpperCase();
-            
-            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
-                fieldsContainer.innerHTML = `<div class="form-group"><label>Amount</label><input type="number" id="editAmount" step="any" value="${transaction.amount || ''}"></div>`;
-            } else {
-                 fieldsContainer.innerHTML = `<div class="form-group"><label>Shares</label><input type="number" id="editShares" step="any" value="${transaction.shares || ''}"></div><div class="form-group"><label>Price</label><input type="number" id="editPrice" step="any" value="${transaction.price || ''}"></div>`;
-            }
-            modal.style.display = 'flex';
-        }
-
-        function closeEditModal() { document.getElementById('editTransactionModal').style.display = 'none'; }
-        
-        function saveTransactionEdit() {
-            const transactionId = document.getElementById('editTransactionId').value;
-            const transactionIndex = appData.portfolio.transactions.findIndex(t => t.id == transactionId);
-            if (transactionIndex === -1) return;
-
-            const transaction = appData.portfolio.transactions[transactionIndex];
-            transaction.date = document.getElementById('editTransactionDate').value;
-            const type = transaction.transactionType.toUpperCase();
-
-            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
-                transaction.amount = parseFloat(document.getElementById('editAmount').value);
-            } else {
-                transaction.shares = parseFloat(document.getElementById('editShares').value);
-                transaction.price = parseFloat(document.getElementById('editPrice').value);
-            }
-
-            saveDataToFirestore();
-            closeEditModal();
-        }
-        
-        function openHoldingEditModal(symbol, accountType, platform) {
-            const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
-            if (!holding) return;
-
-            const modal = document.getElementById('editHoldingModal');
-            document.getElementById('editHoldingSymbol').value = symbol;
-            document.getElementById('editHoldingAccountTypeKey').value = accountType;
-            document.getElementById('editHoldingPlatformKey').value = platform;
-            document.getElementById('editHoldingSymbolDisplay').value = `${symbol} (${accountType} - ${platform})`;
-            document.getElementById('editHoldingTotalShares').value = holding.totalShares;
-            document.getElementById('editHoldingAvgPrice').value = holding.averagePurchasePrice;
-
-            const manualPriceInput = document.getElementById('editHoldingManualPrice');
-            const cachedInfo = appData.priceCache[symbol] || {};
-            manualPriceInput.value = cachedInfo.manualPrice || '';
-            
-            modal.style.display = 'flex';
-        }
-
-        function closeHoldingEditModal() { document.getElementById('editHoldingModal').style.display = 'none'; }
-        
-        function saveHoldingEdit() {
-            const symbol = document.getElementById('editHoldingSymbol').value;
-            const accountType = document.getElementById('editHoldingAccountTypeKey').value;
-            const platform = document.getElementById('editHoldingPlatformKey').value;
-
-            const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
-            
-            const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
-            const newAvgPrice = parseFloat(document.getElementById('editHoldingAvgPrice').value);
-            const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
-
-            if (!appData.priceCache[symbol]) appData.priceCache[symbol] = {};
-            if (!isNaN(newManualPrice) && newManualPrice >= 0) {
-                appData.priceCache[symbol].manualPrice = newManualPrice;
-                appData.priceCache[symbol].currentPrice = newManualPrice;
-            } else {
-                delete appData.priceCache[symbol].manualPrice;
-            }
-
-            if (holding) {
-                const sharesChanged = Math.abs(newTotalShares - holding.totalShares) > 0.00001;
-                const priceChanged = Math.abs(newAvgPrice - holding.averagePurchasePrice) > 0.00001;
-
-                if (sharesChanged || priceChanged) {
-                    const confirmationMessage = `This will replace all transactions for ${symbol} with a single summary. Are you sure?`;
-                    showConfirmationModal(confirmationMessage, () => {
-                        appData.portfolio.transactions = appData.portfolio.transactions.filter(t => !(t.symbol === symbol && t.accountType === accountType && t.platform === platform));
-                        appData.portfolio.transactions.push({
-                            id: Date.now(), transactionType: 'BUY', date: new Date().toISOString().split('T')[0],
-                            symbol: symbol, name: holding.name, shares: newTotalShares, price: newAvgPrice,
-                            dividend: holding.dividend, type: holding.type, accountType: accountType, platform: platform,
-                        });
-                        saveDataToFirestore();
-                    });
-                } else {
-                     saveDataToFirestore();
-                }
-            }
-            closeHoldingEditModal();
-        }
-        
-        function toggleTransactionHistory(key) { 
-            appData.uiState.expandedTransactions[key] = !appData.uiState.expandedTransactions[key]; 
-            saveDataToFirestore();
-        }
-
-        function resetFirebaseConfig() {
-            closeSettingsModal();
-            localStorage.removeItem(FIREBASE_CONFIG_KEY);
-            showConfirmationModal("Configuration has been cleared. The page will now reload to ask for the new configuration.", () => {
-                window.location.reload();
-            });
-        }
-
-        // --- Utility and Charting Functions ---
-        function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
-        function formatPercentage(value) { return (value * 100).toFixed(2) + '%'; }
-        function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
-        function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); updateDisplay() }
-        function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
-        function updateUserName() { appData.portfolio.username = document.getElementById('userNameInput').value.trim(); saveDataToFirestore(); }
-        function updateUserNameDisplay() { const el = document.getElementById('userNameDisplay'); el.textContent = appData.portfolio.username ? `for ${appData.portfolio.username}` : ''; document.getElementById('userNameInput').value = appData.portfolio.username; }
-        function getAccountBadgeClass(accountType) { const map = { 'Regular Brokerage': 'account-regular', 'Roth IRA': 'account-roth', '401(k)': 'account-401k', '529 College Saving': 'account-529', 'Yahoo Finance': 'account-yahoo' }; return map[accountType] || 'account-regular'; }
-        function populatePlatformFilter() {
-            const select = document.getElementById('filterPlatform');
-            const platforms = new Set(appData.portfolio.transactions.map(t => t.platform).filter(Boolean));
-            while (select.options.length > 1) select.remove(1);
-            platforms.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; select.appendChild(o); });
-            select.value = currentFilter;
-        }
-        
-        function updateCharts(dataPoints) {
-            const chartData = dataPoints;
-            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-            const gridColor = currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-            const labelColor = currentTheme === 'dark' ? '#f5f5f5' : '#333';
-            if(accountChart) accountChart.destroy(); if(investmentChart) investmentChart.destroy(); if(historicalChart) historicalChart.destroy(); if(dividendChart) dividendChart.destroy();
-
-            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
-
-            const accountData = portfolioHoldings.reduce((acc, h) => { const val = h.totalShares * h.currentPrice; if(h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val; return acc; }, {});
-            const investmentData = portfolioHoldings.reduce((acc, h) => { const val = h.totalShares * h.currentPrice; if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc; }, {});
-            
-            if(Object.keys(accountData).length > 0) {
-                 const accountColors = {'Regular Brokerage': '#3498db', 'Roth IRA': '#e74c3c', '401(k)': '#f39c12', '529 College Saving': '#9b59b6', 'Yahoo Finance': '#20c997'};
-                 accountChart = new Chart(document.getElementById('accountChart').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#111827' : '#F3F4F6' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
-            }
-             if(Object.keys(investmentData).length > 0) {
-                 const investmentColors = {'Stock': '#2ecc71', 'ETF': '#3498db', 'Market Index': '#1abc9c', 'Bond': '#f39c12', 'Mutual Fund': '#9b59b6', 'Cryptocurrency': '#e67e22', 'Other': '#95a5a6', 'CASH': '#4CAF50', 'Money Market': '#4CAF50', '401k': '#f39c12'};
-                 investmentChart = new Chart(document.getElementById('investmentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#111827' : '#F3F4F6' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
-            }
-            if (chartData && chartData.length > 0) {
-                 historicalChart = new Chart(document.getElementById('historicalChart').getContext('2d'), { type: 'line', data: { labels: chartData.map(dp => new Date(dp.date).toLocaleDateString()), datasets: [{ label: 'Portfolio Value', data: chartData.map(dp => dp.value), borderColor: 'var(--accent-color-1)', backgroundColor: 'rgba(109, 40, 217, 0.1)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, x: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
-            }
-            const dividendData = portfolioHoldings.map(h => ({ symbol: h.symbol, income: h.totalShares * h.dividend }))
-                                                .filter(d => d.income > 0).sort((a,b) => b.income - a.income);
-
-            if (dividendData.length > 0) {
-                 dividendChart = new Chart(document.getElementById('dividendChart').getContext('2d'), { type: 'bar', data: { labels: dividendData.map(d => d.symbol), datasets: [{ label: 'Annual Income', data: dividendData.map(d => d.income), backgroundColor: 'rgba(39, 174, 96, 0.6)', borderColor: 'rgba(39, 174, 96, 1)', borderWidth: 1 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, y: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
-            }
-        }
-        
-        function updateAutoRefreshButton() { const btn = document.getElementById('toggleAutoRefreshBtn'); if (appData.settings.autoRefreshEnabled) { btn.textContent = 'Pause Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #f39c12, #e67e22)'; } else { btn.textContent = 'Resume Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #27ae60, #2ecc71)'; } }
-        function startAutoRefresh() { if (autoRefreshIntervalId !== null) return; appData.settings.autoRefreshEnabled = true; autoRefreshIntervalId = setInterval(() => refreshAllPrices(false), appData.settings.autoRefreshInterval * 1000); updateAutoRefreshButton(); }
-        function stopAutoRefresh() { if (autoRefreshIntervalId !== null) { clearInterval(autoRefreshIntervalId); autoRefreshIntervalId = null; } appData.settings.autoRefreshEnabled = false; updateAutoRefreshButton(); }
-        function toggleAutoRefresh() { if (appData.settings.autoRefreshEnabled) { stopAutoRefresh(); } else { startAutoRefresh(); refreshAllPrices(true); } saveDataToFirestore(); }
-        async function fetchPriceFromFinnhub(symbol) { const apiKey = appData.settings.finnhubApiKey; if (!apiKey) return { currentPrice: null, previousClosePrice: null }; try { const r = await fetch(`${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { return { currentPrice: null, previousClosePrice: null }; } }
-        async function fetchPriceFromAlphaVantage(symbol) { const apiKey = appData.settings.alphaVantageApiKey; if (!apiKey) return { currentPrice: null, previousClosePrice: null }; try { const r = await fetch(`${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${apiKey}`); const d = await r.json(); if (d.Information || d.Note) return { currentPrice: null, previousClosePrice: null }; const ts = d['Time Series (Daily)']; if (ts) { const dates = Object.keys(ts); return { currentPrice: parseFloat(ts[dates[0]]['4. close']), previousClosePrice: dates[1] ? parseFloat(ts[dates[1]]['4. close']) : null }; } return { currentPrice: null, previousClosePrice: null }; } catch (e) { return { currentPrice: null, previousClosePrice: null }; } }
-        function updateDataStatus(status, msg = "") { const el = document.getElementById('dataStatus'); el.classList.remove('saved', 'loading', 'error'); switch(status) { case 'saved': el.textContent = '✅ Data Synced'; el.classList.add('saved'); break; case 'loading': el.textContent = '🔄 Syncing...'; el.classList.add('loading'); break; case 'error': el.textContent = `⚠️ Error: ${msg}`; el.classList.add('error'); break; default: el.textContent = `ℹ️ ${msg}`; break; } }
-        
-        function filterChart(period, portfolioHistory) {
-            activeChartFilter = period;
-            document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.toggle('active', btn.textContent.includes(period)));
-            
-            const now = new Date();
-            let startDate;
-
-            switch (period) {
-                case '1M': startDate = new Date(new Date().setMonth(now.getMonth() - 1)); break;
-                case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
-                case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
-                case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
-                default: updateCharts(portfolioHistory); return;
-            }
-            const filteredData = portfolioHistory.filter(dp => new Date(dp.date) >= startDate);
-            updateCharts(filteredData);
-        }
-        
-        // --- Import/Export Functions ---
-        function exportCSV() {
-            if (appData.portfolio.transactions.length === 0) {
-                 showConfirmationModal("No transactions to export.", null);
-                 return;
-            }
-            const csv = Papa.unparse(appData.portfolio.transactions);
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
-        }
-        
-        function triggerCsvImport() { document.getElementById('csvFileInput').click(); }
-        function handleCsvImport(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            
-            Papa.parse(file, {
-                header: true, dynamicTyping: true, skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.errors.length > 0) {
-                        showConfirmationModal("Error parsing CSV file. Check console for details.", null);
-                    }
-                    if (results.data.length === 0) {
-                        showConfirmationModal("Import failed: CSV file is empty.", null);
-                        return;
-                    }
-
-                    const transactionsToImport = results.data.map((row, index) => ({...row, id: row.id || Date.now() + index}));
-
-                    showConfirmationModal(`Importing ${transactionsToImport.length} transactions will overwrite ALL current cloud data. Continue?`, () => {
-                        appData.portfolio.transactions = transactionsToImport;
-                        saveDataToFirestore().then(() => refreshAllPrices(true));
-                        showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
-                    });
-                },
-                error: (err) => showConfirmationModal(`A critical error occurred: ${err.message}`, null),
-                finally: () => { e.target.value = null; }
-            });
-        }
-        
-        // Make key functions globally accessible from HTML
-        window.toggleTheme = toggleTheme;
-        window.openSettingsModal = openSettingsModal;
-        window.updateUserName = updateUserName;
-        window.toggleAutoRefresh = toggleAutoRefresh;
-        window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (period) => filterChart(period, buildPortfolioHistoryFromTransactions());
-        window.toggleAddForm = () => toggleAddForm();
-        window.toggleTransactionFields = toggleTransactionFields;
-        window.validateSymbol = validateSymbol;
-        window.handleAccountTypeChange = handleAccountTypeChange;
-        window.updateTransactionFields = updateTransactionFields;
-        window.logTransaction = logTransaction;
-        window.exportCSV = exportCSV;
-        window.triggerCsvImport = triggerCsvImport;
-        window.clearAllData = clearAllData;
-        window.toggleGroup = toggleGroup;
-        window.openHoldingEditModal = openHoldingEditModal;
-        window.removeHolding = removeHolding;
-        window.toggleTransactionHistory = toggleTransactionHistory;
-        window.openEditModal = openEditModal;
-        window.removeTransaction = removeTransaction;
-        window.closeEditModal = closeEditModal;
-        window.saveTransactionEdit = saveTransactionEdit;
-        window.closeHoldingEditModal = closeHoldingEditModal;
-        window.saveHoldingEdit = saveHoldingEdit;
-        window.closeSettingsModal = closeSettingsModal;
-        window.saveSettings = saveSettings;
-        window.openFirebaseConfigModal = openFirebaseConfigModal;
-        window.saveFirebaseConfig = saveFirebaseConfig;
-        window.resetFirebaseConfig = resetFirebaseConfig;
-
-    </script>
 </body>
 </html>
+
