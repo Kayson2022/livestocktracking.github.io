@@ -103,6 +103,7 @@
         #symbolValidationStatus { position: absolute; right: 10px; top: 38px; font-size: 1.2em; }
         .btn { background: linear-gradient(45deg, var(--accent-color-1), var(--accent-color-2)); color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: all 0.3s ease; width: 100%; margin: 2px; }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .btn:disabled { background: #9CA3AF; cursor: not-allowed; transform: none; box-shadow: none; }
         
         .investment-item { background: #F9FAFB; border-radius: 10px; margin-bottom: 15px; overflow: hidden; transition: all 0.3s ease; border: 1px solid var(--border-color); }
         .investment-item:hover {
@@ -278,7 +279,7 @@
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, query, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
         const LOCAL_STORAGE_FIREBASE_CONFIG_KEY = 'myPortfolioFirebaseConfig_v4';
@@ -292,6 +293,12 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
         const CORS_PROXY = "https://corsproxy.io/?";
+        
+        // --- API & Fetching Configuration ---
+        const API_THROTTLE_DELAY = 350; // ms to wait between API calls
+        const CACHE_STALE_TIME_FAST = 75 * 1000; // 75 seconds for Stocks, ETFs
+        const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
+
 
         let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
         let ALPHA_VANTAGE_API_KEY = '4XPI78V9CKRS7F47';
@@ -317,7 +324,7 @@
         let isAddFormExpanded = false;
         let autoRefreshIntervalId = null;
         let isAutoRefreshEnabled = true;
-        let autoRefreshIntervalSeconds = 120;
+        let autoRefreshIntervalSeconds = 75; // Default to the faster interval
 
         let currentSort = 'default';
         let currentFilter = 'all';
@@ -688,6 +695,8 @@
         }
 
         // --- API & Price Fetching ---
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
         function loadApiKeys() {
             // Load from storage but fall back to hardcoded values
             FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
@@ -696,7 +705,7 @@
         
         function loadAutoRefreshInterval() {
             const storedInterval = localStorage.getItem(REFRESH_INTERVAL_KEY);
-            autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 120;
+            autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 75;
         }
 
         function saveSettings() {
@@ -729,6 +738,7 @@
             let priceData = await fetchPriceFromFinnhub(holding.symbol);
             if ((!priceData || !priceData.currentPrice || priceData.currentPrice === 0) && holding.type === 'Mutual Fund') {
                 console.warn(`Finnhub failed for Mutual Fund ${holding.symbol}. Trying Alpha Vantage.`);
+                await delay(API_THROTTLE_DELAY); // Wait before trying the next API
                 priceData = await fetchPriceFromAlphaVantage(holding.symbol);
             }
             if (!priceData || priceData.currentPrice === null || priceData.currentPrice === 0) {
@@ -744,37 +754,42 @@
                 return;
             }
             const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
-            refreshButton.textContent = 'Refreshing...'; refreshButton.disabled = true; updateDataStatus('loading');
-
-            const today = new Date().toISOString().split('T')[0];
+            refreshButton.textContent = 'Refreshing...';
+            refreshButton.disabled = true;
+            updateDataStatus('loading');
+            
+            const now = Date.now();
 
             for (const holding of currentHoldings) {
-                let priceData;
+                 const cached = priceCache[holding.symbol];
+                
+                // Determine the correct stale time based on investment type
+                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
+                const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                // For Mutual Funds, only fetch if forced or if data is stale
-                if (holding.type === 'Mutual Fund') {
-                    const cachedData = priceCache[holding.symbol];
-                    if (!forceRefresh && cachedData && cachedData.lastFetchDate === today && cachedData.currentPrice) {
-                        console.log(`Using cached price for ${holding.symbol} from ${cachedData.lastFetchDate}`);
-                        continue; // Skip the fetch for this symbol
-                    }
+                // Skip fetch if not forced and cache is not stale
+                if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
+                    console.log(`Using fresh cached price for ${holding.symbol}`);
+                    continue;
                 }
 
-                priceData = await fetchPrice(holding);
+                // Throttle requests to avoid rate limiting
+                await delay(API_THROTTLE_DELAY);
+                
+                const priceData = await fetchPrice(holding);
 
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
-                    if (holding.type === 'Mutual Fund') {
-                        priceCache[holding.symbol].lastFetchDate = today;
-                    }
+                    priceCache[holding.symbol].lastFetchTimestamp = Date.now();
                 }
             }
             
             await saveDataToFirestore(); 
-            updateDisplay();
-            refreshButton.textContent = 'Refresh Now'; refreshButton.disabled = false;
+            // The onSnapshot listener will call updateDisplay() automatically
+            refreshButton.textContent = 'Refresh Now';
+            refreshButton.disabled = false;
         }
         
         async function validateWithAlphaVantage(symbol) {
@@ -2061,7 +2076,7 @@
             </div>
             <div class="form-group">
                 <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
-                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 120">
+                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
                 <small>Minimum 30 seconds to respect API limits.</small>
             </div>
             <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
