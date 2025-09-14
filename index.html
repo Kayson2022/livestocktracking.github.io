@@ -595,7 +595,7 @@
                 } else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
                     h.currentPrice = cachedInfo.currentPrice;
                 } else {
-                    h.currentPrice = h.averagePurchasePrice; // Fallback
+                    h.currentPrice = null; // Fallback to null, price is unknown
                 }
                 h.previousClosePrice = cachedInfo.previousClosePrice || null;
                 return h;
@@ -1207,18 +1207,33 @@
 
             portfolioHoldings.forEach(h => {
                 totalCostBasis += h.totalCost;
-                const currentValue = h.totalShares * h.currentPrice;
-                totalValue += currentValue;
-                if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
-                    totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
-                }
-                if (h.dividend > 0) estimatedAnnualIncome += h.totalShares * h.dividend;
+                estimatedAnnualIncome += (h.dividend || 0) * h.totalShares;
 
-                const unrealizedGain = currentValue - h.totalCost;
-                if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                // Check if we have a valid, fetched price.
+                if (h.currentPrice !== null && h.currentPrice > 0) {
+                    const currentValue = h.totalShares * h.currentPrice;
+                    totalValue += currentValue;
+                    
+                    // Calculate Today's G/L only if we have the data
+                    if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
+                        totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
+                    }
+
+                    // Calculate Unrealized G/L and performers
+                    const unrealizedGain = currentValue - h.totalCost;
+                    if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                    if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                
+                } else {
+                    // For holdings without a fetched price, their contribution to total value is their cost basis.
+                    // This keeps the Total Portfolio Value correct while prices are loading.
+                    totalValue += h.totalCost;
+                }
             });
+
+            // The total unrealized G/L is the difference between the calculated total value and total cost.
             const totalUnrealizedGainLoss = totalValue - totalCostBasis;
+            
             return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
         }
         
