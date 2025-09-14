@@ -766,11 +766,16 @@
 
                 const cached = priceCache[holding.symbol];
                 
-                // Determine the correct stale time based on investment type
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                // Skip fetch if not forced and cache is not stale
+                // If forcing, AND it's a slow asset, we can skip if the cache is still valid.
+                if (forceRefresh && !isFastMoving && cached && (now - cached.lastFetchTimestamp < staleTime)) {
+                    console.log(`Skipping forced refresh for slow asset ${holding.symbol} due to fresh cache.`);
+                    continue;
+                }
+                
+                // If NOT forcing, we check all assets against their respective stale times.
                 if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Using fresh cached price for ${holding.symbol}`);
                     continue;
@@ -2191,7 +2196,22 @@
                     </div>
                     <div class="form-group cash-field" style="display:none;"> <label for="amount">Amount</label> <input type="number" id="amount" name="amount" step="any" min="0" placeholder="1000.00"> </div>
                     <div class="form-group transaction-field buy-sell-field"> <label for="dividend">Annual Dividend / Share (Est.)</label> <input type="number" id="dividend" name="dividend" step="any" min="0" placeholder="e.g., 3.50"> </div>
-					<div class="form-group transaction-field buy-sell-field"> <label for="type">Investment Type</label> <select id="type" name="type" required> <option value="">Select Type</option> <option value="Stock">Stock</option> <option value="ETF">ETF</option> <option value="Market Index">Market Index</option><option value="401k">401k</option> <option value="Bond">Bond</option> <option value="Mutual Fund">Mutual Fund</option> <option value="Cryptocurrency">Cryptocurrency</option> <option value="Money Market">Money Market</option> <option value="Other">Other</option> <option value="CASH">CASH</option> </select> </div>
+					<div class="form-group transaction-field buy-sell-field"> <label for="type">Investment Type</label> 
+                        <select id="type" name="type" required> 
+                            <option value="">Select Type</option> 
+                            <option value="Stock">Stock</option> 
+                            <option value="ETF">ETF</option> 
+                            <option value="Market Index">Market Index</option>
+                            <option value="401k">401k</option> 
+                            <option value="Bond">Bond</option> 
+                            <option value="Mutual Fund">Mutual Fund</option> 
+                            <option value="Cryptocurrency">Cryptocurrency</option> 
+                            <option value="Money Market">Money Market</option> 
+                            <option value="Manual">Manual (No Price Fetch)</option>
+                            <option value="Other">Other</option> 
+                            <option value="CASH">CASH</option> 
+                        </select> 
+                    </div>
 					<button type="button" class="btn" onclick="logTransaction()">Log Transaction</button>
 				</div>
 			</div>
