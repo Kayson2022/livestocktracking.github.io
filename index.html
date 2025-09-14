@@ -164,9 +164,10 @@
         .modal-close-btn { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-color-secondary); }
         .btn-confirm { background: linear-gradient(45deg, #27ae60, #2ecc71); }
         .btn-cancel { background: linear-gradient(45deg, #95a5a6, #7f8c8d); }
-        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content { text-align: left; }
-        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group { margin-bottom: 12px; }
+        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content { text-align: left; }
+        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group, #firebaseConfigModal .form-group { margin-bottom: 12px; }
         #editHoldingModal .form-group small { color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block; }
+        #firebaseConfigModal textarea { min-height: 200px; font-family: monospace; font-size: 0.9em; }
 
         /* Consolidated Card Styles */
         .investment-header-summary { text-align: right; }
@@ -282,6 +283,20 @@
         </div>
     </div>
 
+    <div id="firebaseConfigModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Firebase Configuration Required</h3>
+            <p class="modal-message" style="font-size: 0.9em; text-align: left;">To sync your data across devices, this app needs to connect to your own free Firebase database. Please follow the setup guide to get your configuration object and paste it below.</p>
+            <div class="form-group">
+                <label for="firebaseConfigInput">Firebase Config Object (JSON)</label>
+                <textarea id="firebaseConfigInput" placeholder="Paste your firebaseConfig object here..."></textarea>
+            </div>
+            <div class="modal-buttons">
+                 <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
+            </div>
+        </div>
+    </div>
+
     <div id="editTransactionModal" class="modal-overlay">
         <div class="modal-content">
              <button class="modal-close-btn" onclick="closeEditModal()">×</button>
@@ -351,6 +366,7 @@
             </div>
             <div class="modal-buttons">
                  <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
+                 <button class="btn btn-cancel" onclick="resetFirebaseConfig()">Reset Connection</button>
             </div>
         </div>
     </div>
@@ -494,11 +510,12 @@
     <script type="module">
         // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- App Configuration ---
         const THEME_KEY = 'myPortfolioTheme_v3';
+        const FIREBASE_CONFIG_KEY = 'myPortfolioFirebaseConfig_v1';
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
         const CORS_PROXY = "https://corsproxy.io/?";
 
@@ -541,16 +558,18 @@
         let lastEditedField = 'shares'; // To track user input between shares and amount
         
         // --- Firebase Initialization ---
-        async function initializeFirebase() {
-            try {
-                // These global variables are provided by the hosting environment.
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        function initializeFirebase() {
+            const configStr = localStorage.getItem(FIREBASE_CONFIG_KEY);
+            if (!configStr) {
+                openFirebaseConfigModal();
+                updateDataStatus('error', 'Config needed');
+                return;
+            }
 
+            try {
+                const firebaseConfig = JSON.parse(configStr);
                 if (!firebaseConfig.apiKey) {
-                    console.error("Firebase config is missing.");
-                    updateDataStatus('error', 'Config Error');
-                    return;
+                    throw new Error("Invalid Firebase config object.");
                 }
                 
                 const app = initializeApp(firebaseConfig);
@@ -561,49 +580,40 @@
                     if (user) {
                         userId = user.uid;
                         document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
-                        setupRealtimeListener(appId, userId);
+                        setupRealtimeListener(userId);
                     } else {
-                        // If no user, sign in. Use custom token if available, otherwise anonymously.
                         try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await signInWithCustomToken(auth, __initial_auth_token);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
+                            await signInAnonymously(auth);
                         } catch (error) {
-                            console.error("Authentication failed:", error);
+                            console.error("Anonymous sign-in failed:", error);
                             updateDataStatus('error', 'Auth Error');
                         }
                     }
                 });
             } catch (error) {
                  console.error("Error initializing Firebase:", error);
-                 updateDataStatus('error', 'Init Error');
+                 updateDataStatus('error', 'Config Error');
+                 openFirebaseConfigModal();
             }
         }
         
-        function setupRealtimeListener(appId, uid) {
-            // Unsubscribe from any previous listener
+        function setupRealtimeListener(uid) {
             if (dataUnsubscribe) dataUnsubscribe(); 
 
-            const dataRef = doc(db, 'artifacts', appId, 'users', uid);
+            const dataRef = doc(db, 'investment_tracker_users', uid);
 
             dataUnsubscribe = onSnapshot(dataRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const dataFromDb = docSnap.data();
-                    // Merge DB data with local defaults to prevent errors if some fields are missing
                     appData.portfolio = { ...appData.portfolio, ...dataFromDb.portfolio };
                     appData.settings = { ...appData.settings, ...dataFromDb.settings };
                     appData.uiState = { ...appData.uiState, ...dataFromDb.uiState };
                     appData.priceCache = dataFromDb.priceCache || {};
 
-                    // Ensure transactions is an array
                     if (!Array.isArray(appData.portfolio.transactions)) {
                         appData.portfolio.transactions = [];
                     }
-
                 } else {
-                    // First time user, save the default structure to Firestore
                     console.log("No data found, creating new document.");
                     saveDataToFirestore();
                 }
@@ -613,7 +623,6 @@
                     initializeAppUI();
                 }
                 
-                // Always update the display on any change from Firestore
                 updateDisplay();
                 updateDataStatus('saved');
             }, (error) => {
@@ -626,9 +635,8 @@
             if (!userId) return;
              updateDataStatus('loading');
             try {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const dataRef = doc(db, 'artifacts', appId, 'users', userId);
-                await setDoc(dataRef, appData, { merge: true }); // Use merge to avoid overwriting with partial data
+                const dataRef = doc(db, 'investment_tracker_users', userId);
+                await setDoc(dataRef, appData, { merge: true });
                  updateDataStatus('saved');
             } catch (error) {
                 console.error("Error saving data to Firestore: ", error);
@@ -636,7 +644,6 @@
             }
         }
         
-
         // --- Initialization on DOM Load ---
         document.addEventListener('DOMContentLoaded', () => {
             loadTheme();
@@ -644,7 +651,6 @@
         });
 
         function initializeAppUI() {
-            // This function runs once the first set of data is loaded from Firestore
             document.getElementById('transactionDate').valueAsDate = new Date();
             document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
             document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
@@ -653,12 +659,10 @@
 
             handleAccountTypeChange();
             
-            // Set up UI state from loaded data
             if (appData.uiState.isAddFormExpanded) {
-                toggleAddForm(true); // Force open without toggling state
+                toggleAddForm(true); 
             }
             
-            // Start auto-refresh if enabled
             if (appData.settings.autoRefreshEnabled) {
                 startAutoRefresh();
             } else {
@@ -666,7 +670,6 @@
             }
             refreshAllPrices();
         }
-
 
         // --- Core Data Calculation Logic ---
         function calculateHoldingsAndCash() {
@@ -806,7 +809,6 @@
                 appData.portfolio.username = '';
                 appData.priceCache = {};
                 await saveDataToFirestore();
-                // UI will auto-update via the snapshot listener
                 updateDataStatus('info', 'Data cleared');
             });
         }
@@ -866,7 +868,7 @@
             if (cacheUpdated) {
                 await saveDataToFirestore();
             } else {
-                updateDisplay(); // If no cache update, just refresh UI
+                updateDisplay();
             }
             
             refreshButton.textContent = 'Refresh Now'; 
@@ -1624,6 +1626,28 @@
         }
         
         // --- MODAL Functions ---
+        function openFirebaseConfigModal() {
+            document.getElementById('firebaseConfigModal').style.display = 'flex';
+        }
+        
+        function saveFirebaseConfig() {
+            const configInput = document.getElementById('firebaseConfigInput');
+            const configStr = configInput.value;
+            try {
+                const config = JSON.parse(configStr);
+                if (!config.apiKey) {
+                    throw new Error("API Key is missing from the config.");
+                }
+                localStorage.setItem(FIREBASE_CONFIG_KEY, configStr);
+                document.getElementById('firebaseConfigModal').style.display = 'none';
+                configInput.value = ''; // Clear after save
+                initializeFirebase(); // Re-initialize with the new config
+            } catch (e) {
+                showConfirmationModal("The provided text is not a valid Firebase configuration object. Please copy it exactly from the Firebase console.", null);
+                console.error("Invalid Firebase config:", e);
+            }
+        }
+        
         function showConfirmationModal(message, onConfirm, onCancel) {
             const modal = document.getElementById('confirmationModal');
             const messageEl = document.getElementById('modalMessage');
@@ -1760,6 +1784,14 @@
         function toggleTransactionHistory(key) { 
             appData.uiState.expandedTransactions[key] = !appData.uiState.expandedTransactions[key]; 
             saveDataToFirestore();
+        }
+
+        function resetFirebaseConfig() {
+            closeSettingsModal();
+            localStorage.removeItem(FIREBASE_CONFIG_KEY);
+            showConfirmationModal("Configuration has been cleared. The page will now reload to ask for the new configuration.", () => {
+                window.location.reload();
+            });
         }
 
         // --- Utility and Charting Functions ---
@@ -1907,6 +1939,9 @@
         window.saveHoldingEdit = saveHoldingEdit;
         window.closeSettingsModal = closeSettingsModal;
         window.saveSettings = saveSettings;
+        window.openFirebaseConfigModal = openFirebaseConfigModal;
+        window.saveFirebaseConfig = saveFirebaseConfig;
+        window.resetFirebaseConfig = resetFirebaseConfig;
 
     </script>
 </body>
