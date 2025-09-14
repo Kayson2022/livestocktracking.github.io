@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment App</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
     <!-- Third-party Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -296,7 +297,7 @@
         
         // --- API & Fetching Configuration ---
         const API_THROTTLE_DELAY = 350; // ms to wait between API calls
-        const CACHE_STALE_TIME_FAST = 75 * 1000; // 75 seconds for Stocks, ETFs
+        const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
 
 
@@ -324,7 +325,7 @@
         let isAddFormExpanded = false;
         let autoRefreshIntervalId = null;
         let isAutoRefreshEnabled = true;
-        let autoRefreshIntervalSeconds = 75; // Default to the faster interval
+        let autoRefreshIntervalSeconds = 300; // Default to the safer 5-minute interval
 
         let currentSort = 'default';
         let currentFilter = 'all';
@@ -705,7 +706,7 @@
         
         function loadAutoRefreshInterval() {
             const storedInterval = localStorage.getItem(REFRESH_INTERVAL_KEY);
-            autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 75;
+            autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 300;
         }
 
         function saveSettings() {
@@ -761,7 +762,9 @@
             const now = Date.now();
 
             for (const holding of currentHoldings) {
-                 const cached = priceCache[holding.symbol];
+                if (holding.type === 'Manual') continue; // Skip manual holdings
+
+                const cached = priceCache[holding.symbol];
                 
                 // Determine the correct stale time based on investment type
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
@@ -944,6 +947,7 @@
             const transactionType = document.getElementById('transactionType').value;
             const accountType = document.getElementById('accountType').value;
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const type = document.getElementById('type').value;
 
             if (!accountType || !document.getElementById('platform').value) {
                 showConfirmationModal("Account Type and Platform are required for all transactions.", null);
@@ -955,7 +959,7 @@
                  return;
             }
             
-            if (!isSymbolValidated && accountType !== '529 College Saving' && (transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND')) {
+            if (type !== 'Manual' && !isSymbolValidated && accountType !== '529 College Saving' && (transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND')) {
                 showConfirmationModal(
                     `Symbol "${symbol}" is not validated. This could be due to API limits or an untracked asset. Do you want to log this transaction anyway?`,
                     () => { // onConfirm
