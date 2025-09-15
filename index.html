@@ -337,6 +337,65 @@
 
         // --- INITIALIZATION ---
 
+        // FIX 1: Moved this function definition before startApp to resolve the ReferenceError
+        function handleConfigFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                try {
+                    const config = {};
+                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    
+                    // Find the content within the curly braces
+                    const startIndex = text.indexOf('{');
+                    const endIndex = text.lastIndexOf('}');
+                    if (startIndex === -1 || endIndex === -1) {
+                        throw new Error("Could not find a configuration object { ... } in the file.");
+                    }
+                    const content = text.substring(startIndex + 1, endIndex);
+
+                    // Split into lines and process each one
+                    content.split(',').forEach(line => {
+                        if (line.trim() === '') return;
+
+                        const parts = line.split(':');
+                        if (parts.length < 2) return;
+
+                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
+                        let value = parts.slice(1).join(':').trim();
+
+                        // Remove quotes and commas from the value
+                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                            value = value.substring(1, value.length - 1);
+                        }
+                        
+                        if (requiredKeys.includes(key)) {
+                            config[key] = value;
+                        }
+                    });
+
+                    // Validate that all keys were found
+                    const hasAllKeys = requiredKeys.every(key => config[key]);
+                    if (!hasAllKeys) {
+                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
+                    }
+                    
+                    // If valid, save and reload
+                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
+                    closeFirebaseConfigModal();
+                    location.reload();
+
+                } catch (error) {
+                    // FIX 3: Replaced alert with the app's modal
+                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
+                }
+            };
+            reader.readAsText(file);
+        }
+
         window.addEventListener('DOMContentLoaded', startApp);
         
         async function startApp() {
@@ -484,63 +543,6 @@
             document.getElementById('firebaseConfigModal').style.display = 'none';
         }
 
-        function handleConfigFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                try {
-                    const config = {};
-                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
-                    
-                    // Find the content within the curly braces
-                    const startIndex = text.indexOf('{');
-                    const endIndex = text.lastIndexOf('}');
-                    if (startIndex === -1 || endIndex === -1) {
-                        throw new Error("Could not find a configuration object { ... } in the file.");
-                    }
-                    const content = text.substring(startIndex + 1, endIndex);
-
-                    // Split into lines and process each one
-                    content.split(',').forEach(line => {
-                        if (line.trim() === '') return;
-
-                        const parts = line.split(':');
-                        if (parts.length < 2) return;
-
-                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
-                        let value = parts.slice(1).join(':').trim();
-
-                        // Remove quotes and commas from the value
-                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                            value = value.substring(1, value.length - 1);
-                        }
-                        
-                        if (requiredKeys.includes(key)) {
-                            config[key] = value;
-                        }
-                    });
-
-                    // Validate that all keys were found
-                    const hasAllKeys = requiredKeys.every(key => config[key]);
-                    if (!hasAllKeys) {
-                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
-                    }
-                    
-                    // If valid, save and reload
-                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
-                    closeFirebaseConfigModal();
-                    location.reload();
-
-                } catch (error) {
-                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
-                }
-            };
-            reader.readAsText(file);
-        }
-
         window.saveFirebaseConfig = function() {
             const config = {
                 apiKey: document.getElementById('fbApiKey').value.trim(),
@@ -553,6 +555,7 @@
 
             // Basic validation
             if (Object.values(config).some(v => !v)) {
+                // FIX 3: Replaced alert with the app's modal
                 showConfirmationModal("All fields are required. Please check your values from the Firebase console.", null);
                 return;
             }
@@ -562,6 +565,7 @@
                 closeFirebaseConfigModal();
                 location.reload(); // Easiest way to force a full re-initialization
             } catch (error) {
+                // FIX 3: Replaced alert with the app's modal
                 showConfirmationModal("Failed to save configuration. Please try again.", null);
             }
         }
