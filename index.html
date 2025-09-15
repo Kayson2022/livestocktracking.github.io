@@ -1308,7 +1308,10 @@
 
         // --- Calculation and Rendering Logic ---
         function calculateOverallStats() {
-            let totalCostBasis = 0, totalValue = 0, totalDailyGainLoss = 0, estimatedAnnualIncome = 0;
+            let totalCostBasis = 0; // Only for invested assets (non-cash)
+            let totalValue = 0; // For ALL assets
+            let totalDailyGainLoss = 0;
+            let estimatedAnnualIncome = 0;
             
             let bestPerformer = { symbol: 'N/A', gain: -Infinity };
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
@@ -1316,30 +1319,41 @@
             const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
             portfolioHoldings.forEach(h => {
-                totalCostBasis += h.totalCost;
-                estimatedAnnualIncome += (h.dividend || 0) * h.totalShares;
-                let currentValue = h.totalCost; 
-
-                if (h.currentPrice !== null && h.currentPrice > 0) {
-                    currentValue = h.totalShares * h.currentPrice;
-                    
-                    if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
-                        totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
-                    }
-                }
+                const isCashEquivalent = h.type === 'CASH' || h.type === 'Money Market';
+                
+                // Use the live price if available, otherwise fall back to the average purchase price (cost basis).
+                const displayPrice = h.currentPrice || h.averagePurchasePrice;
+                const currentValue = h.totalShares * displayPrice;
                 totalValue += currentValue;
                 
-                const unrealizedGain = currentValue - h.totalCost;
+                if (!isCashEquivalent) {
+                    totalCostBasis += h.totalCost;
+                    estimatedAnnualIncome += (h.dividend || 0) * h.totalShares;
+                    
+                    if (h.currentPrice !== null && h.currentPrice > 0 && h.previousClosePrice > 0) {
+                        totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
+                    }
+
+                    const unrealizedGain = currentValue - h.totalCost;
                 
-                if (unrealizedGain > bestPerformer.gain) {
-                    bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                }
-                if (unrealizedGain < worstPerformer.gain) {
-                    worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                    if (unrealizedGain > bestPerformer.gain) {
+                        bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                    }
+                    if (unrealizedGain < worstPerformer.gain) {
+                        worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                    }
                 }
             });
-
-            const totalUnrealizedGainLoss = totalValue - totalCostBasis;
+            
+            // Unrealized G/L is the difference between the total value of invested assets and their cost basis.
+            const investedAssetsValue = portfolioHoldings
+                .filter(h => h.type !== 'CASH' && h.type !== 'Money Market')
+                .reduce((sum, h) => {
+                    const displayPrice = h.currentPrice || h.averagePurchasePrice;
+                    return sum + (h.totalShares * displayPrice);
+                }, 0);
+            
+            const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
             
             return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
         }
