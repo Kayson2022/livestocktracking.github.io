@@ -334,7 +334,7 @@
         let activeChartFilter = 'All';
         let validationTimeout = null;
         let lastEditedField = 'shares';
-        let userNameUpdateTimeout = null; // FIX 1: For debouncing name updates
+        let userNameUpdateTimeout = null; 
 
         // --- INITIALIZATION ---
 
@@ -354,6 +354,8 @@
             document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
             document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
             document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
+            document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
+
 
             // Attempt to initialize Firebase
             await initializeFirebase();
@@ -1830,12 +1832,12 @@
             await saveDataToFirestore(); 
         }
         
-        // FIX 2: This function now updates the browser tab title as well as the page header
         function updateUserNameDisplay() {
             const el = document.getElementById('userNameDisplay');
             const name = portfolioData.username;
             el.textContent = name ? `for ${name}` : '';
             document.getElementById('userNameInput').value = name;
+            // FIX 2: This line updates the browser tab title
             document.title = name ? `${name}'s Portfolio` : 'Investment App';
         }
 
@@ -2059,7 +2061,7 @@
         window.triggerCsvImport = triggerCsvImport;
         window.clearAllData = clearAllData;
         window.updateUserName = updateUserName;
-        window.debouncedUpdateUserName = debouncedUpdateUserName; // FIX 1: Make debounced function global
+        window.debouncedUpdateUserName = debouncedUpdateUserName;
         window.toggleGroup = toggleGroup;
         window.removeHolding = removeHolding;
         window.openHoldingEditModal = openHoldingEditModal;
@@ -2216,7 +2218,7 @@
             <p>Track your investments with a detailed transaction log</p>
             <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
                 <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
-                <input type="text" id="userNameInput" placeholder="Enter your name" oninput="debouncedUpdateUserName()" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
+                <input type="text" id="userNameInput" placeholder="Enter your name" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
             </div>
         </div>
 
