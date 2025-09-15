@@ -334,67 +334,9 @@
         let activeChartFilter = 'All';
         let validationTimeout = null;
         let lastEditedField = 'shares';
+        let userNameUpdateTimeout = null; // FIX 1: For debouncing name updates
 
         // --- INITIALIZATION ---
-
-        // FIX 1: Moved this function definition before startApp to resolve the ReferenceError
-        function handleConfigFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                try {
-                    const config = {};
-                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
-                    
-                    // Find the content within the curly braces
-                    const startIndex = text.indexOf('{');
-                    const endIndex = text.lastIndexOf('}');
-                    if (startIndex === -1 || endIndex === -1) {
-                        throw new Error("Could not find a configuration object { ... } in the file.");
-                    }
-                    const content = text.substring(startIndex + 1, endIndex);
-
-                    // Split into lines and process each one
-                    content.split(',').forEach(line => {
-                        if (line.trim() === '') return;
-
-                        const parts = line.split(':');
-                        if (parts.length < 2) return;
-
-                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
-                        let value = parts.slice(1).join(':').trim();
-
-                        // Remove quotes and commas from the value
-                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                            value = value.substring(1, value.length - 1);
-                        }
-                        
-                        if (requiredKeys.includes(key)) {
-                            config[key] = value;
-                        }
-                    });
-
-                    // Validate that all keys were found
-                    const hasAllKeys = requiredKeys.every(key => config[key]);
-                    if (!hasAllKeys) {
-                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
-                    }
-                    
-                    // If valid, save and reload
-                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
-                    closeFirebaseConfigModal();
-                    location.reload();
-
-                } catch (error) {
-                    // FIX 3: Replaced alert with the app's modal
-                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
-                }
-            };
-            reader.readAsText(file);
-        }
 
         window.addEventListener('DOMContentLoaded', startApp);
         
@@ -543,6 +485,63 @@
             document.getElementById('firebaseConfigModal').style.display = 'none';
         }
 
+        function handleConfigFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                try {
+                    const config = {};
+                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    
+                    // Find the content within the curly braces
+                    const startIndex = text.indexOf('{');
+                    const endIndex = text.lastIndexOf('}');
+                    if (startIndex === -1 || endIndex === -1) {
+                        throw new Error("Could not find a configuration object { ... } in the file.");
+                    }
+                    const content = text.substring(startIndex + 1, endIndex);
+
+                    // Split into lines and process each one
+                    content.split(',').forEach(line => {
+                        if (line.trim() === '') return;
+
+                        const parts = line.split(':');
+                        if (parts.length < 2) return;
+
+                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
+                        let value = parts.slice(1).join(':').trim();
+
+                        // Remove quotes and commas from the value
+                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                            value = value.substring(1, value.length - 1);
+                        }
+                        
+                        if (requiredKeys.includes(key)) {
+                            config[key] = value;
+                        }
+                    });
+
+                    // Validate that all keys were found
+                    const hasAllKeys = requiredKeys.every(key => config[key]);
+                    if (!hasAllKeys) {
+                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
+                    }
+                    
+                    // If valid, save and reload
+                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
+                    closeFirebaseConfigModal();
+                    location.reload();
+
+                } catch (error) {
+                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
+                }
+            };
+            reader.readAsText(file);
+        }
+
         window.saveFirebaseConfig = function() {
             const config = {
                 apiKey: document.getElementById('fbApiKey').value.trim(),
@@ -555,7 +554,6 @@
 
             // Basic validation
             if (Object.values(config).some(v => !v)) {
-                // FIX 3: Replaced alert with the app's modal
                 showConfirmationModal("All fields are required. Please check your values from the Firebase console.", null);
                 return;
             }
@@ -565,7 +563,6 @@
                 closeFirebaseConfigModal();
                 location.reload(); // Easiest way to force a full re-initialization
             } catch (error) {
-                // FIX 3: Replaced alert with the app's modal
                 showConfirmationModal("Failed to save configuration. Please try again.", null);
             }
         }
@@ -1819,7 +1816,19 @@
         function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
         function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); filterChart(activeChartFilter, buildPortfolioHistoryFromTransactions()); }
         function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
-        async function updateUserName() { portfolioData.username = document.getElementById('userNameInput').value.trim(); await saveDataToFirestore(); }
+        
+        // FIX 1: This function debounces the input to prevent race conditions
+        function debouncedUpdateUserName() {
+            clearTimeout(userNameUpdateTimeout);
+            userNameUpdateTimeout = setTimeout(() => {
+                updateUserName();
+            }, 800); // Wait 800ms after user stops typing
+        }
+
+        async function updateUserName() { 
+            portfolioData.username = document.getElementById('userNameInput').value.trim(); 
+            await saveDataToFirestore(); 
+        }
         
         // FIX 2: This function now updates the browser tab title as well as the page header
         function updateUserNameDisplay() {
@@ -2022,6 +2031,8 @@
                     showConfirmationModal(`You are about to import ${transactionsToImport.length} transactions. This will overwrite ALL current data in the cloud. Continue?`, async () => {
                         portfolioData.transactions = transactionsToImport;
                         await saveDataToFirestore();
+                        // FIX 2: Manually trigger a UI update to show holdings immediately.
+                        updateDisplay(); 
                         showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
                     });
                 },
@@ -2048,6 +2059,7 @@
         window.triggerCsvImport = triggerCsvImport;
         window.clearAllData = clearAllData;
         window.updateUserName = updateUserName;
+        window.debouncedUpdateUserName = debouncedUpdateUserName; // FIX 1: Make debounced function global
         window.toggleGroup = toggleGroup;
         window.removeHolding = removeHolding;
         window.openHoldingEditModal = openHoldingEditModal;
@@ -2204,7 +2216,7 @@
             <p>Track your investments with a detailed transaction log</p>
             <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
                 <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
-                <input type="text" id="userNameInput" placeholder="Enter your name" oninput="updateUserName()" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
+                <input type="text" id="userNameInput" placeholder="Enter your name" oninput="debouncedUpdateUserName()" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
             </div>
         </div>
 
