@@ -274,13 +274,32 @@
                 grid-template-columns: repeat(4, 1fr);
             }
         }
+
+        /* NEW: Styles for Auth and Collapse Button */
+        #auth-container { position: absolute; top: 10px; left: 60px; z-index: 10; display: flex; align-items: center; gap: 10px; }
+        #user-info { display: flex; align-items: center; gap: 10px; background: var(--card-bg-color); padding: 5px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px var(--shadow-color); }
+        #user-info img { width: 30px; height: 30px; border-radius: 50%; }
+        #user-info span { font-weight: 600; font-size: 0.9em; }
+        #signOutBtn { width: auto; font-size: 0.8em; padding: 6px 12px; background: #e74c3c; }
+        .collapse-group-btn {
+            display: block;
+            margin: 15px auto 0;
+            padding: 8px 16px;
+            font-size: 0.9em;
+            width: auto;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-color-secondary);
+        }
+        .collapse-group-btn:hover { background: #e5e7eb; }
+        [data-theme="dark"] .collapse-group-btn:hover { background: #374151; }
     </style>
 </head>
 <body>
     <script type="module">
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
@@ -338,7 +357,6 @@
 
         // --- INITIALIZATION ---
         
-        // This function needs to be available for the event listener in startApp
         function handleConfigFileImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -406,6 +424,8 @@
             document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
             document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
             document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
+            document.getElementById('signInBtn').addEventListener('click', signInWithGoogle);
+            document.getElementById('signOutBtn').addEventListener('click', signOutUser);
 
             await initializeFirebase();
         }
@@ -424,12 +444,25 @@
                 auth = getAuth(firebaseApp);
                 
                 onAuthStateChanged(auth, async (user) => {
-                    if (user) {
+                    const signInBtn = document.getElementById('signInBtn');
+                    const userInfoDiv = document.getElementById('user-info');
+
+                    if (user && !user.isAnonymous) {
                         userId = user.uid;
+                        signInBtn.style.display = 'none';
+                        userInfoDiv.style.display = 'flex';
+                        document.getElementById('userName').textContent = user.displayName || 'User';
+                        document.getElementById('userPhoto').src = user.photoURL || 'https://placehold.co/30x30/6D28D9/FFFFFF?text=U';
                         await setupFirestoreListeners();
                         updateDataStatus(true);
                     } else {
-                        await signInAnonymously(auth);
+                        userId = user?.uid; // Keep anonymous ID if exists
+                        signInBtn.style.display = 'block';
+                        userInfoDiv.style.display = 'none';
+                        if (!user) {
+                           await signInAnonymously(auth);
+                        }
+                        await setupFirestoreListeners();
                     }
                 });
 
@@ -437,6 +470,28 @@
                 console.error("Firebase initialization failed:", error);
                 updateDataStatus('error', "Config Error. Please Reset Connection.");
                 showFirebaseConfigModal(true);
+            }
+        }
+
+        async function signInWithGoogle() {
+            const provider = new GoogleAuthProvider();
+            try {
+                await signInWithPopup(auth, provider);
+                // onAuthStateChanged will handle the rest
+            } catch (error) {
+                console.error("Google Sign-In Error:", error);
+                showConfirmationModal(`Could not sign in with Google. Error: ${error.message}`, null);
+            }
+        }
+
+        async function signOutUser() {
+            try {
+                await signOut(auth);
+                // onAuthStateChanged will handle UI changes and signing in anonymously again
+                location.reload(); // Easiest way to reset the state
+            } catch (error) {
+                console.error("Sign Out Error:", error);
+                showConfirmationModal(`Could not sign out. Error: ${error.message}`, null);
             }
         }
         
@@ -702,7 +757,6 @@
 
         // --- Data Persistence Functions ---
         
-        // FIX 1: This function creates a "clean" version of the data to avoid circular reference errors when saving.
         function getCleanObject(obj) {
             return JSON.parse(JSON.stringify(obj));
         }
@@ -714,7 +768,6 @@
                 const portfolioColRef = collection(userDocRef, 'data');
                 const batch = writeBatch(db);
 
-                // Use the clean objects for saving to Firestore
                 batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
                 batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
                 batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
@@ -1411,7 +1464,7 @@
             const isExpanded = !!uiState.expandedGroups[groupName];
 
             return `
-                <div class="investment-group ${isExpanded ? 'expanded' : ''}">
+                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}">
                     <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
                          <div class="group-summary">
                             <div class="group-title">${groupName}</div>
@@ -1421,6 +1474,7 @@
                     </div>
                     <div class="investment-group-content">
                         ${contentHtml}
+                        ${isExpanded && holdings.length > 3 ? `<button class="btn collapse-group-btn" onclick="toggleGroup('${groupName}', true)">Collapse Section</button>` : ''}
                     </div>
                 </div>
             `;
@@ -2191,6 +2245,14 @@
 
     <div class="container">
         <div class="header">
+            <div id="auth-container">
+                <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
+                <div id="user-info" style="display:none;">
+                    <img id="userPhoto" src="" alt="User photo">
+                    <span id="userName"></span>
+                    <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
+                </div>
+            </div>
             <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
             <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
             <div class="data-status" id="dataStatus">...</div>
@@ -2336,12 +2398,6 @@
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
-    </div>
-    
-    <!-- On-screen error log -->
-    <div id="error-log-container">
-        <h4>Error Log</h4>
-        <pre id="error-log-pre"></pre>
     </div>
 </body>
 </html>
