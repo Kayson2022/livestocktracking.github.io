@@ -535,7 +535,7 @@
                     location.reload();
 
                 } catch (error) {
-                    alert("Failed to import configuration from file. Error: " + error.message);
+                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
                 }
             };
             reader.readAsText(file);
@@ -553,7 +553,7 @@
 
             // Basic validation
             if (Object.values(config).some(v => !v)) {
-                alert("All fields are required. Please check your values from the Firebase console.");
+                showConfirmationModal("All fields are required. Please check your values from the Firebase console.", null);
                 return;
             }
             
@@ -562,7 +562,7 @@
                 closeFirebaseConfigModal();
                 location.reload(); // Easiest way to force a full re-initialization
             } catch (error) {
-                alert("Failed to save configuration. Please try again.");
+                showConfirmationModal("Failed to save configuration. Please try again.", null);
             }
         }
         
@@ -1816,7 +1816,16 @@
         function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); filterChart(activeChartFilter, buildPortfolioHistoryFromTransactions()); }
         function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
         async function updateUserName() { portfolioData.username = document.getElementById('userNameInput').value.trim(); await saveDataToFirestore(); }
-        function updateUserNameDisplay() { const el = document.getElementById('userNameDisplay'); el.textContent = portfolioData.username ? `for ${portfolioData.username}` : ''; document.getElementById('userNameInput').value = portfolioData.username; }
+        
+        // FIX 2: This function now updates the browser tab title as well as the page header
+        function updateUserNameDisplay() {
+            const el = document.getElementById('userNameDisplay');
+            const name = portfolioData.username;
+            el.textContent = name ? `for ${name}` : '';
+            document.getElementById('userNameInput').value = name;
+            document.title = name ? `${name}'s Portfolio` : 'Investment App';
+        }
+
         function getAccountBadgeClass(accountType) { const map = { 'Regular Brokerage': 'account-regular', 'Roth IRA': 'account-roth', '401(k)': 'account-401k', '529 College Saving': 'account-529', 'Yahoo Finance': 'account-yahoo' }; return map[accountType] || 'account-regular'; }
         function populatePlatformFilter() {
             const select = document.getElementById('filterPlatform');
@@ -2332,11 +2341,4 @@
     </div>
 </body>
 </html>
-" because I want you to fix the bug I'm reporting. 
-You don't need to generate a new file, instead you should edit the file that is currently open on the right side of the screen.
-
-I'm getting this error message when I run the code. Can you please fix it?
-[01:54:19 PM] [GLOBAL] ReferenceError: handleConfigFileImport is not defined
-    at startApp (https://kayson2022.github.io/livestocktracking.github.io/:291:57)
-    at https://kayson2022.github.io/livestocktracking.github.io/:283:33
 
