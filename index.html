@@ -265,6 +265,8 @@
 
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } .header { padding-top: 60px; } .data-status { position: static; margin: 0 auto 15px auto; display: block; width: fit-content; font-size: 0.75em; } .theme-toggle { top: 15px; left: 15px; } .pie-charts-container { grid-template-columns: 1fr; }
+            .refresh-button-container { text-align: center; }
+            .refresh-button-container .btn { width: 48%; display: inline-block; }
         }
         @media (max-width: 480px) {
             .stats-grid { grid-template-columns: 1fr; } #dataTransfer button { width: 100%; margin: 5px 0; } .controls-bar .form-group { width: 100%; } 
@@ -1326,18 +1328,18 @@
                     }
                 }
                 totalValue += currentValue;
+                
+                const unrealizedGain = currentValue - h.totalCost;
+                
+                if (unrealizedGain > bestPerformer.gain) {
+                    bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                }
+                if (unrealizedGain < worstPerformer.gain) {
+                    worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                }
             });
 
             const totalUnrealizedGainLoss = totalValue - totalCostBasis;
-
-            portfolioHoldings.forEach(h => {
-                if (h.currentPrice !== null && h.currentPrice > 0) {
-                    const currentValue = h.totalShares * h.currentPrice;
-                    const unrealizedGain = currentValue - h.totalCost;
-                    if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                    if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                }
-            });
             
             return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
         }
