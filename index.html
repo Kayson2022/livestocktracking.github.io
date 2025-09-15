@@ -339,9 +339,60 @@
         // --- INITIALIZATION ---
 
         window.addEventListener('DOMContentLoaded', startApp);
+
+        function handleConfigFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                try {
+                    const config = {};
+                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    
+                    const startIndex = text.indexOf('{');
+                    const endIndex = text.lastIndexOf('}');
+                    if (startIndex === -1 || endIndex === -1) {
+                        throw new Error("Could not find a configuration object { ... } in the file.");
+                    }
+                    const content = text.substring(startIndex + 1, endIndex);
+
+                    content.split(',').forEach(line => {
+                        if (line.trim() === '') return;
+
+                        const parts = line.split(':');
+                        if (parts.length < 2) return;
+
+                        const key = parts[0].trim().replace(/['"]/g, '');
+                        let value = parts.slice(1).join(':').trim();
+
+                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                            value = value.substring(1, value.length - 1);
+                        }
+                        
+                        if (requiredKeys.includes(key)) {
+                            config[key] = value;
+                        }
+                    });
+
+                    const hasAllKeys = requiredKeys.every(key => config[key]);
+                    if (!hasAllKeys) {
+                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
+                    }
+                    
+                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
+                    closeFirebaseConfigModal();
+                    location.reload();
+
+                } catch (error) {
+                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
+                }
+            };
+            reader.readAsText(file);
+        }
         
         async function startApp() {
-            // Setup non-Firebase UI elements first
             document.getElementById('transactionDate').valueAsDate = new Date();
             document.getElementById('firebaseConfigFileInput').addEventListener('change', handleConfigFileImport);
             loadTheme();
@@ -349,15 +400,12 @@
             loadAutoRefreshInterval();
             loadAutoRefreshState();
 
-            // Set up event listeners
             document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
             document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
             document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
             document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
             document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
 
-
-            // Attempt to initialize Firebase
             await initializeFirebase();
         }
 
@@ -387,14 +435,13 @@
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
                 updateDataStatus('error', "Config Error. Please Reset Connection.");
-                showFirebaseConfigModal(true); // Show modal with error state
+                showFirebaseConfigModal(true);
             }
         }
         
         async function setupFirestoreListeners() {
             if (!userId) return;
 
-            // Clean up old listeners before attaching new ones
             if (unsubscribePortfolio) unsubscribePortfolio();
             if (unsubscribeUiState) unsubscribeUiState();
             if (unsubscribePriceCache) unsubscribePriceCache();
@@ -402,35 +449,29 @@
             const userDocRef = doc(db, 'users', userId);
             const portfolioColRef = collection(userDocRef, 'data');
 
-            // Listener for portfolio data
             const portfolioDocRef = doc(portfolioColRef, FIRESTORE_DATA_DOC);
             unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
                 } else {
-                    // First time user, create the document
                     setDoc(portfolioDocRef, portfolioData);
                 }
                 updateDisplay();
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
             }, (error) => console.error("Error listening to portfolio:", error));
             
-            // Listener for UI state
             const uiStateDocRef = doc(portfolioColRef, FIRESTORE_UI_STATE_DOC);
             unsubscribeUiState = onSnapshot(uiStateDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     uiState = docSnap.data();
                 }
-                 // No need to create, it's optional
             });
 
-            // Listener for price cache
             const priceCacheDocRef = doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC);
             unsubscribePriceCache = onSnapshot(priceCacheDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     priceCache = docSnap.data();
                 }
-                 // No need to create, it's optional
             });
 
              await refreshAllPrices();
@@ -487,63 +528,6 @@
             document.getElementById('firebaseConfigModal').style.display = 'none';
         }
 
-        function handleConfigFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                try {
-                    const config = {};
-                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
-                    
-                    // Find the content within the curly braces
-                    const startIndex = text.indexOf('{');
-                    const endIndex = text.lastIndexOf('}');
-                    if (startIndex === -1 || endIndex === -1) {
-                        throw new Error("Could not find a configuration object { ... } in the file.");
-                    }
-                    const content = text.substring(startIndex + 1, endIndex);
-
-                    // Split into lines and process each one
-                    content.split(',').forEach(line => {
-                        if (line.trim() === '') return;
-
-                        const parts = line.split(':');
-                        if (parts.length < 2) return;
-
-                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
-                        let value = parts.slice(1).join(':').trim();
-
-                        // Remove quotes and commas from the value
-                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                            value = value.substring(1, value.length - 1);
-                        }
-                        
-                        if (requiredKeys.includes(key)) {
-                            config[key] = value;
-                        }
-                    });
-
-                    // Validate that all keys were found
-                    const hasAllKeys = requiredKeys.every(key => config[key]);
-                    if (!hasAllKeys) {
-                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
-                    }
-                    
-                    // If valid, save and reload
-                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
-                    closeFirebaseConfigModal();
-                    location.reload();
-
-                } catch (error) {
-                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
-                }
-            };
-            reader.readAsText(file);
-        }
-
         window.saveFirebaseConfig = function() {
             const config = {
                 apiKey: document.getElementById('fbApiKey').value.trim(),
@@ -554,7 +538,6 @@
                 appId: document.getElementById('fbAppId').value.trim()
             };
 
-            // Basic validation
             if (Object.values(config).some(v => !v)) {
                 showConfirmationModal("All fields are required. Please check your values from the Firebase console.", null);
                 return;
@@ -563,7 +546,7 @@
             try {
                 localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
                 closeFirebaseConfigModal();
-                location.reload(); // Easiest way to force a full re-initialization
+                location.reload();
             } catch (error) {
                 showConfirmationModal("Failed to save configuration. Please try again.", null);
             }
@@ -581,7 +564,7 @@
             const holdings = {};
             let realizedGains = 0;
             const sortedTransactions = [...(portfolioData.transactions || [])].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            const taxLots = {}; // symbol + account + platform combo: [{shares, price, date}]
+            const taxLots = {};
 
             sortedTransactions.forEach(t => {
                 const shares = parseFloat(t.shares);
@@ -597,7 +580,7 @@
                 } else if (type === 'SELL') {
                     if (!t.symbol || isNaN(shares) || isNaN(price)) return;
                     let sharesToSell = shares;
-                    if (!taxLots[positionKey]) taxLots[positionKey] = []; // Should not happen
+                    if (!taxLots[positionKey]) taxLots[positionKey] = [];
 
                     while (sharesToSell > 0 && taxLots[positionKey].length > 0) {
                         const lot = taxLots[positionKey][0];
@@ -611,7 +594,7 @@
                         sharesToSell -= sharesFromLot;
                         
                         if (lot.shares < 0.0001) {
-                            taxLots[positionKey].shift(); // Remove empty lot
+                            taxLots[positionKey].shift();
                         }
                     }
                 }
@@ -657,7 +640,7 @@
                 } else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
                     h.currentPrice = cachedInfo.currentPrice;
                 } else {
-                    h.currentPrice = null; // Fallback to null, price is unknown
+                    h.currentPrice = null;
                 }
                 h.previousClosePrice = cachedInfo.previousClosePrice || null;
                 return h;
@@ -675,7 +658,7 @@
             const allSymbols = [...new Set(sorted.filter(t => t.symbol && !t.symbol.startsWith('_CASH')).map(t => t.symbol))];
 
             if (allSymbols.length === 0 && sorted.every(t => t.symbol.startsWith('_CASH'))) {
-                 return []; // Only cash transactions, no history line needed yet.
+                 return [];
             }
 
             const firstDate = new Date(sorted[0].date);
@@ -705,7 +688,7 @@
                 });
 
                 Object.entries(tempHoldings).forEach(([symbol, holding]) => {
-                    const price = priceCache[symbol]?.currentPrice || 1; // Use latest known price for historical estimate
+                    const price = priceCache[symbol]?.currentPrice || 1;
                     dailyTotalValue += holding.totalShares * price;
                 });
                 
@@ -740,12 +723,10 @@
             showConfirmationModal('Are you sure you want to clear ALL transaction data from the cloud? This cannot be undone.', async () => {
                 if (!userId) return;
                 
-                // Reset local state
                 portfolioData = { username: '', transactions: [] };
                 uiState = { expandedGroups: {}, expandedTransactions: {} };
                 priceCache = {};
                 
-                // Clear documents in Firestore
                 const userDocRef = doc(db, 'users', userId);
                 const portfolioColRef = collection(userDocRef, 'data');
                 await setDoc(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
@@ -761,7 +742,6 @@
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
-            // Load from storage but fall back to hardcoded values
             FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
             ALPHA_VANTAGE_API_KEY = localStorage.getItem(ALPHA_VANTAGE_API_KEY_STORAGE) || '4XPI78V9CKRS7F47';
         }
@@ -789,7 +769,6 @@
             showConfirmationModal("Settings have been saved successfully.", null);
             closeSettingsModal();
             
-            // Restart the auto-refresh with the new interval
             stopAutoRefresh();
             startAutoRefresh();
         }
@@ -801,7 +780,7 @@
             let priceData = await fetchPriceFromFinnhub(holding.symbol);
             if ((!priceData || !priceData.currentPrice || priceData.currentPrice === 0) && holding.type === 'Mutual Fund') {
                 console.warn(`Finnhub failed for Mutual Fund ${holding.symbol}. Trying Alpha Vantage.`);
-                await delay(API_THROTTLE_DELAY); // Wait before trying the next API
+                await delay(API_THROTTLE_DELAY);
                 priceData = await fetchPriceFromAlphaVantage(holding.symbol);
             }
             if (!priceData || priceData.currentPrice === null || priceData.currentPrice === 0) {
@@ -824,26 +803,23 @@
             const now = Date.now();
 
             for (const holding of currentHoldings) {
-                if (holding.type === 'Manual') continue; // Skip manual holdings
+                if (holding.type === 'Manual') continue;
 
                 const cached = priceCache[holding.symbol];
                 
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                // If forcing, AND it's a slow asset, we can skip if the cache is still valid.
                 if (forceRefresh && !isFastMoving && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Skipping forced refresh for slow asset ${holding.symbol} due to fresh cache.`);
                     continue;
                 }
                 
-                // If NOT forcing, we check all assets against their respective stale times.
                 if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Using fresh cached price for ${holding.symbol}`);
                     continue;
                 }
 
-                // Throttle requests to avoid rate limiting
                 await delay(API_THROTTLE_DELAY);
                 
                 const priceData = await fetchPrice(holding);
@@ -857,7 +833,6 @@
             }
             
             await saveDataToFirestore(); 
-            // The onSnapshot listener will call updateDisplay() automatically
             refreshButton.textContent = 'Refresh Now';
             refreshButton.disabled = false;
         }
@@ -1819,12 +1794,11 @@
         function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); filterChart(activeChartFilter, buildPortfolioHistoryFromTransactions()); }
         function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
         
-        // FIX 1: This function debounces the input to prevent race conditions
         function debouncedUpdateUserName() {
             clearTimeout(userNameUpdateTimeout);
             userNameUpdateTimeout = setTimeout(() => {
                 updateUserName();
-            }, 800); // Wait 800ms after user stops typing
+            }, 800);
         }
 
         async function updateUserName() { 
@@ -1837,7 +1811,6 @@
             const name = portfolioData.username;
             el.textContent = name ? `for ${name}` : '';
             document.getElementById('userNameInput').value = name;
-            // FIX 2: This line updates the browser tab title
             document.title = name ? `${name}'s Portfolio` : 'Investment App';
         }
 
@@ -1915,7 +1888,7 @@
         }
         function stopAutoRefresh() { if (autoRefreshIntervalId !== null) { clearInterval(autoRefreshIntervalId); autoRefreshIntervalId = null; } isAutoRefreshEnabled = false; updateAutoRefreshButton(); saveAutoRefreshState(); }
         function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
-        async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { return { currentPrice: null, previousClosePrice: null }; } }
+        async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { console.error(e); return { currentPrice: null, previousClosePrice: null }; } }
         
         async function fetchPriceFromAlphaVantage(symbol) { 
             if (!ALPHA_VANTAGE_API_KEY) return { currentPrice: null, previousClosePrice: null }; 
@@ -1939,6 +1912,7 @@
                 } 
                 return { currentPrice: null, previousClosePrice: null }; 
             } catch (e) { 
+                console.error(e);
                 return { currentPrice: null, previousClosePrice: null }; 
             } 
         }
@@ -2020,7 +1994,6 @@
                         for (const key in row) {
                             cleanedRow[key] = typeof row[key] === 'string' ? row[key].trim() : row[key];
                         }
-                        // Manual type conversion
                         cleanedRow.id = parseFloat(cleanedRow.id) || Date.now() + index;
                         cleanedRow.shares = parseFloat(cleanedRow.shares) || 0;
                         cleanedRow.price = parseFloat(cleanedRow.price) || 0;
@@ -2033,7 +2006,6 @@
                     showConfirmationModal(`You are about to import ${transactionsToImport.length} transactions. This will overwrite ALL current data in the cloud. Continue?`, async () => {
                         portfolioData.transactions = transactionsToImport;
                         await saveDataToFirestore();
-                        // FIX 2: Manually trigger a UI update to show holdings immediately.
                         updateDisplay(); 
                         showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
                     });
