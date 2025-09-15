@@ -337,9 +337,8 @@
         let userNameUpdateTimeout = null; 
 
         // --- INITIALIZATION ---
-
-        window.addEventListener('DOMContentLoaded', startApp);
-
+        
+        // This function needs to be available for the event listener in startApp
         function handleConfigFileImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -391,6 +390,8 @@
             };
             reader.readAsText(file);
         }
+        
+        window.addEventListener('DOMContentLoaded', startApp);
         
         async function startApp() {
             document.getElementById('transactionDate').valueAsDate = new Date();
