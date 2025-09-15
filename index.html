@@ -492,20 +492,41 @@
             reader.onload = function(e) {
                 const text = e.target.result;
                 try {
-                    // Find the JSON part of the string
+                    const config = {};
+                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    
+                    // Find the content within the curly braces
                     const startIndex = text.indexOf('{');
                     const endIndex = text.lastIndexOf('}');
                     if (startIndex === -1 || endIndex === -1) {
-                        throw new Error("Could not find a JSON object in the file.");
+                        throw new Error("Could not find a configuration object { ... } in the file.");
                     }
-                    const jsonString = text.substring(startIndex, endIndex + 1);
-                    const config = JSON.parse(jsonString);
+                    const content = text.substring(startIndex + 1, endIndex);
 
-                    // Validate that all keys are present
-                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+                    // Split into lines and process each one
+                    content.split(',').forEach(line => {
+                        if (line.trim() === '') return;
+
+                        const parts = line.split(':');
+                        if (parts.length < 2) return;
+
+                        const key = parts[0].trim().replace(/['"]/g, ''); // remove quotes from key just in case
+                        let value = parts.slice(1).join(':').trim();
+
+                        // Remove quotes and commas from the value
+                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                            value = value.substring(1, value.length - 1);
+                        }
+                        
+                        if (requiredKeys.includes(key)) {
+                            config[key] = value;
+                        }
+                    });
+
+                    // Validate that all keys were found
                     const hasAllKeys = requiredKeys.every(key => config[key]);
                     if (!hasAllKeys) {
-                         throw new Error("The JSON object is missing required Firebase keys.");
+                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
                     }
                     
                     // If valid, save and reload
@@ -2311,4 +2332,11 @@
     </div>
 </body>
 </html>
+" because I want you to fix the bug I'm reporting. 
+You don't need to generate a new file, instead you should edit the file that is currently open on the right side of the screen.
+
+I'm getting this error message when I run the code. Can you please fix it?
+[01:54:19 PM] [GLOBAL] ReferenceError: handleConfigFileImport is not defined
+    at startApp (https://kayson2022.github.io/livestocktracking.github.io/:291:57)
+    at https://kayson2022.github.io/livestocktracking.github.io/:283:33
 
