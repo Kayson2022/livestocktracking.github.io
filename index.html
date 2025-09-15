@@ -274,81 +274,10 @@
                 grid-template-columns: repeat(4, 1fr);
             }
         }
-        
-        /* Styles for the on-screen error log */
-        #error-log-container {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 150px;
-            background-color: rgba(255, 235, 238, 0.95);
-            border: 1px solid #e53e3e;
-            border-radius: 8px;
-            padding: 10px;
-            z-index: 2000;
-            overflow-y: auto;
-            display: none; /* Hidden by default */
-            font-family: monospace;
-            font-size: 12px;
-        }
-        #error-log-container h4 {
-            margin: 0 0 10px 0;
-            color: #c53030;
-            border-bottom: 1px solid #fed7d7;
-            padding-bottom: 5px;
-        }
-        #error-log-pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            color: #9b2c2c;
-        }
     </style>
 </head>
 <body>
     <script type="module">
-        // --- On-Screen Error Logging ---
-        const errorLogContainer = document.getElementById('error-log-container');
-        const errorLogPre = document.getElementById('error-log-pre');
-        const originalConsoleError = console.error;
-        const originalConsoleLog = console.log;
-        const originalConsoleWarn = console.warn;
-
-        const logToScreen = (type, args) => {
-            errorLogContainer.style.display = 'block';
-            const message = Array.from(args).map(arg => {
-                if (typeof arg === 'object' && arg !== null) {
-                    return JSON.stringify(arg, null, 2);
-                }
-                return String(arg);
-            }).join(' ');
-
-            const timestamp = new Date().toLocaleTimeString();
-            errorLogPre.textContent += `[${timestamp} ${type.toUpperCase()}]: ${message}\n`;
-            errorLogContainer.scrollTop = errorLogContainer.scrollHeight;
-        };
-
-        console.error = function(...args) {
-            originalConsoleError.apply(console, args);
-            logToScreen('error', args);
-        };
-        console.log = function(...args) {
-            originalConsoleLog.apply(console, args);
-            logToScreen('log', args);
-        };
-        console.warn = function(...args) {
-            originalConsoleWarn.apply(console, args);
-            logToScreen('warn', args);
-        };
-        window.addEventListener('error', function(event) {
-             console.error('Unhandled Error:', event.message, 'at', event.filename, ':', event.lineno);
-        });
-        window.addEventListener('unhandledrejection', function(event) {
-             console.error('Unhandled Promise Rejection:', event.reason);
-        });
-
-
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -772,6 +701,12 @@
         }
 
         // --- Data Persistence Functions ---
+        
+        // FIX 1: This function creates a "clean" version of the data to avoid circular reference errors when saving.
+        function getCleanObject(obj) {
+            return JSON.parse(JSON.stringify(obj));
+        }
+        
         async function saveDataToFirestore() {
             if (!userId) return;
             try {
@@ -779,9 +714,10 @@
                 const portfolioColRef = collection(userDocRef, 'data');
                 const batch = writeBatch(db);
 
-                batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
-                batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
-                batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                // Use the clean objects for saving to Firestore
+                batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
+                batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
+                batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
                 
                 await batch.commit();
                 updateDataStatus(true);
