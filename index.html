@@ -462,7 +462,6 @@
                         if (!user) {
                            await signInAnonymously(auth);
                         } else {
-                           // If we are here, it means we are anonymous. We can still listen to data for this anonymous user.
                            await setupFirestoreListeners();
                         }
                     }
@@ -479,7 +478,6 @@
             const provider = new GoogleAuthProvider();
             try {
                 await signInWithPopup(auth, provider);
-                // onAuthStateChanged will handle the rest
             } catch (error) {
                 console.error("Google Sign-In Error:", error);
                 showConfirmationModal(`Could not sign in with Google. Error: ${error.message}`, null);
@@ -489,8 +487,7 @@
         async function signOutUser() {
             try {
                 await signOut(auth);
-                // onAuthStateChanged will handle UI changes and signing in anonymously again
-                location.reload(); // Easiest way to reset the state
+                location.reload();
             } catch (error) {
                 console.error("Sign Out Error:", error);
                 showConfirmationModal(`Could not sign out. Error: ${error.message}`, null);
@@ -1310,7 +1307,6 @@
         // --- Calculation and Rendering Logic ---
         function calculateOverallStats() {
             let totalCostBasis = 0, totalValue = 0, totalDailyGainLoss = 0, estimatedAnnualIncome = 0;
-            let totalUnrealizedGainLoss = 0; 
             
             let bestPerformer = { symbol: 'N/A', gain: -Infinity };
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
@@ -1320,24 +1316,27 @@
             portfolioHoldings.forEach(h => {
                 totalCostBasis += h.totalCost;
                 estimatedAnnualIncome += (h.dividend || 0) * h.totalShares;
-
-                let unrealizedGain = 0;
-                let currentValue = h.totalCost; // Default value is cost basis
+                let currentValue = h.totalCost; 
 
                 if (h.currentPrice !== null && h.currentPrice > 0) {
                     currentValue = h.totalShares * h.currentPrice;
-                    unrealizedGain = currentValue - h.totalCost;
                     
                     if (h.type !== 'CASH' && h.type !== 'Money Market' && h.previousClosePrice > 0) {
                         totalDailyGainLoss += (currentValue - (h.totalShares * h.previousClosePrice));
                     }
                 }
-                
                 totalValue += currentValue;
-                totalUnrealizedGainLoss += unrealizedGain;
+            });
 
-                if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
-                if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+            const totalUnrealizedGainLoss = totalValue - totalCostBasis;
+
+            portfolioHoldings.forEach(h => {
+                if (h.currentPrice !== null && h.currentPrice > 0) {
+                    const currentValue = h.totalShares * h.currentPrice;
+                    const unrealizedGain = currentValue - h.totalCost;
+                    if (unrealizedGain > bestPerformer.gain) bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                    if (unrealizedGain < worstPerformer.gain) worstPerformer = { symbol: h.symbol, gain: unrealizedGain };
+                }
             });
             
             return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
