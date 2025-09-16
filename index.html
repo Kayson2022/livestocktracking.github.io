@@ -1166,7 +1166,7 @@
                         h.platform === fundingPlatform &&
                         isCashEquivalentType(h.type)
                     );
-                    const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + h.totalShares, 0);
+                    const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
 
                     if (availableCash < cost) {
                         showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${platform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
@@ -1317,7 +1317,11 @@
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
             const normalized = t.replace(/[^a-z0-9]/g, '');
-            return normalized === 'cash' || normalized === 'moneymarket' || normalized === 'mm' || t.includes('cash') || (t.includes('money') && t.includes('market'));
+            const isCash = normalized === 'cash' || normalized === 'moneymarket' || normalized === 'mm' || t.includes('cash') || (t.includes('money') && t.includes('market'));
+            if (isCash) {
+                console.log(`Excluding '${type}' as cash-equivalent.`);
+            }
+            return isCash;
         }
 
         function calculateOverallStats(portfolioHoldings) {
