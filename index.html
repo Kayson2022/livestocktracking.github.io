@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment App</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
     <!-- Third-party Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -324,7 +324,7 @@
 
 
         let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
-        let ALPHA_VANTAGE_API_KEY = '4XPI78V9CKRS7F47';
+        let ALPHA_VANTAGE_API_KEY = '0ZPH51BZ2N5O9G8Q';
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
 
         let firebaseApp, db, auth, userId;
@@ -1497,7 +1497,7 @@
             const isExpanded = !!uiState.expandedGroups[groupName];
 
             return `
-                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}" >
+                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}">
                     <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
                          <div class="group-summary">
                             <div class="group-title">${groupName}</div>
