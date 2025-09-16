@@ -1321,7 +1321,6 @@
             portfolioHoldings.forEach(h => {
                 const isCashEquivalent = h.type === 'CASH' || h.type === 'Money Market';
                 
-                // Use the live price if available, otherwise fall back to the average purchase price (cost basis).
                 const displayPrice = h.currentPrice || h.averagePurchasePrice;
                 const currentValue = h.totalShares * displayPrice;
                 totalValue += currentValue;
@@ -1345,7 +1344,6 @@
                 }
             });
             
-            // Unrealized G/L is the difference between the total value of invested assets and their cost basis.
             const investedAssetsValue = portfolioHoldings
                 .filter(h => h.type !== 'CASH' && h.type !== 'Money Market')
                 .reduce((sum, h) => {
@@ -1430,9 +1428,15 @@
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
             
             const totalGroupValue = holdings.reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || h.averagePurchasePrice)), 0);
+            
+            const totalGroupInvestedCostBasis = holdings
+                .filter(h => h.type !== 'CASH' && h.type !== 'Money Market')
+                .reduce((sum, h) => sum + h.totalCost, 0);
+            
             const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
             const totalGroupGainLoss = totalGroupValue - totalGroupCost;
-            const totalGroupReturnPercentage = totalGroupCost > 0 ? (totalGroupGainLoss / totalGroupCost) : 0;
+            const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? ((totalGroupValue - totalGroupCost) / totalGroupInvestedCostBasis) : 0;
+
             let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
                 if (h.currentPrice && h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
                     return sum + (h.currentPrice - h.previousClosePrice) * h.totalShares;
@@ -1446,6 +1450,7 @@
             } else {
                 groupStatsHtml = `
                     <div class="group-stat-item"><div class="detail-label">Value</div><div class="detail-value">${formatCurrency(totalGroupValue)}</div></div>
+                    <div class="group-stat-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(totalGroupInvestedCostBasis)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">G/L</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupGainLoss)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">G/L %</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalGroupReturnPercentage)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">Today</div><div class="detail-value ${totalGroupDailyGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupDailyGainLoss)}</div></div>
@@ -1487,7 +1492,7 @@
             const isExpanded = !!uiState.expandedGroups[groupName];
 
             return `
-                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}">
+                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}" >
                     <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
                          <div class="group-summary">
                             <div class="group-title">${groupName}</div>
@@ -2424,4 +2429,5 @@
     </div>
 </body>
 </html>
+
 
