@@ -1325,8 +1325,9 @@
         }
 
         function calculateOverallStats(portfolioHoldings) {
-            let totalCostBasis = 0; // Only for invested assets (non-cash)
-            let totalValue = 0; // For ALL assets
+            let totalCostBasis = 0;
+            let totalValue = 0;
+            let totalCashValue = 0;
             let totalDailyGainLoss = 0;
             let estimatedAnnualIncome = 0;
             
@@ -1342,7 +1343,9 @@
                 const currentValue = (Number(h.totalShares) || 0) * displayPrice;
                 totalValue += currentValue;
                 
-                if (!isCashEquivalent) {
+                if (isCashEquivalent) {
+                    totalCashValue += currentValue;
+                } else {
                     totalCostBasis += Number(h.totalCost) || 0;
                     estimatedAnnualIncome += (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
                     
@@ -1370,12 +1373,13 @@
             
             const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
             
-            return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
+            return { totalCostBasis, totalValue, totalCashValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
         }
         
         function updateStats(stats) {
             document.getElementById('totalValue').textContent = formatCurrency(stats.totalValue);
             document.getElementById('totalInvested').textContent = formatCurrency(stats.totalCostBasis);
+            document.getElementById('totalCashValue').textContent = formatCurrency(stats.totalCashValue);
             const unrealizedEl = document.getElementById('unrealizedGainLoss');
             unrealizedEl.textContent = formatCurrency(stats.totalUnrealizedGainLoss);
             unrealizedEl.className = 'stat-value ' + (stats.totalUnrealizedGainLoss >= 0 ? 'positive' : 'negative');
