@@ -1944,12 +1944,12 @@
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
             const accountData = portfolioHoldings.reduce((acc, h) => {
-                const val = h.totalShares * (h.currentPrice || h.averagePurchasePrice);
+                const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
                 if(h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => { 
-                 const val = h.totalShares * (h.currentPrice || h.averagePurchasePrice);
+                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
                  if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc; 
             }, {});
             
@@ -1966,7 +1966,7 @@
             }
             const dividendData = portfolioHoldings.map(h => {
                 const totalShares = h.totalShares;
-                return { symbol: h.symbol, income: totalShares * h.dividend };
+                return { symbol: h.symbol, income: (Number(totalShares) || 0) * (Number(h.dividend) || 0) };
             }).filter(d => d.income > 0).sort((a,b) => b.income - a.income);
 
             if (dividendData.length > 0) {
