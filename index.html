@@ -2124,7 +2124,7 @@
         window.filterChart = (p) => {
             const currentHoldings = calculateHoldingsAndCash();
             const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
-            filterChart(p, portfolioHistory);
+            filterChart(p, portfolioHistory, currentHoldings);
         };
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
