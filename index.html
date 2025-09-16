@@ -356,6 +356,7 @@
         let validationTimeout = null;
         let lastEditedField = 'shares';
         let userNameUpdateTimeout = null; 
+        let isInitialDataLoaded = false; // Prevents race conditions on load
 
         // --- INITIALIZATION ---
         
@@ -448,6 +449,8 @@
                 onAuthStateChanged(auth, async (user) => {
                     const signInBtn = document.getElementById('signInBtn');
                     const userInfoDiv = document.getElementById('user-info');
+                    
+                    isInitialDataLoaded = false; // Reset on auth change
 
                     if (user && !user.isAnonymous) {
                         userId = user.uid;
@@ -513,6 +516,7 @@
                 } else {
                     setDoc(portfolioDocRef, portfolioData);
                 }
+                isInitialDataLoaded = true; // Set flag after first data load
                 updateDisplay();
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
             }, (error) => console.error("Error listening to portfolio:", error));
@@ -530,8 +534,6 @@
                     priceCache = docSnap.data();
                 }
             });
-
-             await refreshAllPrices();
         }
 
         // --- MODALS (Confirmation, Firebase Config, Edit, etc.) ---
@@ -766,7 +768,10 @@
         }
         
         async function saveDataToFirestore() {
-            if (!userId) return;
+            if (!isInitialDataLoaded || !userId) {
+                console.warn("Data not fully loaded yet. Save operation skipped.");
+                return;
+            }
             try {
                 const userDocRef = doc(db, 'users', userId);
                 const portfolioColRef = collection(userDocRef, 'data');
@@ -2429,5 +2434,4 @@
     </div>
 </body>
 </html>
-
 
