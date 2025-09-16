@@ -860,7 +860,7 @@
         }
 
         async function refreshAllPrices(forceRefresh = false) {
-            if (!isInitialDataLoaded) return; // Don't refresh if initial data isn't loaded
+            if (!isInitialDataLoaded) return;
             const currentHoldings = calculateHoldingsAndCash();
             if (currentHoldings.length === 0) {
                 updateDisplay();
@@ -1439,9 +1439,9 @@
                 .filter(h => h.type !== 'CASH' && h.type !== 'Money Market')
                 .reduce((sum, h) => sum + h.totalCost, 0);
             
-            const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
-            const totalGroupGainLoss = totalGroupValue - totalGroupCost;
-            const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? ((totalGroupValue - totalGroupCost) / totalGroupInvestedCostBasis) : 0;
+            const investedValue = holdings.filter(h => h.type !== 'CASH' && h.type !== 'Money Market').reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || h.averagePurchasePrice)), 0);
+            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis;
+            const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
 
             let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
                 if (h.currentPrice && h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
@@ -2030,6 +2030,7 @@
         }
         
         function filterChart(period, portfolioHistory) {
+            const currentHoldings = calculateHoldingsAndCash();
             activeChartFilter = period;
             document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.remove('active'));
             const activeBtn = Array.from(document.querySelectorAll('.chart-filter-btn')).find(b => b.textContent === period);
