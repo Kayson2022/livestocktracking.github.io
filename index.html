@@ -1905,7 +1905,14 @@
         function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
         function formatPercentage(value) { return (value * 100).toFixed(2) + '%'; }
         function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
-        function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); updateDisplay(); }
+        function toggleTheme() { 
+            const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; 
+            localStorage.setItem(THEME_KEY, newTheme); 
+            applyTheme(newTheme);
+            const currentHoldings = calculateHoldingsAndCash();
+            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
+            filterChart(activeChartFilter, portfolioHistory, currentHoldings);
+        }
         function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
         
         function debouncedUpdateUserName() {
