@@ -860,6 +860,7 @@
         }
 
         async function refreshAllPrices(forceRefresh = false) {
+            if (!isInitialDataLoaded) return; // Don't refresh if initial data isn't loaded
             calculateHoldingsAndCash();
             if (currentHoldings.length === 0) {
                 updateDisplay();
