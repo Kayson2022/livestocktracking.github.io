@@ -340,7 +340,6 @@
         };
         let priceCache = {};
         
-        let currentHoldings = [];
         let totalRealizedGainLoss = 0;
         let isSymbolValidated = false;
         let accountChart, investmentChart, historicalChart, dividendChart;
@@ -424,7 +423,7 @@
 
             document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
             document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
-            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
+            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; updateDisplay(); });
             document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
             document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
             document.getElementById('signInBtn').addEventListener('click', signInWithGoogle);
@@ -689,7 +688,7 @@
 
             totalRealizedGainLoss = realizedGains;
             
-            currentHoldings = Object.values(holdings).map(h => {
+            const calculatedHoldings = Object.values(holdings).map(h => {
                 const cachedInfo = priceCache[h.symbol] || {};
                 if (h.type === 'CASH' || h.type === 'Money Market') {
                     h.currentPrice = 1.0;
@@ -704,9 +703,10 @@
                 h.previousClosePrice = cachedInfo.previousClosePrice || null;
                 return h;
             });
+            return calculatedHoldings;
         }
         
-        function buildPortfolioHistoryFromTransactions() {
+        function buildPortfolioHistoryFromTransactions(holdings) {
             const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
             if (nonWatchlistTransactions.length === 0) return [];
             
@@ -861,7 +861,7 @@
 
         async function refreshAllPrices(forceRefresh = false) {
             if (!isInitialDataLoaded) return; // Don't refresh if initial data isn't loaded
-            calculateHoldingsAndCash();
+            const currentHoldings = calculateHoldingsAndCash();
             if (currentHoldings.length === 0) {
                 updateDisplay();
                 return;
@@ -1094,7 +1094,7 @@
             const platform = document.getElementById('platform').value;
             const type = document.getElementById('type').value;
 
-            calculateHoldingsAndCash(); 
+            const currentHoldings = calculateHoldingsAndCash();
 
             const transactionsToAdd = [];
             let mainTransaction = {
@@ -1225,7 +1225,7 @@
         async function toggleGroup(groupName, shouldScroll = false) { 
             uiState.expandedGroups[groupName] = !uiState.expandedGroups[groupName]; 
             await saveDataToFirestore(); 
-            renderInvestments(); 
+            updateDisplay();
             if (shouldScroll) {
                 setTimeout(() => {
                     const groupHeader = document.getElementById(`group-${groupName.replace(/\s+/g, '-')}`);
@@ -1313,7 +1313,7 @@
         }
 
         // --- Calculation and Rendering Logic ---
-        function calculateOverallStats() {
+        function calculateOverallStats(portfolioHoldings) {
             let totalCostBasis = 0; // Only for invested assets (non-cash)
             let totalValue = 0; // For ALL assets
             let totalDailyGainLoss = 0;
@@ -1322,9 +1322,9 @@
             let bestPerformer = { symbol: 'N/A', gain: -Infinity };
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
             
-            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            const filteredHoldings = portfolioHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
-            portfolioHoldings.forEach(h => {
+            filteredHoldings.forEach(h => {
                 const isCashEquivalent = h.type === 'CASH' || h.type === 'Money Market';
                 
                 const displayPrice = h.currentPrice || h.averagePurchasePrice;
@@ -1350,7 +1350,7 @@
                 }
             });
             
-            const investedAssetsValue = portfolioHoldings
+            const investedAssetsValue = filteredHoldings
                 .filter(h => h.type !== 'CASH' && h.type !== 'Money Market')
                 .reduce((sum, h) => {
                     const displayPrice = h.currentPrice || h.averagePurchasePrice;
@@ -1362,8 +1362,7 @@
             return { totalCostBasis, totalValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
         }
         
-        function updateStats() {
-            const stats = calculateOverallStats();
+        function updateStats(stats) {
             document.getElementById('totalValue').textContent = formatCurrency(stats.totalValue);
             document.getElementById('totalInvested').textContent = formatCurrency(stats.totalCostBasis);
             const unrealizedEl = document.getElementById('unrealizedGainLoss');
@@ -1387,11 +1386,12 @@
             document.getElementById('worstPerformerValue').className = 'stat-value ' + (stats.worstPerformer.gain >= 0 ? 'positive' : 'negative');
         }
 
-        function renderInvestments() {
+        function renderInvestments(holdings) {
+            if (!holdings) return; // Add a guard clause
             const container = document.getElementById('investmentsList');
             container.innerHTML = '';
             
-            let holdingsToRender = [...currentHoldings];
+            let holdingsToRender = [...holdings];
             const searchTerm = currentSearchTerm.toLowerCase();
             
             if (searchTerm) {
@@ -1519,8 +1519,8 @@
             const displayPrice = h.currentPrice || h.averagePurchasePrice;
             const currentValue = h.totalShares * displayPrice;
             
-            const totalGainLoss = hasLivePrice ? currentValue - h.totalCost : 0;
-            const totalReturnPercentage = hasLivePrice && h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const totalGainLoss = currentValue - h.totalCost;
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
             const annualIncome = (h.dividend || 0) * h.totalShares;
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
@@ -1565,9 +1565,9 @@
                     <div class="detail-item"><div class="detail-label">Avg. Cost</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
                     <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
@@ -1726,13 +1726,13 @@
 
         // --- Main Update Function ---
         function updateDisplay() {
-            calculateHoldingsAndCash();
-            const portfolioHistory = buildPortfolioHistoryFromTransactions();
+            const freshHoldings = calculateHoldingsAndCash();
             updateUserNameDisplay();
-            updateStats();
-            filterChart(activeChartFilter, portfolioHistory);
+            updateStats(freshHoldings);
+            const portfolioHistory = buildPortfolioHistoryFromTransactions(freshHoldings);
+            filterChart(activeChartFilter, portfolioHistory, freshHoldings);
             populatePlatformFilter();
-            renderInvestments();
+            renderInvestments(freshHoldings);
         }
         
         // --- MODAL Functions for Editing Data ---
@@ -1800,8 +1800,9 @@
         }
         
         function openHoldingEditModal(symbol, accountType, platform) {
+            const holdings = calculateHoldingsAndCash();
             const positionKey = `${symbol}|||${accountType}|||${platform}`;
-            const holding = currentHoldings.find(h => `${h.symbol}|||${h.accountType}|||${h.platform}` === positionKey);
+            const holding = holdings.find(h => `${h.symbol}|||${h.accountType}|||${h.platform}` === positionKey);
             if (!holding) return;
 
             const modal = document.getElementById('editHoldingModal');
@@ -1828,7 +1829,8 @@
             const symbol = document.getElementById('editHoldingSymbol').value;
             const accountType = document.getElementById('editHoldingAccountTypeKey').value;
             const platform = document.getElementById('editHoldingPlatformKey').value;
-
+            
+            const currentHoldings = calculateHoldingsAndCash();
             const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
             
             const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
@@ -1880,14 +1882,14 @@
         async function toggleTransactionHistory(key) { 
             uiState.expandedTransactions[key] = !uiState.expandedTransactions[key]; 
             await saveDataToFirestore();
-            renderInvestments(); 
+            updateDisplay(); 
         }
 
         // --- Utility and Charting Functions ---
         function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
         function formatPercentage(value) { return (value * 100).toFixed(2) + '%'; }
         function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
-        function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); applyTheme(newTheme); filterChart(activeChartFilter, buildPortfolioHistoryFromTransactions()); }
+        function toggleTheme() { const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, newTheme); updateDisplay(); }
         function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
         
         function debouncedUpdateUserName() {
@@ -1920,14 +1922,14 @@
             select.value = currentFilter;
         }
         
-        function updateCharts(dataPoints) {
+        function updateCharts(dataPoints, holdings) {
             const chartData = dataPoints || [];
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
             const gridColor = currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
             const labelColor = currentTheme === 'dark' ? '#f5f5f5' : '#333';
             if(accountChart) accountChart.destroy(); if(investmentChart) investmentChart.destroy(); if(historicalChart) historicalChart.destroy(); if(dividendChart) dividendChart.destroy();
 
-            const portfolioHoldings = currentHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
             const accountData = portfolioHoldings.reduce((acc, h) => {
                 const val = h.totalShares * (h.currentPrice || h.averagePurchasePrice);
@@ -2041,11 +2043,11 @@
                 case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
                 case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
                 case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
-                default: updateCharts(portfolioHistory); return;
+                default: updateCharts(portfolioHistory, currentHoldings); return;
             }
 
             const filteredData = portfolioHistory.filter(dp => new Date(dp.date) >= startDate);
-            updateCharts(filteredData);
+            updateCharts(filteredData, currentHoldings);
         }
         
         // --- Import/Export Functions ---
