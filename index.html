@@ -2121,11 +2121,7 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (p) => {
-            const currentHoldings = calculateHoldingsAndCash();
-            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
-            filterChart(p, portfolioHistory, currentHoldings);
-        };
+        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions());
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
         window.validateSymbol = validateSymbol;
