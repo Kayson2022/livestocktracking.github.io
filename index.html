@@ -1498,7 +1498,7 @@
             const isExpanded = !!uiState.expandedGroups[groupName];
 
             return `
-                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}">
+                <div class="investment-group ${isExpanded ? 'expanded' : ''}" id="group-${groupName.replace(/\s+/g, '-')}" >
                     <div class="investment-group-header" data-group-type="${groupName}" onclick="toggleGroup('${groupName}')">
                          <div class="group-summary">
                             <div class="group-title">${groupName}</div>
