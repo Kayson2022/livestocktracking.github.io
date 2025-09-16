@@ -422,7 +422,7 @@
 
             document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
             document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
-            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; renderInvestments(); });
+            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; updateDisplay(); });
             document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
             document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
             document.getElementById('signInBtn').addEventListener('click', signInWithGoogle);
@@ -1224,7 +1224,8 @@
         async function toggleGroup(groupName, shouldScroll = false) { 
             uiState.expandedGroups[groupName] = !uiState.expandedGroups[groupName]; 
             await saveDataToFirestore(); 
-            renderInvestments(); 
+            // We call updateDisplay which will re-render everything correctly
+            updateDisplay(); 
             if (shouldScroll) {
                 setTimeout(() => {
                     const groupHeader = document.getElementById(`group-${groupName.replace(/\s+/g, '-')}`);
@@ -1387,6 +1388,7 @@
         }
 
         function renderInvestments(holdings) {
+            if (!holdings) return; // Add a guard clause
             const container = document.getElementById('investmentsList');
             container.innerHTML = '';
             
@@ -1439,8 +1441,9 @@
                 .reduce((sum, h) => sum + h.totalCost, 0);
             
             const totalGroupCost = holdings.reduce((sum, h) => sum + h.totalCost, 0);
-            const totalGroupGainLoss = totalGroupValue - totalGroupCost;
-            const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? ((totalGroupValue - totalGroupCost) / totalGroupInvestedCostBasis) : 0;
+            const investedValue = holdings.filter(h => h.type !== 'CASH' && h.type !== 'Money Market').reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || h.averagePurchasePrice)), 0);
+            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis;
+            const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
 
             let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
                 if (h.currentPrice && h.previousClosePrice > 0 && h.type !== 'CASH' && h.type !== 'Money Market') {
@@ -1518,8 +1521,8 @@
             const displayPrice = h.currentPrice || h.averagePurchasePrice;
             const currentValue = h.totalShares * displayPrice;
             
-            const totalGainLoss = hasLivePrice ? currentValue - h.totalCost : 0;
-            const totalReturnPercentage = hasLivePrice && h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const totalGainLoss = currentValue - h.totalCost;
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
             const annualIncome = (h.dividend || 0) * h.totalShares;
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
@@ -1564,9 +1567,9 @@
                     <div class="detail-item"><div class="detail-label">Avg. Cost</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
                     <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
@@ -1881,7 +1884,7 @@
         async function toggleTransactionHistory(key) { 
             uiState.expandedTransactions[key] = !uiState.expandedTransactions[key]; 
             await saveDataToFirestore();
-            renderInvestments(); 
+            updateDisplay(); 
         }
 
         // --- Utility and Charting Functions ---
@@ -2119,7 +2122,11 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions(currentHoldings), currentHoldings);
+        window.filterChart = (p) => {
+            const currentHoldings = calculateHoldingsAndCash();
+            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
+            filterChart(p, portfolioHistory, currentHoldings);
+        };
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
         window.validateSymbol = validateSymbol;
