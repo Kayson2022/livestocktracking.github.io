@@ -1387,7 +1387,7 @@
         }
 
         function renderInvestments(holdings) {
-            if (!holdings) return; // Add a guard clause
+            if (!holdings) return;
             const container = document.getElementById('investmentsList');
             container.innerHTML = '';
             
@@ -1727,9 +1727,11 @@
         // --- Main Update Function ---
         function updateDisplay() {
             const freshHoldings = calculateHoldingsAndCash();
-            updateUserNameDisplay();
-            updateStats(freshHoldings);
+            const stats = calculateOverallStats(freshHoldings);
             const portfolioHistory = buildPortfolioHistoryFromTransactions(freshHoldings);
+
+            updateUserNameDisplay();
+            updateStats(stats);
             filterChart(activeChartFilter, portfolioHistory, freshHoldings);
             populatePlatformFilter();
             renderInvestments(freshHoldings);
