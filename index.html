@@ -2037,7 +2037,8 @@
             }
         }
         
-        function filterChart(period, portfolioHistory, holdings) {
+        function filterChart(period, portfolioHistory) {
+            const currentHoldings = calculateHoldingsAndCash();
             activeChartFilter = period;
             document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.remove('active'));
             const activeBtn = Array.from(document.querySelectorAll('.chart-filter-btn')).find(b => b.textContent === period);
@@ -2051,11 +2052,11 @@
                 case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
                 case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
                 case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
-                default: updateCharts(portfolioHistory, holdings); return;
+                default: updateCharts(portfolioHistory, currentHoldings); return;
             }
 
             const filteredData = portfolioHistory.filter(dp => new Date(dp.date) >= startDate);
-            updateCharts(filteredData, holdings);
+            updateCharts(filteredData, currentHoldings);
         }
         
         // --- Import/Export Functions ---
@@ -2128,11 +2129,7 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (p) => {
-            const currentHoldings = calculateHoldingsAndCash();
-            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
-            filterChart(p, portfolioHistory);
-        };
+        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions());
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
         window.validateSymbol = validateSymbol;
