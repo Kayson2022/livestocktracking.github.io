@@ -1169,7 +1169,7 @@
                     const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
 
                     if (availableCash < cost) {
-                        showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${platform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
+                        showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${fundingPlatform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
                         return; 
                     }
                     
@@ -1318,9 +1318,7 @@
             const t = String(type).trim().toLowerCase();
             const normalized = t.replace(/[^a-z0-9]/g, '');
             const isCash = normalized === 'cash' || normalized === 'moneymarket' || normalized === 'mm' || t.includes('cash') || (t.includes('money') && t.includes('market'));
-            if (isCash) {
-                console.log(`Excluding '${type}' as cash-equivalent.`);
-            }
+            // console.log(`Checking if '${type}' is cash: ${isCash}`); // Log to check logic
             return isCash;
         }
 
@@ -1551,6 +1549,9 @@
             let headerHtml = '';
             let detailsHtml = '';
 
+            // Determine classes for daily performance
+            const todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
+
             if (isWatchlist) {
                 headerHtml = `
                      <div class="investment-header-info">
@@ -1559,8 +1560,8 @@
                     </div>
                     <div class="investment-header-summary">
                         <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
-                        <div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">
-                           ${hasLivePrice ? `${formatCurrency(h.currentPrice - h.previousClosePrice)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
+                        <div class="detail-value ${todayGLLabelClass}">
+                           ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
                         </div>
                     </div>
                 `;
@@ -1583,8 +1584,8 @@
                     <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
                     <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGainLossAmount >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
                     <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
@@ -1658,6 +1659,8 @@
             }
 
             const allTransactions = holdings.flatMap(h => h.transactions);
+            const todayPLLabelClass = todayPL >= 0 ? 'positive' : 'negative';
+
 
             const purchasesHtml = holdings.map(h => `
                 <div class="purchase-item">
@@ -1713,7 +1716,7 @@
                     </div>
                     <div class="investment-header-summary">
                          <div class="detail-value" style="font-size: 1.4em;">${hasLivePrice ? formatCurrency(currentPrice) : '...'}</div>
-                         <div class="detail-value ${todayPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
+                         <div class="detail-value ${todayPLLabelClass}">${hasLivePrice ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
                     </div>
                 </div>
 
@@ -1731,7 +1734,7 @@
                     
                     <div class="consolidated-footer">
                         <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
                     </div>
                      ${transactionsHtml}
                 </div>
@@ -2461,4 +2464,3 @@
     </div>
 </body>
 </html>
-
