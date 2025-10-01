@@ -1575,7 +1575,7 @@
             const currentValue = (Number(h.totalShares) || 0) * displayPrice;
 
             const totalGainLoss = currentValue - h.totalCost;
-            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / totalCost) : 0;
             const annualIncome = (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
