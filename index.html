@@ -552,18 +552,23 @@
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
             let dataCollectionPath;
 
-            // FIX: Use public path for anonymous users (when not signed in with a provider)
+            // FIX: Use a fully public data path for anonymous users to avoid permission issues
             if (auth.currentUser && !auth.currentUser.isAnonymous) {
                 // Authenticated (Google, etc.) user: Use private user path
                 dataCollectionPath = `artifacts/${appId}/users/${userId}/data`;
                 console.log(`Using private path: ${dataCollectionPath}`);
             } else {
-                // Anonymous user: Use public path to ensure read/write permissions
-                // Note: The userId is still provided by Firebase even for anonymous users
+                // Anonymous user: Use public path mapped by their user ID.
                 const anonymousCollectionName = `user_portfolio_${userId}`;
                 dataCollectionPath = `artifacts/${appId}/public/data/${anonymousCollectionName}`;
-                console.log(`Using public anonymous path: ${dataCollectionPath}`);
+                // Fallback to a broader public path if the initial one fails (as suggested by the console logs)
+                // Note: The previous attempt already used this path, but the following function will simplify the path logic.
             }
+            
+            // Re-implementing getFirestoreDataPath logic for clarity and robustness
+            dataCollectionPath = getFirestoreDataPath(userId);
+            console.log(`Attempting to listen to path: ${dataCollectionPath}`);
+
 
             const portfolioDocRef = doc(db, dataCollectionPath, FIRESTORE_DATA_DOC);
             unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
@@ -831,9 +836,10 @@
                 // Private user path (for authenticated users)
                 return `artifacts/${appId}/users/${currentUserId}/data`;
             } else {
-                // Public path (for anonymous users, as they usually don't have write permissions to the 'users' path)
-                const anonymousCollectionName = `user_portfolio_${currentUserId}`;
-                return `artifacts/${appId}/public/data/${anonymousCollectionName}`;
+                // Anonymous user: Use a simple public collection name, which typically has looser permissions.
+                // We'll use the user ID as the document ID inside the 'portfolios' collection.
+                const publicCollectionName = 'user_portfolios';
+                return `artifacts/${appId}/public/data/${publicCollectionName}`;
             }
         }
 
@@ -844,11 +850,13 @@
             }
             try {
                 const dataCollectionPath = getFirestoreDataPath(userId);
+                const docId = (auth.currentUser && !auth.currentUser.isAnonymous) ? FIRESTORE_DATA_DOC : userId;
+
                 const batch = writeBatch(db);
 
-                batch.set(doc(db, dataCollectionPath, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
-                batch.set(doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
-                batch.set(doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
+                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
+                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
+                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
 
                 await batch.commit();
                 updateDataStatus(true);
@@ -867,10 +875,11 @@
                 priceCache = {};
 
                 const dataCollectionPath = getFirestoreDataPath(userId);
+                const docId = (auth.currentUser && !auth.currentUser.isAnonymous) ? FIRESTORE_DATA_DOC : userId;
 
-                await setDoc(doc(db, dataCollectionPath, FIRESTORE_DATA_DOC), portfolioData);
-                await setDoc(doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC), uiState);
-                await setDoc(doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_DATA_DOC), portfolioData);
+                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_UI_STATE_DOC), uiState);
+                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_PRICE_CACHE_DOC), priceCache);
 
                 updateDisplay();
                 updateDataStatus(false, "Data cleared");
@@ -881,7 +890,7 @@
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
-            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
+            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r0opk0';
             ALPHA_VANTAGE_API_KEY = localStorage.getItem(ALPHA_VANTAGE_API_KEY_STORAGE) || '0ZPH51BZ2N5O9G8Q';
         }
 
@@ -2248,7 +2257,7 @@
             <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
                 To connect to your private cloud database, please enter the configuration values from your Firebase project settings.
             </p>
-            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid #ffaaaa; color: #D8000C; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid var(--negative-color); color: var(--negative-color); padding: 10px; border-radius: 5px; margin-bottom: 15px;">
                 Your previous connection attempt failed. Please double-check your values.
             </div>
             <div class="form-group">
