@@ -302,6 +302,7 @@
         const FIRESTORE_DATA_DOC = 'portfolioData';
         const FIRESTORE_UI_STATE_DOC = 'uiState';
         const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
+        const INTERNAL_CASH_SYMBOL = '_CASH_MM_'; // Internal symbol for cash management
 
         const THEME_KEY = 'myPortfolioTheme_v4';
         const AUTO_REFRESH_STATE_KEY = 'myPortfolioAutoRefreshState_v4';
@@ -323,8 +324,8 @@
         let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache;
 
         let portfolioData = {
-             username: '',
-             transactions: []
+            username: '',
+            transactions: []
         };
         let uiState = {
             expandedGroups: {},
@@ -387,7 +388,7 @@
 
                     const hasAllKeys = requiredKeys.every(key => config[key]);
                     if (!hasAllKeys) {
-                         throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
+                            throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
                     }
 
                     localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
@@ -418,6 +419,8 @@
             document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
             document.getElementById('signInBtn').addEventListener('click', signInWithGoogle);
             document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+            document.getElementById('transactionType').addEventListener('change', toggleTransactionFields); // Ensure toggle is called on load
+            toggleTransactionFields(); // Initial call to set correct visibility
 
             await initializeFirebase();
         }
@@ -542,6 +545,29 @@
             }
         }
 
+        /**
+         * Generates the correct Firestore Document Reference based on Canvas security rules
+         * and user authentication status.
+         * @param {string} docName - The name of the document (e.g., 'portfolioData', 'uiState').
+         * @returns {DocumentReference}
+         */
+        function getFirestoreDocRef(docName) {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const collectionName = 'portfolio_tracker_v1';
+            
+            if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                // Private path: artifacts/{appId}/users/{userId}/portfolio_tracker_v1/{docName}
+                const collectionPath = `artifacts/${appId}/users/${userId}/${collectionName}`;
+                return doc(db, collectionPath, docName);
+            } else {
+                // Public path for anonymous users, using userId to maintain uniqueness across different anonymous users.
+                // artifacts/{appId}/public/data/portfolio_tracker_v1/{userId}_{docName}
+                const collectionPath = `artifacts/${appId}/public/data/${collectionName}`;
+                return doc(db, collectionPath, `${userId}_${docName}`);
+            }
+        }
+
+
         async function setupFirestoreListeners() {
             if (!userId) return;
 
@@ -549,52 +575,40 @@
             if (unsubscribeUiState) unsubscribeUiState();
             if (unsubscribePriceCache) unsubscribePriceCache();
 
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            let dataCollectionPath;
+            console.log(`Setting up listeners for user ID: ${userId}`);
 
-            // FIX: Use a fully public data path for anonymous users to avoid permission issues
-            if (auth.currentUser && !auth.currentUser.isAnonymous) {
-                // Authenticated (Google, etc.) user: Use private user path
-                dataCollectionPath = `artifacts/${appId}/users/${userId}/data`;
-                console.log(`Using private path: ${dataCollectionPath}`);
-            } else {
-                // Anonymous user: Use public path mapped by their user ID.
-                const anonymousCollectionName = `user_portfolio_${userId}`;
-                dataCollectionPath = `artifacts/${appId}/public/data/${anonymousCollectionName}`;
-                // Fallback to a broader public path if the initial one fails (as suggested by the console logs)
-                // Note: The previous attempt already used this path, but the following function will simplify the path logic.
-            }
-            
-            // Re-implementing getFirestoreDataPath logic for clarity and robustness
-            dataCollectionPath = getFirestoreDataPath(userId);
-            console.log(`Attempting to listen to path: ${dataCollectionPath}`);
-
-
-            const portfolioDocRef = doc(db, dataCollectionPath, FIRESTORE_DATA_DOC);
+            // Listen to Portfolio Data
+            const portfolioDocRef = getFirestoreDocRef(FIRESTORE_DATA_DOC);
             unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
+                    console.log("Portfolio Data loaded.");
                 } else {
-                    setDoc(portfolioDocRef, portfolioData);
+                    // Create initial document if it doesn't exist
+                    setDoc(portfolioDocRef, portfolioData).catch(e => console.error("Error creating initial portfolio doc:", e));
                 }
-                isInitialDataLoaded = true; // Set flag after first data load
+                isInitialDataLoaded = true;
                 updateDisplay();
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
             }, (error) => console.error("Error listening to portfolio:", error));
 
-            const uiStateDocRef = doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC);
+            // Listen to UI State
+            const uiStateDocRef = getFirestoreDocRef(FIRESTORE_UI_STATE_DOC);
             unsubscribeUiState = onSnapshot(uiStateDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     uiState = docSnap.data();
+                    console.log("UI State loaded.");
                 }
-            });
+            }, (error) => console.error("Error listening to UI state:", error));
 
-            const priceCacheDocRef = doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC);
+            // Listen to Price Cache
+            const priceCacheDocRef = getFirestoreDocRef(FIRESTORE_PRICE_CACHE_DOC);
             unsubscribePriceCache = onSnapshot(priceCacheDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     priceCache = docSnap.data();
+                    console.log("Price Cache loaded.");
                 }
-            });
+            }, (error) => console.error("Error listening to price cache:", error));
         }
 
         // --- MODALS (Confirmation, Firebase Config, Edit, etc.) ---
@@ -674,8 +688,8 @@
 
         window.resetFirebaseConnection = function() {
             showConfirmationModal("Are you sure? This will clear your current connection settings and reload the page.", () => {
-                 localStorage.removeItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
-                 location.reload();
+                localStorage.removeItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
+                location.reload();
             });
         }
 
@@ -691,6 +705,7 @@
                 const price = parseFloat(t.price);
                 const type = t.transactionType.toUpperCase();
 
+                // Group by Symbol, Account Type, and Platform
                 const positionKey = `${t.symbol}|||${t.accountType}|||${t.platform}`;
 
                 if (type === 'BUY') {
@@ -706,8 +721,9 @@
                         const lot = taxLots[positionKey][0];
                         const sharesFromLot = Math.min(sharesToSell, lot.shares);
 
-                        if (t.accountType !== WATCHLIST_ACCOUNT_TYPE) {
-                             realizedGains += sharesFromLot * (price - lot.price);
+                        if (t.accountType !== WATCHLIST_ACCOUNT_TYPE && !isCashEquivalentType(t.type)) {
+                            // Calculate realized gains only for non-watchlist and non-cash equity sales
+                            realizedGains += sharesFromLot * (price - lot.price);
                         }
 
                         lot.shares -= sharesFromLot;
@@ -742,6 +758,7 @@
                             totalShares: totalShares,
                             totalCost: totalCost,
                             averagePurchasePrice: totalCost / totalShares,
+                            // Filter transactions for this specific position (symbol/account/platform)
                             transactions: portfolioData.transactions.filter(t => t.symbol === symbol && t.accountType === accountType && t.platform === platform)
                         };
                     }
@@ -752,7 +769,8 @@
 
             const calculatedHoldings = Object.values(holdings).map(h => {
                 const cachedInfo = priceCache[h.symbol] || {};
-                if (isCashEquivalentType(h.type)) {
+                
+                if (isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL) {
                     h.currentPrice = 1.0;
                 }
                 else if (cachedInfo.manualPrice != null && cachedInfo.manualPrice >= 0) {
@@ -774,9 +792,9 @@
 
             const dailySnapshots = {};
             const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            const allSymbols = [...new Set(sorted.filter(t => t.symbol && !t.symbol.startsWith('_CASH')).map(t => t.symbol))];
+            const allSymbols = [...new Set(sorted.filter(t => t.symbol).map(t => t.symbol))];
 
-            if (allSymbols.length === 0 && sorted.every(t => t.symbol.startsWith('_CASH'))) return [];
+            if (allSymbols.length === 0) return [];
 
             const firstDate = new Date(sorted[0].date);
             const today = new Date();
@@ -789,31 +807,55 @@
                 let dailyTotalValue = 0;
                 const tempHoldings = {};
 
-                transactionsUpToDate.forEach(t => {
+                // Re-calculate holdings up to this date
+                const transactionsForDate = [...transactionsUpToDate].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+                const lotTracker = {}; // Uses same FIFO logic as main calculation
+
+                transactionsForDate.forEach(t => {
                     const shares = parseFloat(t.shares) || 0;
                     const price = parseFloat(t.price) || 0;
                     const type = t.transactionType.toUpperCase();
                     if (!t.symbol) return;
-                    const symbol = t.symbol.toUpperCase();
-
-                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0, totalCost: 0 };
+                    const positionKey = `${t.symbol}|||${t.accountType}|||${t.platform}`;
 
                     if (type === 'BUY') {
-                        tempHoldings[symbol].totalShares += shares;
-                        tempHoldings[symbol].totalCost += shares * price;
+                        if (!lotTracker[positionKey]) lotTracker[positionKey] = [];
+                        lotTracker[positionKey].push({ shares, price });
                     } else if (type === 'SELL') {
-                        if (tempHoldings[symbol].totalShares > 0) { // Avoid division by zero
-                            const avgCost = tempHoldings[symbol].totalCost / tempHoldings[symbol].totalShares;
-                            tempHoldings[symbol].totalCost -= shares * avgCost;
+                        let sharesToSell = shares;
+                        if (!lotTracker[positionKey]) lotTracker[positionKey] = [];
+                        
+                        while (sharesToSell > 0 && lotTracker[positionKey].length > 0) {
+                            const lot = lotTracker[positionKey][0];
+                            const sharesFromLot = Math.min(sharesToSell, lot.shares);
+                            lot.shares -= sharesFromLot;
+                            sharesToSell -= sharesFromLot;
+                            if (lot.shares < 0.0001) lotTracker[positionKey].shift();
                         }
-                        tempHoldings[symbol].totalShares -= shares;
                     }
                 });
+                
+                // Calculate market value based on current cache prices
+                Object.entries(lotTracker).forEach(([positionKey, lots]) => {
+                    const totalShares = lots.reduce((sum, lot) => sum + lot.shares, 0);
+                    const totalCost = lots.reduce((sum, lot) => sum + (lot.shares * lot.price), 0);
+                    
+                    if (totalShares > 0.00001) {
+                        const [symbol] = positionKey.split('|||');
+                        
+                        let price;
+                        const firstTransaction = transactionsForDate.find(t => t.symbol === symbol);
+                        const assetType = firstTransaction ? firstTransaction.type : 'Unknown';
 
-                Object.entries(tempHoldings).forEach(([symbol, holding]) => {
-                    const avgCost = (holding.totalShares > 0) ? (holding.totalCost / holding.totalShares) : 0;
-                    const price = priceCache[symbol]?.currentPrice || avgCost;
-                    dailyTotalValue += holding.totalShares * price;
+                        if (isCashEquivalentType(assetType) || symbol === INTERNAL_CASH_SYMBOL) {
+                            price = 1.0;
+                        } else {
+                            // Use current cached price for portfolio history
+                            price = priceCache[symbol]?.currentPrice || totalCost / totalShares || 0;
+                        }
+                        
+                        dailyTotalValue += totalShares * price;
+                    }
                 });
 
                 dailySnapshots[dateString] = dailyTotalValue;
@@ -829,34 +871,19 @@
             return JSON.parse(JSON.stringify(obj));
         }
 
-        function getFirestoreDataPath(currentUserId) {
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            // Check if the user is signed in and NOT anonymous
-            if (auth.currentUser && !auth.currentUser.isAnonymous) {
-                // Private user path (for authenticated users)
-                return `artifacts/${appId}/users/${currentUserId}/data`;
-            } else {
-                // Anonymous user: Use a simple public collection name, which typically has looser permissions.
-                // We'll use the user ID as the document ID inside the 'portfolios' collection.
-                const publicCollectionName = 'user_portfolios';
-                return `artifacts/${appId}/public/data/${publicCollectionName}`;
-            }
-        }
-
         async function saveDataToFirestore() {
             if (!isInitialDataLoaded || !userId) {
                 console.warn("Data not fully loaded yet or userId is missing. Save operation skipped.");
                 return;
             }
+            updateDataStatus('loading');
             try {
-                const dataCollectionPath = getFirestoreDataPath(userId);
-                const docId = (auth.currentUser && !auth.currentUser.isAnonymous) ? FIRESTORE_DATA_DOC : userId;
-
                 const batch = writeBatch(db);
 
-                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
-                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
-                batch.set(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
+                // Use the proper doc references
+                batch.set(getFirestoreDocRef(FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
+                batch.set(getFirestoreDocRef(FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
+                batch.set(getFirestoreDocRef(FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
 
                 await batch.commit();
                 updateDataStatus(true);
@@ -874,12 +901,12 @@
                 uiState = { expandedGroups: {}, expandedTransactions: {} };
                 priceCache = {};
 
-                const dataCollectionPath = getFirestoreDataPath(userId);
-                const docId = (auth.currentUser && !auth.currentUser.isAnonymous) ? FIRESTORE_DATA_DOC : userId;
-
-                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_DATA_DOC), portfolioData);
-                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_UI_STATE_DOC), uiState);
-                await setDoc(doc(db, dataCollectionPath, docId, 'state', FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                // Use the proper doc references for clearing
+                const batch = writeBatch(db);
+                batch.set(getFirestoreDocRef(FIRESTORE_DATA_DOC), portfolioData);
+                batch.set(getFirestoreDocRef(FIRESTORE_UI_STATE_DOC), uiState);
+                batch.set(getFirestoreDocRef(FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                await batch.commit();
 
                 updateDisplay();
                 updateDataStatus(false, "Data cleared");
@@ -890,7 +917,7 @@
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
-            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r0opk0';
+            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
             ALPHA_VANTAGE_API_KEY = localStorage.getItem(ALPHA_VANTAGE_API_KEY_STORAGE) || '0ZPH51BZ2N5O9G8Q';
         }
 
@@ -922,7 +949,7 @@
         }
 
         async function fetchPrice(holding) {
-            if (isCashEquivalentType(holding.type)) {
+            if (isCashEquivalentType(holding.type) || holding.symbol === INTERNAL_CASH_SYMBOL) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
             }
             let priceData = await fetchPriceFromFinnhub(holding.symbol);
@@ -952,7 +979,7 @@
             const now = Date.now();
 
             for (const holding of currentHoldings) {
-                if (holding.type === 'Manual') continue;
+                if (holding.type === 'Manual' || holding.symbol === INTERNAL_CASH_SYMBOL) continue;
 
                 const cached = priceCache[holding.symbol];
 
@@ -1018,7 +1045,9 @@
                     }
                     isSymbolValidated = true;
                 } else {
-                    await validateWithAlphaVantage(symbol);
+                    statusEl.textContent = '❌';
+                    statusEl.title = 'Symbol not found on Alpha Vantage.';
+                    isSymbolValidated = false;
                 }
             } catch (error) {
                 console.error("Alpha Vantage validation error:", error);
@@ -1043,14 +1072,15 @@
                 statusEl.textContent = '...';
                 statusEl.title = 'Validating...';
 
+                // Check for generic money market pattern or internal cash symbol
                 const mmRegex = /^[A-Z]{3,5}XX$/;
-                if (mmRegex.test(symbol)) {
+                if (mmRegex.test(symbol) || symbol === INTERNAL_CASH_SYMBOL) {
                     statusEl.textContent = '✅';
-                    statusEl.title = `Validated: ${symbol} (Money Market)`;
+                    statusEl.title = `Validated: ${symbol} (Money Market/Cash)`;
                     document.getElementById('type').value = 'Money Market';
                     isSymbolValidated = true;
                     return;
-                 }
+                }
 
                 if (!FINNHUB_API_KEY) {
                     statusEl.textContent = '⚠️';
@@ -1089,6 +1119,7 @@
                         }
                         isSymbolValidated = true;
                     } else {
+                        // Fallback to Alpha Vantage for Mutual Funds/less common symbols
                         await validateWithAlphaVantage(symbol);
                     }
                 } catch (error) {
@@ -1098,7 +1129,7 @@
                     isSymbolValidated = false;
                 }
             }, 750);
-         }
+        }
 
         // --- Form Interaction Logic ---
         function updateTransactionFields(editedField) {
@@ -1143,12 +1174,18 @@
                 return;
             }
 
-            if ((transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND' || transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') && !symbol) {
+            if ((transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND') && !symbol) {
                  showConfirmationModal('Symbol is required for this transaction type.', null);
                  return;
             }
 
-            if (type !== 'Manual' && !isSymbolValidated && accountType !== '529 College Saving' && (transactionType === 'BUY' || transactionType === 'SELL' || transactionType === 'DIVIDEND')) {
+            // Skip validation check for cash transactions, as they use internal symbols
+            if (transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') {
+                proceedWithTransactionLogging();
+                return;
+            }
+
+            if (type !== 'Manual' && !isSymbolValidated && accountType !== '529 College Saving') {
                 showConfirmationModal(
                     `Symbol "${symbol}" is not validated. This could be due to API limits or an untracked asset. Do you want to log this transaction anyway?`,
                     () => { // onConfirm
@@ -1171,7 +1208,6 @@
             const type = document.getElementById('type').value;
 
             const currentHoldings = calculateHoldingsAndCash();
-
             const transactionsToAdd = [];
             let mainTransaction = {
                 id: Date.now(),
@@ -1185,88 +1221,89 @@
                 const amount = parseFloat(document.getElementById('amount').value);
                 if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid amount.", null); return; }
 
-                const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-
                 mainTransaction.transactionType = (transactionType === 'DEPOSIT') ? 'BUY' : 'SELL';
-                mainTransaction.symbol = symbol;
-                mainTransaction.name = document.getElementById('name').value.trim() || symbol;
+                mainTransaction.symbol = INTERNAL_CASH_SYMBOL; // Use internal symbol for cash
+                mainTransaction.name = (transactionType === 'DEPOSIT') ? 'Cash Deposit' : 'Cash Withdrawal';
                 mainTransaction.shares = amount; // For cash funds, amount = shares
                 mainTransaction.price = 1;
-                mainTransaction.type = 'CASH'; // Assume deposits/withdrawals are cash-equivalents
+                mainTransaction.type = 'CASH';
+                mainTransaction.dividend = 0;
                 transactionsToAdd.push(mainTransaction);
 
             } else { // BUY, SELL, DIVIDEND
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-                const shares = parseFloat(document.getElementById('shares').value);
-                const price = parseFloat(document.getElementById('price').value);
-                const cost = shares * price;
-
-                if ((transactionType === 'BUY' || transactionType === 'SELL') && (!symbol || isNaN(shares) || shares <= 0 || isNaN(price) || price < 0)) {
-                    showConfirmationModal("Symbol, Shares, and Price must be valid positive numbers.", null); return;
-                }
-
+                
                 if(transactionType === 'DIVIDEND') {
                      const amount = parseFloat(document.getElementById('amount').value);
                      if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid dividend amount.", null); return; }
 
-                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && isCashEquivalentType(h.type));
-                     if (cashFund) {
-                         mainTransaction.transactionType = 'BUY';
-                         mainTransaction.symbol = cashFund.symbol;
-                         mainTransaction.name = `Dividend from ${document.getElementById('symbol').value.trim().toUpperCase()}`;
-                         mainTransaction.shares = amount;
-                         mainTransaction.price = 1;
-                         mainTransaction.type = cashFund.type;
-                         transactionsToAdd.push(mainTransaction);
-                     } else {
-                         showConfirmationModal(`No cash/money market fund found in ${accountType} on ${platform} to deposit dividend. Please add a cash fund (e.g., SPAXX) first.`, null);
-                         return;
-                     }
+                     // Dividends are assumed to be deposited into the cash fund for that account/platform
+                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL));
+                     
+                     mainTransaction.transactionType = 'BUY';
+                     mainTransaction.symbol = cashFund ? cashFund.symbol : INTERNAL_CASH_SYMBOL;
+                     mainTransaction.name = `Dividend from ${symbol} (to ${mainTransaction.symbol})`;
+                     mainTransaction.shares = amount;
+                     mainTransaction.price = 1;
+                     mainTransaction.type = cashFund ? cashFund.type : 'CASH';
+                     mainTransaction.dividend = 0;
+                     transactionsToAdd.push(mainTransaction);
+
                 } else { // BUY or SELL
+                    const shares = parseFloat(document.getElementById('shares').value);
+                    const price = parseFloat(document.getElementById('price').value);
+                    const cost = shares * price;
+                    
+                    if ((transactionType === 'BUY' || transactionType === 'SELL') && (!symbol || isNaN(shares) || shares <= 0 || isNaN(price) || price < 0)) {
+                        showConfirmationModal("Symbol, Shares, and Price must be valid positive numbers.", null); return;
+                    }
+
                     Object.assign(mainTransaction, {
                         symbol: symbol, name: document.getElementById('name').value.trim() || symbol, shares: shares, price: price,
                         dividend: parseFloat(document.getElementById('dividend').value) || 0, type: type
                     });
                     transactionsToAdd.push(mainTransaction);
-                }
+                    
+                    // Logic to automatically account for cash settlement
+                    const isMoneyMarket = isCashEquivalentType(type) || symbol === INTERNAL_CASH_SYMBOL;
+                    const isRetirementOr529 = accountType === '401(k)' || accountType === '529 College Saving';
+                    const isNonWatchlistEquityTrade = !isMoneyMarket && !isRetirementOr529 && accountType !== WATCHLIST_ACCOUNT_TYPE;
+                    
+                    // Determine the cash fund symbol for this platform/account
+                    const cashFundInfo = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && (isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL));
+                    const cashSymbol = cashFundInfo ? cashFundInfo.symbol : INTERNAL_CASH_SYMBOL;
+                    const cashName = cashFundInfo ? cashFundInfo.name : 'Cash Equivalent';
+                    const cashType = cashFundInfo ? cashFundInfo.type : 'CASH';
 
-                const isMoneyMarket = isCashEquivalentType(type);
-                const isRetirementOr529 = accountType === '401(k)' || accountType === '529 College Saving';
+                    if (transactionType === 'BUY' && isNonWatchlistEquityTrade) {
+                        const fundingAccountType = accountType;
+                        const fundingPlatform = platform;
 
-                if (transactionType === 'BUY' && !isMoneyMarket && !isRetirementOr529 && accountType !== WATCHLIST_ACCOUNT_TYPE) {
-                    const fundingAccountType = accountType;
-                    const fundingPlatform = platform;
+                        const cashAndMoneyMarketHoldings = currentHoldings.filter(h =>
+                             h.accountType === fundingAccountType &&
+                             h.platform === fundingPlatform &&
+                             (isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL)
+                        );
+                        const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
 
-                    const cashAndMoneyMarketHoldings = currentHoldings.filter(h =>
-                         h.accountType === fundingAccountType &&
-                         h.platform === fundingPlatform &&
-                        isCashEquivalentType(h.type)
-                    );
-                    const availableCash = cashAndMoneyMarketHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
+                        if (availableCash < cost) {
+                            showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${fundingPlatform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
+                            return;
+                        }
 
-                    if (availableCash < cost) {
-                        showConfirmationModal(`Transaction Failed: Insufficient buying power in ${fundingAccountType} on ${fundingPlatform}. This purchase costs ${formatCurrency(cost)}, but you only have ${formatCurrency(availableCash)} available. Please log a DEPOSIT transaction first.`, null);
-                        return;
-                     }
-
-                    const sourceFund = cashAndMoneyMarketHoldings.sort((a,b) => b.totalShares - a.totalShares)[0];
-                    if (sourceFund) {
-                         transactionsToAdd.unshift({ // Add SELL to the beginning of the list to be processed first
+                         transactionsToAdd.unshift({ // Add SELL (cash out) to be processed before the BUY (equity)
                             id: Date.now() - 1,
                             transactionType: 'SELL', date: mainTransaction.date, accountType: fundingAccountType,
-                            platform: sourceFund.platform, symbol: sourceFund.symbol, name: sourceFund.name, shares: cost, price: 1, type: sourceFund.type
+                            platform: fundingPlatform, symbol: cashSymbol, name: cashName, shares: cost, price: 1, type: cashType
+                        });
+                    }
+                     else if(transactionType === 'SELL' && isNonWatchlistEquityTrade) {
+                         transactionsToAdd.push({ // Add BUY (cash in)
+                            id: Date.now() + 1, transactionType: 'BUY', date: mainTransaction.date, accountType: accountType,
+                            platform: platform, symbol: cashSymbol, name: cashName, shares: cost, price: 1, type: cashType
                         });
                     }
                 }
-                 if(transactionType === 'SELL' && !isMoneyMarket && !isRetirementOr529) {
-                     const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && isCashEquivalentType(h.type));
-                     if (cashFund) {
-                         transactionsToAdd.push({
-                            id: Date.now() + 1, transactionType: 'BUY', date: mainTransaction.date, accountType: accountType,
-                            platform: cashFund.platform, symbol: cashFund.symbol, name: cashFund.name, shares: cost, price: 1, type: cashFund.type
-                         });
-                     }
-                 }
             }
 
             portfolioData.transactions.push(...transactionsToAdd);
@@ -1295,6 +1332,7 @@
             document.getElementById('price').value = '';
             document.getElementById('amount').value = '';
             document.getElementById('totalAmount').value = '';
+            document.getElementById('dividend').value = '';
             document.getElementById('symbolValidationStatus').textContent = '';
         }
 
@@ -1317,7 +1355,7 @@
              document.getElementById('addFormContent').style.display = isAddFormExpanded ? 'block' : 'none';
              document.getElementById('addFormToggleIcon').innerHTML = isAddFormExpanded ? '&#9660;' : '&#9658;';
              // This is local-only state, not synced.
-        }
+		}
 
         function openSettingsModal() {
             document.getElementById('finnhubApiKeyInput').value = FINNHUB_API_KEY;
@@ -1367,23 +1405,33 @@
         function toggleTransactionFields() {
             const type = document.getElementById('transactionType').value;
             const cashFields = document.querySelectorAll('.cash-field');
-            const transactionFields = document.querySelectorAll('.transaction-field');
+            const symbolFields = [document.getElementById('symbol').parentElement, document.getElementById('name').parentElement, document.getElementById('type').parentElement];
             const buySellFields = document.querySelectorAll('.buy-sell-field');
+            const dividendField = document.getElementById('dividend').parentElement;
+
+
+            // Default: Show all primary fields
+            cashFields.forEach(f => f.style.display = 'none');
+            buySellFields.forEach(f => f.style.display = 'block');
+            symbolFields.forEach(f => f.style.display = 'block');
+            dividendField.style.display = 'block';
 
             if (type === 'DEPOSIT' || type === 'WITHDRAWAL') {
+                // Cash transactions need the amount field, but not shares/price/dividend/symbol/type
                 cashFields.forEach(f => f.style.display = 'block');
                 buySellFields.forEach(f => f.style.display = 'none');
-                document.getElementById('symbol').parentElement.style.display = 'block';
-                document.getElementById('name').parentElement.style.display = 'block';
+                dividendField.style.display = 'none';
+                symbolFields.forEach(f => f.style.display = 'none'); // Hide specific asset fields
             } else if (type === 'DIVIDEND') {
+                // Dividends need the amount field and the symbol/name of the stock that paid it
                 cashFields.forEach(f => f.style.display = 'block');
                 buySellFields.forEach(f => f.style.display = 'none');
-                document.getElementById('symbol').parentElement.style.display = 'block';
-                document.getElementById('name').parentElement.style.display = 'block';
-
+                dividendField.style.display = 'none';
+                symbolFields.forEach(f => f.style.display = 'block');
             } else { // BUY or SELL
+                // Regular trades need shares/price/totalAmount/dividend
                 cashFields.forEach(f => f.style.display = 'none');
-                transactionFields.forEach(f => f.style.display = 'block');
+                buySellFields.forEach(f => f.style.display = 'block');
             }
             handleAccountTypeChange();
         }
@@ -1393,8 +1441,7 @@
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
             const normalized = t.replace(/[^a-z0-9]/g, '');
-            const isCash = normalized === 'cash' || normalized === 'moneymarket' || normalized === 'mm' || t.includes('cash') || (t.includes('money') && t.includes('market'));
-            // console.log(`Checking if '${type}' is cash: ${isCash}`); // Log to check logic
+            const isCash = normalized === 'cash' || normalized === 'moneymarket' || t.includes(INTERNAL_CASH_SYMBOL.toLowerCase()) || normalized === 'mm' || t.includes('cash') || (t.includes('money') && t.includes('market'));
             return isCash;
         }
 
@@ -1411,7 +1458,7 @@
             const filteredHoldings = portfolioHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
 
             filteredHoldings.forEach(h => {
-                const isCashEquivalent = isCashEquivalentType(h.type);
+                const isCashEquivalent = isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL;
 
                 const displayPrice = h.currentPrice || h.averagePurchasePrice;
                 const currentValue = (Number(h.totalShares) || 0) * displayPrice;
@@ -1439,7 +1486,7 @@
             });
 
             const investedAssetsValue = filteredHoldings
-                .filter(h => !isCashEquivalentType(h.type))
+                .filter(h => !isCashEquivalentType(h.type) && h.symbol !== INTERNAL_CASH_SYMBOL)
                 .reduce((sum, h) => {
                     const displayPrice = h.currentPrice || h.averagePurchasePrice;
                     return sum + ((Number(h.totalShares) || 0) * displayPrice);
@@ -1493,6 +1540,9 @@
                 holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
             }
 
+            // Filter out 0-share positions unless they are a Watchlist item or a cash position
+            holdingsToRender = holdingsToRender.filter(h => h.totalShares > 0.00001 || h.accountType === WATCHLIST_ACCOUNT_TYPE);
+
             const groupedByAccount = {};
             holdingsToRender.forEach(h => {
                 if (!groupedByAccount[h.accountType]) groupedByAccount[h.accountType] = [];
@@ -1510,7 +1560,7 @@
 
             if (sortedAccountTypes.length === 0) {
                  container.innerHTML = `<div class="empty-state">📊<p>No holdings found. Log a transaction or clear your filters.</p></div>`;
-                  return;
+                 return;
              }
 
             sortedAccountTypes.forEach(accountType => {
@@ -1524,15 +1574,15 @@
             const totalGroupValue = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice), 0);
 
             const totalGroupInvestedCostBasis = holdings
-                .filter(h => !isCashEquivalentType(h.type))
+                .filter(h => !isCashEquivalentType(h.type) && h.symbol !== INTERNAL_CASH_SYMBOL)
                 .reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
 
-            const investedValue = holdings.filter(h => !isCashEquivalentType(h.type)).reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice)), 0);
+            const investedValue = holdings.filter(h => !isCashEquivalentType(h.type) && h.symbol !== INTERNAL_CASH_SYMBOL).reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice)), 0);
             const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis;
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
 
             let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
-                if (h.currentPrice && h.previousClosePrice > 0 && !isCashEquivalentType(h.type)) {
+                if (h.currentPrice && h.previousClosePrice > 0 && !isCashEquivalentType(h.type) && h.symbol !== INTERNAL_CASH_SYMBOL) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
                 return sum;
@@ -1558,11 +1608,11 @@
             });
 
             const sortedSymbols = Object.keys(holdingsBySymbol).sort((a, b) => {
-                const holdingsA = holdingsBySymbol[a][0];
-                const holdingsB = holdingsBySymbol[b][0];
+                const holdingsA = holdingsBySymbol[a];
+                const holdingsB = holdingsBySymbol[b];
 
-                const isCashA = isCashEquivalentType(holdingsA.type);
-                const isCashB = isCashEquivalentType(holdingsB.type);
+                const isCashA = isCashEquivalentType(holdingsA[0].type) || holdingsA[0].symbol === INTERNAL_CASH_SYMBOL;
+                const isCashB = isCashEquivalentType(holdingsB[0].type) || holdingsB[0].symbol === INTERNAL_CASH_SYMBOL;
 
                 if (isCashA && !isCashB) return -1;
                  if (!isCashA && isCashB) return 1;
@@ -1575,10 +1625,17 @@
             let contentHtml = '';
             sortedSymbols.forEach(symbol => {
                 const symbolHoldings = holdingsBySymbol[symbol];
-                if (isWatchlist || symbolHoldings.length === 1) {
+                if (symbolHoldings.length === 1) { // Single instance (symbol + platform unique)
                     contentHtml += renderIndividualHolding(symbolHoldings[0]);
-                } else {
-                    contentHtml += renderConsolidatedHolding(symbol, groupName, symbolHoldings);
+                } else { // Multiple instances (same symbol, multiple platforms, or Watchlist)
+                    if (isWatchlist) {
+                        symbolHoldings.forEach(h => {
+                             contentHtml += renderIndividualHolding(h);
+                        });
+                    } else {
+                        // Consolidation: Same symbol across multiple platforms within the same account type
+                        contentHtml += renderConsolidatedHolding(symbol, groupName, symbolHoldings);
+                    }
                 }
             });
 
@@ -1606,15 +1663,16 @@
             const displayPrice = h.currentPrice || h.averagePurchasePrice;
             const currentValue = (Number(h.totalShares) || 0) * displayPrice;
 
-            const totalGainLoss = currentValue - h.totalCost;
-            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / totalCost) : 0;
+            const isCash = isCashEquivalentType(h.type) || h.symbol === INTERNAL_CASH_SYMBOL;
+            const totalGainLoss = isCash ? 0 : (currentValue - h.totalCost);
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
             const annualIncome = (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
             let todayGainLossAmount = 0;
             let todayGainLossPercentage = 0;
 
-            if (hasLivePrice && !isCashEquivalentType(h.type) && h.previousClosePrice > 0) {
+            if (hasLivePrice && !isCash && h.previousClosePrice > 0) {
                 const previousCloseValue = h.previousClosePrice * (Number(h.totalShares) || 0);
                 todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0);
                 todayGainLossPercentage = previousCloseValue > 0 ? (todayGainLossAmount / previousCloseValue) : 0;
@@ -1625,6 +1683,8 @@
 
             // Determine classes for daily performance
             const todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
+            const transactionListKey = `${h.symbol}|||${h.accountType}|||${h.platform}`;
+            const isHistoryExpanded = !!uiState.expandedTransactions[transactionListKey];
 
             if (isWatchlist) {
                 headerHtml = `
@@ -1635,8 +1695,11 @@
                     <div class="investment-header-summary">
                         <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
                         <div class="detail-value ${todayGLLabelClass}">
-                           ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
+                            ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
                         </div>
+                    </div>
+                    <div class="investment-header-actions">
+                         <button class="btn btn-danger" onclick="event.stopPropagation(); removeHolding('${h.symbol}', '${h.accountType}', '${h.platform}')">Remove</button>
                     </div>
                 `;
             } else {
@@ -1658,19 +1721,17 @@
                     <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
                     <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && !isCash ? formatCurrency(todayGainLossAmount) : 'N/A'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && !isCash ? formatPercentage(todayGainLossPercentage) : 'N/A'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
+                    <div class="detail-item"><div class="detail-label">Type</div><div class="detail-value">${h.type}</div></div>
                 `;
             }
 
-            const uniqueKey = `${h.symbol}|||${h.accountType}|||${h.platform}`;
-            const isHistoryExpanded = !!uiState.expandedTransactions[uniqueKey];
             const transactionsHtml = `
                 <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
-                    <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
+                    <div class="transaction-history-header" onclick="toggleTransactionHistory('${transactionListKey}')">
                         <h4>Transaction History</h4>
                         <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
                     </div>
@@ -1680,19 +1741,27 @@
                                 <tr><th>Date</th><th>Type</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr>
                             </thead>
                             <tbody>
-                                ${(h.transactions || []).sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
-                                    <tr>
-                                        <td>${t.date}</td>
-                                        <td>${t.transactionType}</td>
-                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
-                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
-                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
-                                        <td class="transaction-actions">
-                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
-                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
+                                ${(h.transactions || []).sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => {
+                                    const tType = t.transactionType.toUpperCase();
+                                    const isAmountTransaction = tType === 'DEPOSIT' || tType === 'WITHDRAWAL' || tType === 'DIVIDEND';
+                                    const sharesDisplay = t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A';
+                                    const priceDisplay = t.price ? formatCurrency(t.price) : 'N/A';
+                                    const totalDisplay = (t.shares && t.price) ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A');
+
+                                    return `
+                                        <tr>
+                                            <td>${t.date}</td>
+                                            <td>${t.transactionType}</td>
+                                            <td>${isAmountTransaction ? '-' : sharesDisplay}</td>
+                                            <td>${isAmountTransaction ? '-' : priceDisplay}</td>
+                                            <td>${totalDisplay}</td>
+                                            <td class="transaction-actions">
+                                                <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
+                                                <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
+                                            </td>
+                                        </tr>
+                                    `
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -1704,7 +1773,7 @@
                     ${headerHtml}
                 </div>
                 <div class="investment-details">
-                   ${detailsHtml}
+                    ${detailsHtml}
                 </div>
                 ${isWatchlist ? '' : transactionsHtml}
             </div>`;
@@ -1749,8 +1818,8 @@
             const isHistoryExpanded = !!uiState.expandedTransactions[uniqueKey];
             const transactionsHtml = `
                 <div class="transaction-history ${isHistoryExpanded ? 'expanded' : ''}">
-                     <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
-                        <h4>Transaction History</h4>
+                    <div class="transaction-history-header" onclick="toggleTransactionHistory('${uniqueKey}')">
+                        <h4>Transaction History (Combined)</h4>
                         <span class="toggle-icon">${isHistoryExpanded ? '&#9660;' : '&#9658;'}</span>
                     </div>
                     <div class="transaction-table-container">
@@ -1759,20 +1828,28 @@
                                <tr><th>Date</th><th>Type</th><th>Platform</th><th>Shares</th><th>Price</th><th>Total</th><th>Actions</th></tr>
                             </thead>
                             <tbody>
-                                ${allTransactions.sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => `
-                                    <tr>
-                                        <td>${t.date}</td>
-                                        <td>${t.transactionType}</td>
-                                        <td>${t.platform}</td>
-                                        <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
-                                        <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
-                                        <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
-                                        <td class="transaction-actions">
-                                            <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
-                                            <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
+                                ${allTransactions.sort((a,b) => new Date(b.date) - new Date(a.date)).map(t => {
+                                    const tType = t.transactionType.toUpperCase();
+                                    const isAmountTransaction = tType === 'DEPOSIT' || tType === 'WITHDRAWAL' || tType === 'DIVIDEND' || t.symbol === INTERNAL_CASH_SYMBOL;
+                                    const sharesDisplay = t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A';
+                                    const priceDisplay = t.price ? formatCurrency(t.price) : 'N/A';
+                                    const totalDisplay = (t.shares && t.price) ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A');
+
+                                    return `
+                                        <tr>
+                                            <td>${t.date}</td>
+                                            <td>${t.transactionType}</td>
+                                            <td>${t.platform}</td>
+                                            <td>${isAmountTransaction ? '-' : sharesDisplay}</td>
+                                            <td>${isAmountTransaction ? '-' : priceDisplay}</td>
+                                            <td>${totalDisplay}</td>
+                                            <td class="transaction-actions">
+                                                <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
+                                                <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
+                                            </td>
+                                        </tr>
+                                    `
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -1800,7 +1877,7 @@
                     </div>
 
                     <div class="purchase-breakdown">
-                        <h4>Purchases in ${accountType}:</h4>
+                        <h4>Breakdown by Platform:</h4>
                         ${purchasesHtml}
                     </div>
 
@@ -1839,11 +1916,14 @@
             fieldsContainer.innerHTML = ''; // Clear old fields
             const type = transaction.transactionType.toUpperCase();
 
-            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
-                const amount = transaction.shares; // For these types, shares IS the amount
+            // Check if it's a cash-based transaction (Deposit, Withdrawal, or Dividend)
+            const isCashBased = type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND' || transaction.symbol === INTERNAL_CASH_SYMBOL;
+
+            if (isCashBased) {
+                const amount = transaction.shares; // For these types, shares IS the amount (price is always 1)
                 fieldsContainer.innerHTML = `
                     <div class="form-group">
-                        <label>Amount</label>
+                        <label>Amount (for Cash/Dividend)</label>
                         <input type="number" id="editAmount" step="any" value="${amount || ''}">
                     </div>
                 `;
@@ -1875,13 +1955,27 @@
             transaction.date = document.getElementById('editTransactionDate').value;
             const type = transaction.transactionType.toUpperCase();
 
-            if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
+            const isCashBased = type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND' || transaction.symbol === INTERNAL_CASH_SYMBOL;
+
+            if (isCashBased) {
                 const amount = parseFloat(document.getElementById('editAmount').value);
+                if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid amount.", null); return; }
                 transaction.shares = amount;
                 transaction.price = 1;
             } else {
-                transaction.shares = parseFloat(document.getElementById('editShares').value);
-                transaction.price = parseFloat(document.getElementById('editPrice').value);
+                const shares = parseFloat(document.getElementById('editShares').value);
+                const price = parseFloat(document.getElementById('editPrice').value);
+                if (isNaN(shares) || shares <= 0 || isNaN(price) || price < 0) { showConfirmationModal("Shares and Price must be valid numbers.", null); return; }
+                transaction.shares = shares;
+                transaction.price = price;
+            }
+
+            // Simple fix for a bug where editing one cash transaction could break the links in others.
+            // We just ensure the ID of the cash fund transaction remains unique and the date is sequential.
+            if (transaction.symbol === INTERNAL_CASH_SYMBOL) {
+                portfolioData.transactions = portfolioData.transactions.filter(t => t.id != transactionId);
+                transaction.id = Date.now();
+                portfolioData.transactions.push(transaction);
             }
 
             await saveDataToFirestore();
@@ -1930,6 +2024,7 @@
             if (!isNaN(newManualPrice) && newManualPrice >= 0) {
                 priceCache[symbol].manualPrice = newManualPrice;
                 priceCache[symbol].currentPrice = newManualPrice;
+                priceCache[symbol].lastFetchTimestamp = Date.now();
             } else {
                 delete priceCache[symbol].manualPrice;
             }
@@ -1971,8 +2066,8 @@
         async function toggleTransactionHistory(key) {
              uiState.expandedTransactions[key] = !uiState.expandedTransactions[key];
              await saveDataToFirestore();
-            updateDisplay();
-         }
+             updateDisplay();
+          }
 
         // --- Utility and Charting Functions ---
         function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
@@ -1998,7 +2093,7 @@
         async function updateUserName() {
              portfolioData.username = document.getElementById('userNameInput').value.trim();
              await saveDataToFirestore();
-         }
+          }
 
         function updateUserNameDisplay() {
             const el = document.getElementById('userNameDisplay');
@@ -2033,7 +2128,7 @@
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => {
-                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
+                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
                  if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
 
@@ -2079,7 +2174,7 @@
              autoRefreshIntervalId = setInterval(() => refreshAllPrices(false), autoRefreshIntervalSeconds * 1000);
              updateAutoRefreshButton();
              saveAutoRefreshState();
-         }
+          }
         function stopAutoRefresh() { if (autoRefreshIntervalId !== null) { clearInterval(autoRefreshIntervalId); autoRefreshIntervalId = null; } isAutoRefreshEnabled = false; updateAutoRefreshButton(); saveAutoRefreshState(); }
         function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
         async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { console.error(e); return { currentPrice: null, previousClosePrice: null }; } }
@@ -2109,7 +2204,7 @@
                  console.error(e);
                 return { currentPrice: null, previousClosePrice: null };
              }
-         }
+          }
 
         function updateDataStatus(isSaved, msg = "") {
              const el = document.getElementById('dataStatus');
@@ -2122,7 +2217,7 @@
                 el.textContent = `⚠️ Error: ${msg}`; el.classList.add('error');
              } else {
                 el.textContent = '...';
-            }
+             }
         }
 
         function filterChart(period, portfolioHistory) {
@@ -2164,7 +2259,7 @@
 
         function triggerCsvImport() {
              document.getElementById('csvFileInput').click();
-         }
+          }
 
         function handleCsvImport(e) {
             const file = e.target.files[0];
@@ -2206,7 +2301,7 @@
                     });
                 },
                 error: (err) => showConfirmationModal(`A critical error occurred during import: ${err.message}`, null),
-                finally: () => e.target.value = null
+                 finally: () => e.target.value = null
              });
         }
 
@@ -2217,7 +2312,7 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions());
+        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions(calculateHoldingsAndCash()));
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
         window.validateSymbol = validateSymbol;
@@ -2442,7 +2537,7 @@
 				<div class="investment-group-header" onclick="toggleAddForm()" style="margin: -25px -25px 20px -25px; border-radius: 15px 15px 0 0; border-left-color: #27ae60; width: calc(100% + 50px);">
 					<div class="group-summary">
                         <div class="group-title">Add New Investment <span class="account-badge" style="background: #27ae60;">Form</span></div>
-                    </div>
+					</div>
 					<span class="toggle-icon" id="addFormToggleIcon">&#9658;</span>
 				</div>
 
@@ -2493,13 +2588,13 @@
                              <option value="Stock">Stock</option>
                              <option value="ETF">ETF</option>
                              <option value="Market Index">Market Index</option>
-                            <option value="401k">401k</option>
+                             <option value="401k">401k</option>
                              <option value="Bond">Bond</option>
                              <option value="Mutual Fund">Mutual Fund</option>
                              <option value="Cryptocurrency">Cryptocurrency</option>
                              <option value="Money Market">Money Market</option>
                              <option value="Manual">Manual (No Price Fetch)</option>
-                            <option value="Other">Other</option>
+                             <option value="Other">Other</option>
                              <option value="CASH">CASH</option>
                          </select>
                      </div>
