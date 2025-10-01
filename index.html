@@ -549,11 +549,23 @@
             if (unsubscribeUiState) unsubscribeUiState();
             if (unsubscribePriceCache) unsubscribePriceCache();
 
-            // Use the standard Firestore path structure for private user data
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            const userPortfolioPath = `artifacts/${appId}/users/${userId}/data`;
+            let dataCollectionPath;
 
-            const portfolioDocRef = doc(db, userPortfolioPath, FIRESTORE_DATA_DOC);
+            // FIX: Use public path for anonymous users (when not signed in with a provider)
+            if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                // Authenticated (Google, etc.) user: Use private user path
+                dataCollectionPath = `artifacts/${appId}/users/${userId}/data`;
+                console.log(`Using private path: ${dataCollectionPath}`);
+            } else {
+                // Anonymous user: Use public path to ensure read/write permissions
+                // Note: The userId is still provided by Firebase even for anonymous users
+                const anonymousCollectionName = `user_portfolio_${userId}`;
+                dataCollectionPath = `artifacts/${appId}/public/data/${anonymousCollectionName}`;
+                console.log(`Using public anonymous path: ${dataCollectionPath}`);
+            }
+
+            const portfolioDocRef = doc(db, dataCollectionPath, FIRESTORE_DATA_DOC);
             unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
@@ -565,14 +577,14 @@
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
             }, (error) => console.error("Error listening to portfolio:", error));
 
-            const uiStateDocRef = doc(db, userPortfolioPath, FIRESTORE_UI_STATE_DOC);
+            const uiStateDocRef = doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC);
             unsubscribeUiState = onSnapshot(uiStateDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     uiState = docSnap.data();
                 }
             });
 
-            const priceCacheDocRef = doc(db, userPortfolioPath, FIRESTORE_PRICE_CACHE_DOC);
+            const priceCacheDocRef = doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC);
             unsubscribePriceCache = onSnapshot(priceCacheDocRef, (docSnap) => {
                 if (docSnap.exists()) {
                     priceCache = docSnap.data();
@@ -812,19 +824,31 @@
             return JSON.parse(JSON.stringify(obj));
         }
 
+        function getFirestoreDataPath(currentUserId) {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            // Check if the user is signed in and NOT anonymous
+            if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                // Private user path (for authenticated users)
+                return `artifacts/${appId}/users/${currentUserId}/data`;
+            } else {
+                // Public path (for anonymous users, as they usually don't have write permissions to the 'users' path)
+                const anonymousCollectionName = `user_portfolio_${currentUserId}`;
+                return `artifacts/${appId}/public/data/${anonymousCollectionName}`;
+            }
+        }
+
         async function saveDataToFirestore() {
             if (!isInitialDataLoaded || !userId) {
                 console.warn("Data not fully loaded yet or userId is missing. Save operation skipped.");
                 return;
             }
             try {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userPortfolioPath = `artifacts/${appId}/users/${userId}/data`;
+                const dataCollectionPath = getFirestoreDataPath(userId);
                 const batch = writeBatch(db);
 
-                batch.set(doc(db, userPortfolioPath, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
-                batch.set(doc(db, userPortfolioPath, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
-                batch.set(doc(db, userPortfolioPath, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
+                batch.set(doc(db, dataCollectionPath, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
+                batch.set(doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
+                batch.set(doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
 
                 await batch.commit();
                 updateDataStatus(true);
@@ -842,12 +866,11 @@
                 uiState = { expandedGroups: {}, expandedTransactions: {} };
                 priceCache = {};
 
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const userPortfolioPath = `artifacts/${appId}/users/${userId}/data`;
+                const dataCollectionPath = getFirestoreDataPath(userId);
 
-                await setDoc(doc(db, userPortfolioPath, FIRESTORE_DATA_DOC), portfolioData);
-                await setDoc(doc(db, userPortfolioPath, FIRESTORE_UI_STATE_DOC), uiState);
-                await setDoc(doc(db, userPortfolioPath, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                await setDoc(doc(db, dataCollectionPath, FIRESTORE_DATA_DOC), portfolioData);
+                await setDoc(doc(db, dataCollectionPath, FIRESTORE_UI_STATE_DOC), uiState);
+                await setDoc(doc(db, dataCollectionPath, FIRESTORE_PRICE_CACHE_DOC), priceCache);
 
                 updateDisplay();
                 updateDataStatus(false, "Data cleared");
@@ -1575,7 +1598,7 @@
             const currentValue = (Number(h.totalShares) || 0) * displayPrice;
 
             const totalGainLoss = currentValue - h.totalCost;
-            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
+            const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / totalCost) : 0;
             const annualIncome = (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
