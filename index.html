@@ -1668,8 +1668,8 @@
                         ${purchasesHtml}
                     </div>
                     <div class="consolidated-footer">
-                        <div class="summary-item"><span>Overall P/L:</span> <span class="${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
+                        <div class="summary-item"><span>Overall P/L:</span> <span class="detail-value ${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
                     </div>
                        ${transactionsHtml}
                 </div>
@@ -2405,3 +2405,4 @@
     </div>
 </body>
 </html>
+
