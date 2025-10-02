@@ -2525,22 +2525,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
-I did a manual mutual fund refresh button, but It didn't refresh the mutual funds that i have in my portfolio.
-Here's the output from inspect:
-livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
-fetchPrice @ livestocktracking.github.io/:849Understand this warning
-livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
-fetchPriceFromAlphaVantage @ livestocktracking.github.io/:2025Understand this warning
-livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
-fetchPrice @ livestocktracking.github.io/:849
-await in fetchPrice
-refreshMutualFunds @ livestocktracking.github.io/:2159
-await in refreshMutualFunds
-onclick @ livestocktracking.github.io/:2368Understand this warning
-livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
-
-1. How did you detect the mutual funds among stocks and etfs?
-2. the 2 mutual funds that i have are FXAIX and FSELX, at least refetch those if button is pressed.
-
-
