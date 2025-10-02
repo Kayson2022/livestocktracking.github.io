@@ -878,9 +878,8 @@
                 if (holding.type === 'Manual') continue;
 
                 const cached = priceCache[holding.symbol];
-                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
-
+                const staleTime = (holding.type === 'Stock' || holding.type === 'ETF') ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
+                
                 if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Using fresh cached price for ${holding.symbol}`);
                     continue;
@@ -2180,6 +2179,7 @@
             await saveDataToFirestore(); // Save the updated prices
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
+            updateDisplay(); // Re-render the UI with new prices
         }
 
 
