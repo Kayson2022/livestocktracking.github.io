@@ -1777,14 +1777,17 @@
             const positionKey = `${symbol}|||${accountType}|||${platform}`;
             const holding = currentHoldings.find(h => `${h.symbol}|||${h.accountType}|||${h.platform}` === positionKey);
             if (!holding) return;
+
             const modal = document.getElementById('editHoldingModal');
             document.getElementById('editHoldingSymbol').value = symbol;
             document.getElementById('editHoldingAccountTypeKey').value = accountType;
             document.getElementById('editHoldingPlatformKey').value = platform;
             document.getElementById('editHoldingSymbolDisplay').value = `${symbol} (${accountType} - ${platform})`;
-
+            
+            document.getElementById('editHoldingType').value = holding.type || '';
             document.getElementById('editHoldingTotalShares').value = holding.totalShares;
             document.getElementById('editHoldingAvgPrice').value = holding.averagePurchasePrice;
+            
             const manualPriceInput = document.getElementById('editHoldingManualPrice');
             const cachedInfo = priceCache[symbol] || {};
             manualPriceInput.value = cachedInfo.manualPrice || '';
@@ -1800,8 +1803,11 @@
             const symbol = document.getElementById('editHoldingSymbol').value;
             const accountType = document.getElementById('editHoldingAccountTypeKey').value;
             const platform = document.getElementById('editHoldingPlatformKey').value;
+            const newType = document.getElementById('editHoldingType').value;
+
             const currentHoldings = calculateHoldingsAndCash();
             const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
+            
             const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
             const newAvgPrice = parseFloat(document.getElementById('editHoldingAvgPrice').value);
             const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
@@ -1817,6 +1823,8 @@
             if (holding) {
                 const sharesChanged = Math.abs(newTotalShares - holding.totalShares) > 0.00001;
                 const priceChanged = Math.abs(newAvgPrice - holding.averagePurchasePrice) > 0.00001;
+                const typeChanged = newType !== holding.type;
+
                 if (sharesChanged || priceChanged) {
                     const confirmationMessage = `This will replace all existing transactions for ${symbol} in this position with a single summary transaction. Are you sure?`;
                     showConfirmationModal(confirmationMessage, async () => {
@@ -1830,15 +1838,23 @@
                             shares: newTotalShares,
                             price: newAvgPrice,
                             dividend: holding.dividend,
-                            type: holding.type,
+                            type: newType, // Use the new type
                             accountType: accountType,
                             platform: platform,
                         };
                         portfolioData.transactions = [...otherTransactions, summaryTransaction];
                         await saveDataToFirestore();
                     });
+                } else if (typeChanged) {
+                     // If only the type changed, update all associated transactions
+                    portfolioData.transactions.forEach(t => {
+                        if (t.symbol === symbol && t.accountType === accountType && t.platform === platform) {
+                            t.type = newType;
+                        }
+                    });
+                    await saveDataToFirestore();
                 } else {
-                    await saveDataToFirestore(); // Save manual price change
+                    await saveDataToFirestore(); // Only save manual price change if nothing else was modified
                 }
             }
             closeHoldingEditModal();
@@ -2285,6 +2301,22 @@
                 <label>Symbol</label>
                 <input type="text" id="editHoldingSymbolDisplay" disabled>
             </div>
+            <div class="form-group">
+                <label for="editHoldingType">Investment Type</label>
+                <select id="editHoldingType">
+                    <option value="Stock">Stock</option>
+                    <option value="ETF">ETF</option>
+                    <option value="Market Index">Market Index</option>
+                    <option value="401k">401k</option>
+                    <option value="Bond">Bond</option>
+                    <option value="Mutual Fund">Mutual Fund</option>
+                    <option value="Cryptocurrency">Cryptocurrency</option>
+                    <option value="Money Market">Money Market</option>
+                    <option value="Manual">Manual (No Price Fetch)</option>
+                    <option value="Other">Other</option>
+                    <option value="CASH">CASH</option>
+                </select>
+            </div>
              <div class="form-group">
                 <label for="editHoldingTotalShares">Total Shares</label>
                 <input type="number" id="editHoldingTotalShares" step="any" min="0">
@@ -2493,4 +2525,21 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
+I did a manual mutual fund refresh button, but It didn't refresh the mutual funds that i have in my portfolio.
+Here's the output from inspect:
+livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
+fetchPrice @ livestocktracking.github.io/:849Understand this warning
+livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
+fetchPriceFromAlphaVantage @ livestocktracking.github.io/:2025Understand this warning
+livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
+fetchPrice @ livestocktracking.github.io/:849
+await in fetchPrice
+refreshMutualFunds @ livestocktracking.github.io/:2159
+await in refreshMutualFunds
+onclick @ livestocktracking.github.io/:2368Understand this warning
+livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
+
+1. How did you detect the mutual funds among stocks and etfs?
+2. the 2 mutual funds that i have are FXAIX and FSELX, at least refetch those if button is pressed.
 
