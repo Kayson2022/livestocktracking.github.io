@@ -707,8 +707,6 @@
             reader.readAsText(file);
         }
 
-        window.addEventListener('DOMContentLoaded', startApp);
-
         async function startApp() {
             document.getElementById('transactionDate').valueAsDate = new Date();
             document.getElementById('firebaseConfigFileInput').addEventListener('change', handleConfigFileImport);
@@ -968,10 +966,16 @@
                     if (totalShares > 0.00001) {
                         const firstTransaction = lots[0].transaction;
                         const [symbol, accountType, platform] = positionKey.split('|||');
+                        
+                        let holdingType = firstTransaction.type;
+                        if (symbol.endsWith('X')) {
+                            holdingType = 'Mutual Fund';
+                        }
+                        
                         holdings[positionKey] = {
                             symbol: symbol,
                             name: firstTransaction.name,
-                            type: firstTransaction.type,
+                            type: holdingType,
                             accountType: accountType,
                             platform: platform,
                             dividend: firstTransaction.dividend,
