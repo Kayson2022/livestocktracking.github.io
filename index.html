@@ -944,6 +944,17 @@
                     }
                 }
             });
+            
+            console.log("--- Tax Lot Calculation Results (includes zero-share positions) ---");
+            Object.entries(taxLots).forEach(([positionKey, lots]) => {
+                let totalShares = 0;
+                lots.forEach(lot => {
+                    totalShares += lot.shares;
+                });
+                console.log(`Position: ${positionKey}, Final Shares: ${totalShares}`);
+            });
+            console.log("------------------------------------------------------------------");
+
 
             Object.entries(taxLots).forEach(([positionKey, lots]) => {
                 if (lots.length > 0) {
@@ -2162,7 +2173,6 @@
             closeHoldingEditModal();
         }
 
-        // CORRECTED: Added async keyword because this function uses 'await'.
         async function toggleTransactionHistory(key) {
             uiState.expandedTransactions[key] = !uiState.expandedTransactions[key];
             await saveDataToFirestore();
@@ -2463,7 +2473,7 @@
             const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund' || h.symbol.endsWith('X'));
 
             if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No holdings currently categorized as 'Mutual Fund' were found to refresh.", null);
+                showConfirmationModal("No holdings identified as Mutual Funds (by type or 'X' suffix) were found to refresh.", null);
                 return;
             }
 
