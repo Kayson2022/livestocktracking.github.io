@@ -113,6 +113,7 @@
         .btn-danger:hover { background: #DC2626; }
         .btn-edit { background: #FBBF24; }
         .btn-edit:hover { background: #F59E0B; }
+        .btn-secondary { background: linear-gradient(45deg, #8B5CF6, #7C3AED); }
         .account-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; margin-left: 10px; }
         .account-regular { background: #3498db; } .account-roth { background: #e74c3c; } .account-401k { background: #f39c12; } .account-529 { background: #9b59b6; } .account-yahoo { background: #20c997; }
         .investment-item:not(.consolidated) .investment-details {
@@ -263,7 +264,11 @@
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } .header { padding-top: 60px; } .data-status { position: static; margin: 0 auto 15px auto; display: block; width: fit-content; font-size: 0.75em; } .theme-toggle { top: 15px; left: 15px; } .pie-charts-container { grid-template-columns: 1fr; }
             .refresh-button-container { text-align: center; }
-            .refresh-button-container .btn { width: 48%; display: inline-block; }
+            .refresh-button-container .btn { 
+                width: 100%;
+                display: block;
+                margin-bottom: 10px;
+            }
         }
         @media (max-width: 480px) {
             .stats-grid { grid-template-columns: 1fr; } #dataTransfer button { width: 100%; margin: 5px 0; } .controls-bar .form-group { width: 100%; }
@@ -2131,6 +2136,41 @@
                 },
             });
         }
+        
+        async function refreshMutualFunds() {
+            if (!isInitialDataLoaded) return;
+            
+            const currentHoldings = calculateHoldingsAndCash();
+            const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund');
+
+            if (mutualFundHoldings.length === 0) {
+                showConfirmationModal("No mutual funds to refresh.", null);
+                return;
+            }
+
+            const refreshButton = document.getElementById('refreshMFBtn');
+            refreshButton.textContent = 'Refreshing...';
+            refreshButton.disabled = true;
+            updateDataStatus('loading');
+
+            for (const holding of mutualFundHoldings) {
+                await delay(API_THROTTLE_DELAY); // Respect API limits
+                
+                const priceData = await fetchPrice(holding); // fetchPrice already has the FMP -> Alpha Vantage logic
+
+                if (priceData && priceData.currentPrice !== null) {
+                    if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                    priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                    priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    priceCache[holding.symbol].lastFetchTimestamp = Date.now(); // Update timestamp to show it's fresh
+                }
+            }
+
+            await saveDataToFirestore(); // Save the updated prices
+            refreshButton.textContent = 'Refresh Mutual Funds';
+            refreshButton.disabled = false;
+        }
+
 
         // Make functions globally accessible for inline HTML onclick handlers
         window.toggleTheme = toggleTheme;
@@ -2161,6 +2201,7 @@
         window.closeEditModal = closeEditModal;
         window.saveTransactionEdit = saveTransactionEdit;
         window.removeTransaction = removeTransaction;
+        window.refreshMutualFunds = refreshMutualFunds;
     </script>
 
     <!-- MODALS -->
@@ -2324,6 +2365,7 @@
         </div>
         <div class="refresh-button-container">
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
+            <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
         </div>
         <div class="charts-section">
