@@ -242,6 +242,24 @@
             width: auto;
             margin: 0 2px;
         }
+
+        .countdown-timer {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 500;
+            z-index: 1001;
+            display: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+        }
+
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } .header { padding-top: 60px; } .data-status { position: static; margin: 0 auto 15px auto; display: block; width: fit-content; font-size: 0.75em; } .theme-toggle { top: 15px; left: 15px; } .pie-charts-container { grid-template-columns: 1fr; }
             .refresh-button-container { text-align: center; }
@@ -324,7 +342,7 @@
         let isSymbolValidated = false;
         let accountChart, investmentChart, historicalChart, dividendChart;
         let isAddFormExpanded = false;
-        let autoRefreshIntervalId = null;
+        let countdownIntervalId = null;
         let isAutoRefreshEnabled = true;
         let autoRefreshIntervalSeconds = 300; // Default to the safer 5-minute interval
         let currentSort = 'default';
@@ -1925,14 +1943,41 @@
         function saveAutoRefreshState() { localStorage.setItem(AUTO_REFRESH_STATE_KEY, JSON.stringify(isAutoRefreshEnabled)); }
         function loadAutoRefreshState() { const s = localStorage.getItem(AUTO_REFRESH_STATE_KEY); isAutoRefreshEnabled = s !== null ? JSON.parse(s) : true; }
         function updateAutoRefreshButton() { const btn = document.getElementById('toggleAutoRefreshBtn'); if (isAutoRefreshEnabled) { btn.textContent = 'Pause Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #f39c12, #e67e22)'; } else { btn.textContent = 'Resume Auto-Refresh'; btn.style.background = 'linear-gradient(45deg, #27ae60, #2ecc71)'; } }
+        
         function startAutoRefresh() {
-            if (autoRefreshIntervalId !== null) clearInterval(autoRefreshIntervalId);
+            if (countdownIntervalId !== null) clearInterval(countdownIntervalId); // Clear any existing interval
             isAutoRefreshEnabled = true;
-            autoRefreshIntervalId = setInterval(() => refreshAllPrices(false), autoRefreshIntervalSeconds * 1000);
+
+            const countdownEl = document.getElementById('countdown-timer');
+            let timeLeft = autoRefreshIntervalSeconds;
+
+            countdownEl.style.display = 'block';
+            countdownEl.textContent = `Next update: ${timeLeft}s`;
+
+            countdownIntervalId = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    refreshAllPrices(false);
+                    timeLeft = autoRefreshIntervalSeconds;
+                }
+                countdownEl.textContent = `Next update: ${timeLeft}s`;
+            }, 1000);
+
             updateAutoRefreshButton();
             saveAutoRefreshState();
         }
-        function stopAutoRefresh() { if (autoRefreshIntervalId !== null) { clearInterval(autoRefreshIntervalId); autoRefreshIntervalId = null; } isAutoRefreshEnabled = false; updateAutoRefreshButton(); saveAutoRefreshState(); }
+
+        function stopAutoRefresh() { 
+            if (countdownIntervalId !== null) { 
+                clearInterval(countdownIntervalId); 
+                countdownIntervalId = null; 
+            } 
+            document.getElementById('countdown-timer').style.display = 'none';
+            isAutoRefreshEnabled = false; 
+            updateAutoRefreshButton(); 
+            saveAutoRefreshState(); 
+        }
+
         function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
         async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { console.error(e); return { currentPrice: null, previousClosePrice: null }; } }
 
@@ -2403,6 +2448,7 @@
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
+    <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
 
