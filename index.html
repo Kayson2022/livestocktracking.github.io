@@ -299,309 +299,7 @@
     </style>
 </head>
 <body>
-    <!-- MODALS -->
-    <div id="confirmationModal" class="modal-overlay">
-        <div class="modal-content">
-            <p id="modalMessage" class="modal-message"></p>
-            <div class="modal-buttons">
-                <button id="modalConfirmBtn" class="btn btn-confirm">Confirm</button>
-                <button id="modalCancelBtn" class="btn btn-cancel">Cancel</button>
-            </div>
-        </div>
-    </div>
-    <div id="firebaseConfigModal" class="modal-overlay">
-        <div class="modal-content">
-            <h3>Firebase Configuration Required</h3>
-            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
-                To connect to your private cloud database, please enter the configuration values from your Firebase project settings.
-            </p>
-            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid #ffaaaa; color: #D8000C; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-                Your previous connection attempt failed. Please double-check your values.
-            </div>
-            <div class="form-group">
-                <label for="fbApiKey">apiKey</label>
-                <input type="text" id="fbApiKey" placeholder="Enter your apiKey">
-            </div>
-            <div class="form-group">
-                <label for="fbAuthDomain">authDomain</label>
-                <input type="text" id="fbAuthDomain" placeholder="Enter your authDomain">
-            </div>
-            <div class="form-group">
-                <label for="fbProjectId">projectId</label>
-                <input type="text" id="fbProjectId" placeholder="Enter your projectId">
-            </div>
-            <div class="form-group">
-                <label for="fbStorageBucket">storageBucket</label>
-                <input type="text" id="fbStorageBucket" placeholder="Enter your storageBucket">
-            </div>
-            <div class="form-group">
-                <label for="fbMessagingSenderId">messagingSenderId</label>
-                <input type="text" id="fbMessagingSenderId" placeholder="Enter your messagingSenderId">
-            </div>
-            <div class="form-group">
-                <label for="fbAppId">appId</label>
-                <input type="text" id="fbAppId" placeholder="Enter your appId">
-            </div>
-            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
-            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
-                Or, import the configuration from a text or JSON file.
-            </p>
-            <input type="file" id="firebaseConfigFileInput" accept=".json,.txt" style="display: none;">
-            <div class="modal-buttons" style="margin-top: 20px;">
-                 <button class="btn btn-cancel" onclick="document.getElementById('firebaseConfigFileInput').click()">Import from File</button>
-                 <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
-            </div>
-        </div>
-    </div>
-    <div id="editTransactionModal" class="modal-overlay">
-        <div class="modal-content">
-             <button class="modal-close-btn" onclick="closeEditModal()">×</button>
-            <h3>Edit Transaction</h3>
-            <input type="hidden" id="editTransactionId">
-            <div class="form-group">
-                <label for="editTransactionDate">Date</label>
-                <input type="date" id="editTransactionDate">
-            </div>
-            <div id="editTransactionFields"></div>
-             <div class="modal-buttons">
-                 <button class="btn btn-confirm" onclick="saveTransactionEdit()">Save</button>
-                 <button class="btn btn-cancel" onclick="closeEditModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
-    <div id="editHoldingModal" class="modal-overlay">
-        <div class="modal-content">
-             <button class="modal-close-btn" onclick="closeHoldingEditModal()">×</button>
-            <h3>Edit Position Details</h3>
-            <input type="hidden" id="editHoldingSymbol">
-            <input type="hidden" id="editHoldingAccountTypeKey">
-            <input type="hidden" id="editHoldingPlatformKey">
-            <div class="form-group">
-                <label>Symbol</label>
-                <input type="text" id="editHoldingSymbolDisplay" disabled>
-            </div>
-            <div class="form-group">
-                <label for="editHoldingType">Investment Type</label>
-                <select id="editHoldingType">
-                    <option value="Stock">Stock</option>
-                    <option value="ETF">ETF</option>
-                    <option value="Market Index">Market Index</option>
-                    <option value="401k">401k</option>
-                    <option value="Bond">Bond</option>
-                    <option value="Mutual Fund">Mutual Fund</option>
-                    <option value="Cryptocurrency">Cryptocurrency</option>
-                    <option value="Money Market">Money Market</option>
-                    <option value="Manual">Manual (No Price Fetch)</option>
-                    <option value="Other">Other</option>
-                    <option value="CASH">CASH</option>
-                </select>
-            </div>
-             <div class="form-group">
-                <label for="editHoldingTotalShares">Total Shares</label>
-                <input type="number" id="editHoldingTotalShares" step="any" min="0">
-                <small>Adjusting this will replace transactions for this specific position with a single summary record.</small>
-            </div>
-            <div class="form-group">
-                <label for="editHoldingAvgPrice">Average Cost / Share</label>
-                <input type="number" id="editHoldingAvgPrice" step="any" min="0">
-                <small>Adjusting this will replace transactions for this specific position with a single summary record.</small>
-            </div>
-             <div class="form-group">
-                <label for="editHoldingManualPrice">Manual Current Price / Share (Optional)</label>
-                <input type="number" id="editHoldingManualPrice" step="any" min="0">
-                <small>Use this to override the live price if fetching fails. Leave blank to use live data.</small>
-            </div>
-            <div class="modal-buttons">
-                 <button class="btn btn-confirm" onclick="saveHoldingEdit()">Save</button>
-                 <button class="btn btn-cancel" onclick="closeHoldingEditModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
-    <div id="settingsModal" class="modal-overlay">
-        <div class="modal-content">
-            <button class="modal-close-btn" onclick="closeSettingsModal()">×</button>
-            <h3>Settings</h3>
-            <div class="form-group">
-                <label for="finnhubApiKeyInput">Finnhub API Key</label>
-                <input type="text" id="finnhubApiKeyInput" placeholder="Enter your Finnhub API Key">
-            </div>
-            <div class="form-group">
-                <label for="fmpApiKeyInput">Financial Modeling Prep (FMP) API Key</label>
-                <input type="text" id="fmpApiKeyInput" placeholder="Enter your FMP API Key">
-                <small>Used for Mutual Fund lookups before falling back to Alpha Vantage.</small>
-            </div>
-            <div class="form-group">
-                <label for="alphaVantageApiKeyInput">Alpha Vantage API Key</label>
-                <input type="text" id="alphaVantageApiKeyInput" placeholder="Enter your Alpha Vantage API Key">
-            </div>
-            <div class="form-group">
-                <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
-                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
-                <small>Minimum 30 seconds to respect API limits.</small>
-            </div>
-            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
-             <div class="form-group">
-                <label>Firebase Connection</label>
-                <button class="btn btn-cancel" onclick="resetFirebaseConnection()">Reset Connection</button>
-                <small>Use this if you need to enter a new Firebase configuration.</small>
-            </div>
-            <div class="modal-buttons" style="margin-top: 20px;">
-                 <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
-            </div>
-        </div>
-    </div>
 
-    <div class="container">
-        <div class="header">
-            <div id="auth-container">
-                <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
-                <div id="user-info" style="display:none;">
-                    <img id="userPhoto" src="" alt="User photo">
-                    <span id="userName"></span>
-                    <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
-                </div>
-            </div>
-            <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
-            <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
-            <div class="data-status" id="dataStatus">...</div>
-            <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
-            <p>Track your investments with a detailed transaction log</p>
-            <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
-                <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
-                <input type="text" id="userNameInput" placeholder="Enter your name" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
-            </div>
-        </div>
-        <div class="stats-grid">
-             <div class="stat-card"> <div class="stat-value" id="totalValue">$0.00</div> <div class="stat-label">Total Portfolio Value</div> </div> <div class="stat-card"> <div class="stat-value" id="totalInvested">$0.00</div> <div class="stat-label">Total Cost Basis</div> </div> <div class="stat-card"> <div class="stat-value" id="totalCashValue">$0.00</div> <div class="stat-label">Cash & Money Market</div> </div> <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
-        </div>
-        <div class="refresh-button-container">
-            <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
-            <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
-            <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
-        </div>
-        <div class="charts-section">
-            <div class="chart-container">
-                <h3>Portfolio Performance History</h3>
-                <div class="chart-filters">
-                    <button class="chart-filter-btn" onclick="filterChart('1M')">1M</button>
-                    <button class="chart-filter-btn" onclick="filterChart('6M')">6M</button>
-                    <button class="chart-filter-btn" onclick="filterChart('YTD')">YTD</button>
-                    <button class="chart-filter-btn" onclick="filterChart('1Y')">1Y</button>
-                    <button class="chart-filter-btn active" onclick="filterChart('All')">All</button>
-                </div>
-                <div class="chart-wrapper"> <canvas id="historicalChart"></canvas> </div>
-            </div>
-            <div class="pie-charts-container">
-                <div class="chart-container"> <h3>Portfolio by Account Type</h3> <div class="chart-wrapper"> <canvas id="accountChart"></canvas> </div> </div>
-                <div class="chart-container"> <h3>Portfolio by Investment Type</h3> <div class="chart-wrapper"> <canvas id="investmentChart"></canvas> </div> </div>
-            </div>
-            <div class="chart-container">
-                <h3>Est. Annual Income by Holding</h3>
-                <div class="chart-wrapper">
-                    <canvas id="dividendChart"></canvas>
-                </div>
-            </div>
-        </div>
-        <div class="main-content">
-            <div class="add-investment card-panel">
-				<div class="investment-group-header" onclick="toggleAddForm()" style="margin: -25px -25px 20px -25px; border-radius: 15px 15px 0 0; border-left-color: #27ae60; width: calc(100% + 50px);">
-					<div class="group-summary">
-                        <div class="group-title">Add New Investment <span class="account-badge" style="background: #27ae60;">Form</span></div>
-                    </div>
-					<span class="toggle-icon" id="addFormToggleIcon">&#9658;</span>
-				</div>
-				<div id="addFormContent" style="display: none;">
-                    <div class="form-group">
-                        <label for="transactionType">Transaction Type</label>
-                        <select id="transactionType" name="transactionType" onchange="toggleTransactionFields()" required>
-                            <option value="BUY">BUY</option>
-                            <option value="SELL">SELL</option>
-                            <option value="DIVIDEND">DIVIDEND</option>
-                            <option value="DEPOSIT">DEPOSIT</option>
-                            <option value="WITHDRAWAL">WITHDRAWAL</option>
-                        </select>
-                    </div>
-                    <div class="form-group"> <label for="transactionDate">Transaction Date</label> <input type="date" id="transactionDate" name="transactionDate" required> </div>
-					<div class="form-group transaction-field"> <label for="symbol">Symbol</label> <input type="text" id="symbol" name="symbol" placeholder="e.g., AAPL, TSLA" oninput="validateSymbol()" required> <span id="symbolValidationStatus"></span> </div>
-					<div class="form-group transaction-field"> <label for="name">Company Name</label> <input type="text" id="name" name="name" placeholder="e.g., Apple Inc." > </div>
-					<div class="form-group"> <label for="accountType">Account Type</label> <select id="accountType" name="accountType" onchange="handleAccountTypeChange()" required> <option value="">Select Account</option> <option value="Regular Brokerage">Regular Brokerage</option> <option value="Roth IRA">Roth IRA</option> <option value="401(k)">401(k)</option> <option value="529 College Saving">529 College Saving</option> <option value="Yahoo Finance">Yahoo Finance</option> </select> </div>
-					<div class="form-group" id="fundingSourceGroup" style="display:none;">
-                        <label for="fundingSource">Fund Purchase From</label>
-                        <select id="fundingSource" name="fundingSource" required>
-                            <!-- Options will be populated dynamically -->
-                        </select>
-                    </div>
-                    <div class="form-group"> <label for="platform">Platform</label>
-                        <select id="platform" name="platform" required>
-                            <option value="">Select Platform</option>
-                            <option value="Fidelity">Fidelity</option>
-                            <option value="Vanguard">Vanguard</option>
-                            <option value="Charles Schwab">Charles Schwab</option>
-                            <option value="Merrill Edge">Merrill Edge</option>
-                            <option value="E*TRADE">E*TRADE</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </div>
-					<div class="form-group transaction-field buy-sell-field"> <label for="shares">Number of Shares</label> <input type="number" id="shares" name="shares" step="any" min="0" placeholder="100" oninput="updateTransactionFields('shares')" required> </div>
-					<div class="form-group transaction-field buy-sell-field"> <label for="price">Price per Share</label> <input type="number" id="price" name="price" step="any" min="0" placeholder="150.00" oninput="updateTransactionFields('price')" required> </div>
-                    <div class="form-group transaction-field buy-sell-field">
-                        <label for="totalAmount">Total Amount (optional)</label>
-                        <input type="number" id="totalAmount" name="totalAmount" step="any" min="0" placeholder="100.00" oninput="updateTransactionFields('amount')">
-                        <small style="color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block;">Fill this in to auto-calculate shares.</small>
-                    </div>
-                    <div class="form-group cash-field" style="display:none;"> <label for="amount">Amount</label> <input type="number" id="amount" name="amount" step="any" min="0" placeholder="1000.00"> </div>
-                    <div class="form-group transaction-field buy-sell-field"> <label for="dividend">Annual Dividend / Share (Est.)</label> <input type="number" id="dividend" name="dividend" step="any" min="0" placeholder="e.g., 3.50"> </div>
-					<div class="form-group transaction-field buy-sell-field"> <label for="type">Investment Type</label>
-                         <select id="type" name="type" required>
-                             <option value="">Select Type</option>
-                             <option value="Stock">Stock</option>
-                             <option value="ETF">ETF</option>
-                             <option value="Market Index">Market Index</option>
-                            <option value="401k">401k</option>
-                             <option value="Bond">Bond</option>
-                             <option value="Mutual Fund">Mutual Fund</option>
-                             <option value="Cryptocurrency">Cryptocurrency</option>
-                             <option value="Money Market">Money Market</option>
-                             <option value="Manual">Manual (No Price Fetch)</option>
-                            <option value="Other">Other</option>
-                             <option value="CASH">CASH</option>
-                         </select>
-                     </div>
-					<button type="button" class="btn" onclick="logTransaction()">Log Transaction</button>
-				</div>
-			</div>
-            <div class="investments-list card-panel">
-                <h2>Your Investments</h2>
-                <div class="controls-bar">
-                    <div class="form-group">
-                        <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
-                    </div>
-                    <div class="form-group">
-                        <select id="sortOptions">
-                            <option value="default">Sort: Default</option>
-                            <option value="symbol-asc">Sort: Symbol (A-Z)</option>
-                            <option value="value-desc">Sort: Highest Value</option>
-                            <option value="gain-desc">Sort: Biggest Gainer ($)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <select id="filterPlatform">
-                            <option value="all">Filter: All Platforms</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
-            </div>
-        </div>
-        <div id="dataTransfer" class="card-panel">
-            <h2>Data Transfer</h2>
-            <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
-            <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
-            <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
-            <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
-        </div>
-    </div>
-    <div id="countdown-timer" class="countdown-timer"></div>
     <script type="module">
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -706,6 +404,8 @@
             };
             reader.readAsText(file);
         }
+
+        window.addEventListener('DOMContentLoaded', startApp);
 
         async function startApp() {
             document.getElementById('transactionDate').valueAsDate = new Date();
@@ -942,17 +642,6 @@
                     }
                 }
             });
-            
-            console.log("--- Tax Lot Calculation Results (includes zero-share positions) ---");
-            Object.entries(taxLots).forEach(([positionKey, lots]) => {
-                let totalShares = 0;
-                lots.forEach(lot => {
-                    totalShares += lot.shares;
-                });
-                console.log(`Position: ${positionKey}, Final Shares: ${totalShares}`);
-            });
-            console.log("------------------------------------------------------------------");
-
 
             Object.entries(taxLots).forEach(([positionKey, lots]) => {
                 if (lots.length > 0) {
@@ -966,16 +655,10 @@
                     if (totalShares > 0.00001) {
                         const firstTransaction = lots[0].transaction;
                         const [symbol, accountType, platform] = positionKey.split('|||');
-                        
-                        let holdingType = firstTransaction.type;
-                        if (symbol.endsWith('X')) {
-                            holdingType = 'Mutual Fund';
-                        }
-                        
                         holdings[positionKey] = {
                             symbol: symbol,
                             name: firstTransaction.name,
-                            type: holdingType,
+                            type: firstTransaction.type,
                             accountType: accountType,
                             platform: platform,
                             dividend: firstTransaction.dividend,
@@ -1157,7 +840,7 @@
 
             let priceData = { currentPrice: null, previousClosePrice: null };
 
-            if (holding.type === 'Mutual Fund' || holding.symbol.endsWith('X')) {
+            if (holding.type === 'Mutual Fund') {
                 // 1. Mutual Funds: Try FMP first
                 priceData = await fetchPriceFromFMP(holding.symbol);
 
@@ -1195,9 +878,14 @@
                 if (holding.type === 'Manual') continue;
 
                 const cached = priceCache[holding.symbol];
-                const isFastMoving = (holding.type === 'Stock' || holding.type === 'ETF') && !holding.symbol.endsWith('X');
+                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
-                
+
+                if (forceRefresh && !isFastMoving && cached && (now - cached.lastFetchTimestamp < staleTime)) {
+                    console.log(`Skipping forced refresh for slow asset ${holding.symbol} due to fresh cache.`);
+                    continue;
+                }
+
                 if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Using fresh cached price for ${holding.symbol}`);
                     continue;
@@ -1243,7 +931,7 @@
                     statusEl.textContent = '✅';
                     statusEl.title = `Validated: ${match['2. name']}`;
                     document.getElementById('name').value = match['2. name'];
-                    if (match['3. type'] === 'Mutual Fund' || symbol.endsWith('X')) {
+                    if (match['3. type'] === 'Mutual Fund') {
                         document.getElementById('type').value = 'Mutual Fund';
                     }
                     isSymbolValidated = true;
@@ -1272,11 +960,6 @@
                     statusEl.title = '';
                     return;
                 }
-
-                if (symbol.endsWith('X')) {
-                    document.getElementById('type').value = 'Mutual Fund';
-                }
-
                 statusEl.textContent = '...';
                 statusEl.title = 'Validating...';
 
@@ -2177,6 +1860,7 @@
             closeHoldingEditModal();
         }
 
+        // CORRECTED: Added async keyword because this function uses 'await'.
         async function toggleTransactionHistory(key) {
             uiState.expandedTransactions[key] = !uiState.expandedTransactions[key];
             await saveDataToFirestore();
@@ -2473,11 +2157,10 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            
-            const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund' || h.symbol.endsWith('X'));
+            const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund');
 
             if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No holdings identified as Mutual Funds (by type or 'X' suffix) were found to refresh.", null);
+                showConfirmationModal("No mutual funds to refresh.", null);
                 return;
             }
 
@@ -2502,7 +2185,6 @@
             await saveDataToFirestore(); // Save the updated prices
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
-            updateDisplay(); // Re-render the UI with new prices
         }
 
 
@@ -2537,6 +2219,328 @@
         window.removeTransaction = removeTransaction;
         window.refreshMutualFunds = refreshMutualFunds;
     </script>
+
+    <!-- MODALS -->
+    <div id="confirmationModal" class="modal-overlay">
+        <div class="modal-content">
+            <p id="modalMessage" class="modal-message"></p>
+            <div class="modal-buttons">
+                <button id="modalConfirmBtn" class="btn btn-confirm">Confirm</button>
+                <button id="modalCancelBtn" class="btn btn-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <div id="firebaseConfigModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Firebase Configuration Required</h3>
+            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
+                To connect to your private cloud database, please enter the configuration values from your Firebase project settings.
+            </p>
+            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid #ffaaaa; color: #D8000C; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                Your previous connection attempt failed. Please double-check your values.
+            </div>
+            <div class="form-group">
+                <label for="fbApiKey">apiKey</label>
+                <input type="text" id="fbApiKey" placeholder="Enter your apiKey">
+            </div>
+            <div class="form-group">
+                <label for="fbAuthDomain">authDomain</label>
+                <input type="text" id="fbAuthDomain" placeholder="Enter your authDomain">
+            </div>
+            <div class="form-group">
+                <label for="fbProjectId">projectId</label>
+                <input type="text" id="fbProjectId" placeholder="Enter your projectId">
+            </div>
+            <div class="form-group">
+                <label for="fbStorageBucket">storageBucket</label>
+                <input type="text" id="fbStorageBucket" placeholder="Enter your storageBucket">
+            </div>
+            <div class="form-group">
+                <label for="fbMessagingSenderId">messagingSenderId</label>
+                <input type="text" id="fbMessagingSenderId" placeholder="Enter your messagingSenderId">
+            </div>
+            <div class="form-group">
+                <label for="fbAppId">appId</label>
+                <input type="text" id="fbAppId" placeholder="Enter your appId">
+            </div>
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
+                Or, import the configuration from a text or JSON file.
+            </p>
+            <input type="file" id="firebaseConfigFileInput" accept=".json,.txt" style="display: none;">
+            <div class="modal-buttons" style="margin-top: 20px;">
+                 <button class="btn btn-cancel" onclick="document.getElementById('firebaseConfigFileInput').click()">Import from File</button>
+                 <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
+            </div>
+        </div>
+    </div>
+    <div id="editTransactionModal" class="modal-overlay">
+        <div class="modal-content">
+             <button class="modal-close-btn" onclick="closeEditModal()">×</button>
+            <h3>Edit Transaction</h3>
+            <input type="hidden" id="editTransactionId">
+            <div class="form-group">
+                <label for="editTransactionDate">Date</label>
+                <input type="date" id="editTransactionDate">
+            </div>
+            <div id="editTransactionFields"></div>
+             <div class="modal-buttons">
+                 <button class="btn btn-confirm" onclick="saveTransactionEdit()">Save</button>
+                 <button class="btn btn-cancel" onclick="closeEditModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <div id="editHoldingModal" class="modal-overlay">
+        <div class="modal-content">
+             <button class="modal-close-btn" onclick="closeHoldingEditModal()">×</button>
+            <h3>Edit Position Details</h3>
+            <input type="hidden" id="editHoldingSymbol">
+            <input type="hidden" id="editHoldingAccountTypeKey">
+            <input type="hidden" id="editHoldingPlatformKey">
+            <div class="form-group">
+                <label>Symbol</label>
+                <input type="text" id="editHoldingSymbolDisplay" disabled>
+            </div>
+            <div class="form-group">
+                <label for="editHoldingType">Investment Type</label>
+                <select id="editHoldingType">
+                    <option value="Stock">Stock</option>
+                    <option value="ETF">ETF</option>
+                    <option value="Market Index">Market Index</option>
+                    <option value="401k">401k</option>
+                    <option value="Bond">Bond</option>
+                    <option value="Mutual Fund">Mutual Fund</option>
+                    <option value="Cryptocurrency">Cryptocurrency</option>
+                    <option value="Money Market">Money Market</option>
+                    <option value="Manual">Manual (No Price Fetch)</option>
+                    <option value="Other">Other</option>
+                    <option value="CASH">CASH</option>
+                </select>
+            </div>
+             <div class="form-group">
+                <label for="editHoldingTotalShares">Total Shares</label>
+                <input type="number" id="editHoldingTotalShares" step="any" min="0">
+                <small>Adjusting this will replace transactions for this specific position with a single summary record.</small>
+            </div>
+            <div class="form-group">
+                <label for="editHoldingAvgPrice">Average Cost / Share</label>
+                <input type="number" id="editHoldingAvgPrice" step="any" min="0">
+                <small>Adjusting this will replace transactions for this specific position with a single summary record.</small>
+            </div>
+             <div class="form-group">
+                <label for="editHoldingManualPrice">Manual Current Price / Share (Optional)</label>
+                <input type="number" id="editHoldingManualPrice" step="any" min="0">
+                <small>Use this to override the live price if fetching fails. Leave blank to use live data.</small>
+            </div>
+            <div class="modal-buttons">
+                 <button class="btn btn-confirm" onclick="saveHoldingEdit()">Save</button>
+                 <button class="btn btn-cancel" onclick="closeHoldingEditModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <div id="settingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close-btn" onclick="closeSettingsModal()">×</button>
+            <h3>Settings</h3>
+            <div class="form-group">
+                <label for="finnhubApiKeyInput">Finnhub API Key</label>
+                <input type="text" id="finnhubApiKeyInput" placeholder="Enter your Finnhub API Key">
+            </div>
+            <div class="form-group">
+                <label for="fmpApiKeyInput">Financial Modeling Prep (FMP) API Key</label>
+                <input type="text" id="fmpApiKeyInput" placeholder="Enter your FMP API Key">
+                <small>Used for Mutual Fund lookups before falling back to Alpha Vantage.</small>
+            </div>
+            <div class="form-group">
+                <label for="alphaVantageApiKeyInput">Alpha Vantage API Key</label>
+                <input type="text" id="alphaVantageApiKeyInput" placeholder="Enter your Alpha Vantage API Key">
+            </div>
+            <div class="form-group">
+                <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
+                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
+                <small>Minimum 30 seconds to respect API limits.</small>
+            </div>
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+             <div class="form-group">
+                <label>Firebase Connection</label>
+                <button class="btn btn-cancel" onclick="resetFirebaseConnection()">Reset Connection</button>
+                <small>Use this if you need to enter a new Firebase configuration.</small>
+            </div>
+            <div class="modal-buttons" style="margin-top: 20px;">
+                 <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <div id="auth-container">
+                <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
+                <div id="user-info" style="display:none;">
+                    <img id="userPhoto" src="" alt="User photo">
+                    <span id="userName"></span>
+                    <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
+                </div>
+            </div>
+            <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
+            <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
+            <div class="data-status" id="dataStatus">...</div>
+            <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
+            <p>Track your investments with a detailed transaction log</p>
+            <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
+                <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
+                <input type="text" id="userNameInput" placeholder="Enter your name" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
+            </div>
+        </div>
+        <div class="stats-grid">
+             <div class="stat-card"> <div class="stat-value" id="totalValue">$0.00</div> <div class="stat-label">Total Portfolio Value</div> </div> <div class="stat-card"> <div class="stat-value" id="totalInvested">$0.00</div> <div class="stat-label">Total Cost Basis</div> </div> <div class="stat-card"> <div class="stat-value" id="totalCashValue">$0.00</div> <div class="stat-label">Cash & Money Market</div> </div> <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
+        </div>
+        <div class="refresh-button-container">
+            <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
+            <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
+            <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
+        </div>
+        <div class="charts-section">
+            <div class="chart-container">
+                <h3>Portfolio Performance History</h3>
+                <div class="chart-filters">
+                    <button class="chart-filter-btn" onclick="filterChart('1M')">1M</button>
+                    <button class="chart-filter-btn" onclick="filterChart('6M')">6M</button>
+                    <button class="chart-filter-btn" onclick="filterChart('YTD')">YTD</button>
+                    <button class="chart-filter-btn" onclick="filterChart('1Y')">1Y</button>
+                    <button class="chart-filter-btn active" onclick="filterChart('All')">All</button>
+                </div>
+                <div class="chart-wrapper"> <canvas id="historicalChart"></canvas> </div>
+            </div>
+            <div class="pie-charts-container">
+                <div class="chart-container"> <h3>Portfolio by Account Type</h3> <div class="chart-wrapper"> <canvas id="accountChart"></canvas> </div> </div>
+                <div class="chart-container"> <h3>Portfolio by Investment Type</h3> <div class="chart-wrapper"> <canvas id="investmentChart"></canvas> </div> </div>
+            </div>
+            <div class="chart-container">
+                <h3>Est. Annual Income by Holding</h3>
+                <div class="chart-wrapper">
+                    <canvas id="dividendChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="add-investment card-panel">
+				<div class="investment-group-header" onclick="toggleAddForm()" style="margin: -25px -25px 20px -25px; border-radius: 15px 15px 0 0; border-left-color: #27ae60; width: calc(100% + 50px);">
+					<div class="group-summary">
+                        <div class="group-title">Add New Investment <span class="account-badge" style="background: #27ae60;">Form</span></div>
+                    </div>
+					<span class="toggle-icon" id="addFormToggleIcon">&#9658;</span>
+				</div>
+				<div id="addFormContent" style="display: none;">
+                    <div class="form-group">
+                        <label for="transactionType">Transaction Type</label>
+                        <select id="transactionType" name="transactionType" onchange="toggleTransactionFields()" required>
+                            <option value="BUY">BUY</option>
+                            <option value="SELL">SELL</option>
+                            <option value="DIVIDEND">DIVIDEND</option>
+                            <option value="DEPOSIT">DEPOSIT</option>
+                            <option value="WITHDRAWAL">WITHDRAWAL</option>
+                        </select>
+                    </div>
+                    <div class="form-group"> <label for="transactionDate">Transaction Date</label> <input type="date" id="transactionDate" name="transactionDate" required> </div>
+					<div class="form-group transaction-field"> <label for="symbol">Symbol</label> <input type="text" id="symbol" name="symbol" placeholder="e.g., AAPL, TSLA" oninput="validateSymbol()" required> <span id="symbolValidationStatus"></span> </div>
+					<div class="form-group transaction-field"> <label for="name">Company Name</label> <input type="text" id="name" name="name" placeholder="e.g., Apple Inc." > </div>
+					<div class="form-group"> <label for="accountType">Account Type</label> <select id="accountType" name="accountType" onchange="handleAccountTypeChange()" required> <option value="">Select Account</option> <option value="Regular Brokerage">Regular Brokerage</option> <option value="Roth IRA">Roth IRA</option> <option value="401(k)">401(k)</option> <option value="529 College Saving">529 College Saving</option> <option value="Yahoo Finance">Yahoo Finance</option> </select> </div>
+					<div class="form-group" id="fundingSourceGroup" style="display:none;">
+                        <label for="fundingSource">Fund Purchase From</label>
+                        <select id="fundingSource" name="fundingSource" required>
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                    </div>
+                    <div class="form-group"> <label for="platform">Platform</label>
+                        <select id="platform" name="platform" required>
+                            <option value="">Select Platform</option>
+                            <option value="Fidelity">Fidelity</option>
+                            <option value="Vanguard">Vanguard</option>
+                            <option value="Charles Schwab">Charles Schwab</option>
+                            <option value="Merrill Edge">Merrill Edge</option>
+                            <option value="E*TRADE">E*TRADE</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+					<div class="form-group transaction-field buy-sell-field"> <label for="shares">Number of Shares</label> <input type="number" id="shares" name="shares" step="any" min="0" placeholder="100" oninput="updateTransactionFields('shares')" required> </div>
+					<div class="form-group transaction-field buy-sell-field"> <label for="price">Price per Share</label> <input type="number" id="price" name="price" step="any" min="0" placeholder="150.00" oninput="updateTransactionFields('price')" required> </div>
+                    <div class="form-group transaction-field buy-sell-field">
+                        <label for="totalAmount">Total Amount (optional)</label>
+                        <input type="number" id="totalAmount" name="totalAmount" step="any" min="0" placeholder="100.00" oninput="updateTransactionFields('amount')">
+                        <small style="color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block;">Fill this in to auto-calculate shares.</small>
+                    </div>
+                    <div class="form-group cash-field" style="display:none;"> <label for="amount">Amount</label> <input type="number" id="amount" name="amount" step="any" min="0" placeholder="1000.00"> </div>
+                    <div class="form-group transaction-field buy-sell-field"> <label for="dividend">Annual Dividend / Share (Est.)</label> <input type="number" id="dividend" name="dividend" step="any" min="0" placeholder="e.g., 3.50"> </div>
+					<div class="form-group transaction-field buy-sell-field"> <label for="type">Investment Type</label>
+                         <select id="type" name="type" required>
+                             <option value="">Select Type</option>
+                             <option value="Stock">Stock</option>
+                             <option value="ETF">ETF</option>
+                             <option value="Market Index">Market Index</option>
+                            <option value="401k">401k</option>
+                             <option value="Bond">Bond</option>
+                             <option value="Mutual Fund">Mutual Fund</option>
+                             <option value="Cryptocurrency">Cryptocurrency</option>
+                             <option value="Money Market">Money Market</option>
+                             <option value="Manual">Manual (No Price Fetch)</option>
+                            <option value="Other">Other</option>
+                             <option value="CASH">CASH</option>
+                         </select>
+                     </div>
+					<button type="button" class="btn" onclick="logTransaction()">Log Transaction</button>
+				</div>
+			</div>
+            <div class="investments-list card-panel">
+                <h2>Your Investments</h2>
+                <div class="controls-bar">
+                    <div class="form-group">
+                        <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
+                    </div>
+                    <div class="form-group">
+                        <select id="sortOptions">
+                            <option value="default">Sort: Default</option>
+                            <option value="symbol-asc">Sort: Symbol (A-Z)</option>
+                            <option value="value-desc">Sort: Highest Value</option>
+                            <option value="gain-desc">Sort: Biggest Gainer ($)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <select id="filterPlatform">
+                            <option value="all">Filter: All Platforms</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
+            </div>
+        </div>
+        <div id="dataTransfer" class="card-panel">
+            <h2>Data Transfer</h2>
+            <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
+            <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
+            <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+            <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
+        </div>
+    </div>
+    <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
+I did a manual mutual fund refresh button, but It didn't refresh the mutual funds that i have in my portfolio.
+Here's the output from inspect:
+livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
+fetchPrice @ livestocktracking.github.io/:849Understand this warning
+livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
+fetchPriceFromAlphaVantage @ livestocktracking.github.io/:2025Understand this warning
+livestocktracking.github.io/:849 FMP failed for Mutual Fund INDIVIDUAL - 529 - TOD. Trying Alpha Vantage.
+fetchPrice @ livestocktracking.github.io/:849
+await in fetchPrice
+refreshMutualFunds @ livestocktracking.github.io/:2159
+await in refreshMutualFunds
+onclick @ livestocktracking.github.io/:2368Understand this warning
+livestocktracking.github.io/:2025 Alpha Vantage API limit reached for INDIVIDUAL - 529 - TOD. Price not updated.
+
+1. How did you detect the mutual funds among stocks and etfs?
+2. the 2 mutual funds that i have are FXAIX and FSELX, at least refetch those if button is pressed.
+
 
