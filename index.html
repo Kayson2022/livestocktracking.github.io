@@ -2154,7 +2154,7 @@
             const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund');
 
             if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No mutual funds to refresh.", null);
+                showConfirmationModal("No holdings currently categorized as 'Mutual Fund' were found to refresh.", null);
                 return;
             }
 
@@ -2520,4 +2520,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
