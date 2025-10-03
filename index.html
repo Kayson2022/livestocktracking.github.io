@@ -2165,13 +2165,17 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            // FIXED: Broaden the filter to include holdings typed as 'Mutual Fund' OR symbols ending in 'X'.
-            // This is more robust against data entry errors (e.g., a user forgets the 'X' but sets the type correctly).
-            const mutualFundHoldings = currentHoldings.filter(h => (h.symbol && h.symbol.trim().toUpperCase().endsWith('X')) || h.type === 'Mutual Fund');
+            const mutualFundHoldings = currentHoldings.filter(h => {
+                const isMFType = h.type === 'Mutual Fund';
+                const hasXSuffix = h.symbol && h.symbol.trim().toUpperCase().endsWith('X');
+                const looksLikeTicker = h.symbol && !h.symbol.includes(' ');
+                
+                return (isMFType || hasXSuffix) && looksLikeTicker;
+            });
 
 
             if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No mutual funds found to refresh.", null);
+                showConfirmationModal("No valid mutual funds found to refresh.", null);
                 return;
             }
 
@@ -2540,5 +2544,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
 
