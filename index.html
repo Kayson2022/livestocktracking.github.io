@@ -828,43 +828,57 @@
             startAutoRefresh();
         }
 
-        /**
-		 * FIXED: This function was rewritten to be more robust.
-		 * Instead of relying on holding.type, it attempts to fetch a price from all available APIs
-		 * in a "waterfall" sequence. This prevents failures if an asset is miscategorized
-		 * (e.g., a mutual fund like FXAIX is logged as a "Stock").
-		 * @param {object} holding The holding object.
-		 * @returns {object} Price data object.
-		 */
         async function fetchPrice(holding) {
             if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
             }
 
             const symbol = holding.symbol;
+            const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
+            
+            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`); // Debug log to trace logic
 
             // --- Waterfall Approach ---
-            // Attempt 1: Finnhub (Best for Stocks/ETFs, but fails for many mutual funds)
-            let priceData = await fetchPriceFromFinnhub(symbol);
+            let priceData;
+
+            // Attempt 1: Finnhub (Fastest, will get stocks/ETFs, but will fail for MFs)
+            priceData = await fetchPriceFromFinnhub(symbol);
             if (priceData && priceData.currentPrice > 0) {
                 console.log(`Price for ${symbol} found via Finnhub.`);
                 return priceData;
             }
-
-            // Attempt 2: FMP (Good for many funds, fallback for stocks)
-            await delay(API_THROTTLE_DELAY); // Wait before next API call to avoid rate limits
-            priceData = await fetchPriceFromFMP(symbol);
-            if (priceData && priceData.currentPrice > 0) {
-                console.log(`Price for ${symbol} found via FMP.`);
-                return priceData;
-            }
-
-            // Attempt 3: Alpha Vantage (Slowest, but good fallback for funds FMP misses)
             await delay(API_THROTTLE_DELAY);
-            priceData = await fetchPriceFromAlphaVantage(symbol);
-            if (priceData && priceData.currentPrice > 0) {
-                console.log(`Price for ${symbol} found via Alpha Vantage.`);
-                return priceData;
+
+            // For Mutual Funds, try AlphaVantage next as it's more reliable for NAV.
+            // For other assets, try FMP next as it's faster.
+            if (isMutualFund) {
+                priceData = await fetchPriceFromAlphaVantage(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Alpha Vantage.`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
+
+                // Fallback to FMP for the mutual fund if AV fails
+                priceData = await fetchPriceFromFMP(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via FMP (fallback).`);
+                    return priceData;
+                }
+            } else { // For Stocks, ETFs, etc.
+                priceData = await fetchPriceFromFMP(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via FMP.`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
+
+                // Fallback to AlphaVantage if FMP fails
+                priceData = await fetchPriceFromAlphaVantage(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Alpha Vantage (fallback).`);
+                    return priceData;
+                }
             }
 
             console.warn(`All price providers failed for symbol: ${symbol}`);
@@ -2048,53 +2062,40 @@
         }
 
         /**
-         * Fetches price from Financial Modeling Prep (FMP). Used as the first fallback for Mutual Funds.
+         * Fetches price from Financial Modeling Prep (FMP). Used as a fallback for price data.
+         * This function now ONLY uses the historical endpoint to ensure accuracy for NAV.
          * @param {string} symbol The stock/fund symbol.
          * @returns {object} Price data.
          */
         async function fetchPriceFromFMP(symbol) {
              if (!FMP_API_KEY) return { currentPrice: null, previousClosePrice: null };
              try {
-                 // For mutual funds, the most reliable "current" price during the day is the previous day's close (NAV).
-                 // We will fetch the last 2 days of historical data.
-                 // The most recent (index 0) is yesterday's close, which we'll use as the current price.
-                 // The one before that (index 1) is the day-before's close, which is our previous close.
+                 // We ONLY use the historical endpoint for FMP as it's the only one reliable for NAV.
+                 // We need at least 2 days of data to calculate the daily change correctly.
                  const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
                  const historyRes = await fetch(historyUrl);
+                 
                  if (!historyRes.ok) {
                      console.warn(`FMP historical fetch failed for ${symbol}: ${historyRes.status}`);
-                     // Don't return here, let it fall back to quote-short
-                 } else {
-                     const historyData = await historyRes.json();
-                     if (historyData && historyData.historical && historyData.historical.length >= 2) {
-                         const latestClose = historyData.historical[0].close;
-                         const previousDayClose = historyData.historical[1].close;
-                         return {
-                             currentPrice: latestClose,
-                             previousClosePrice: previousDayClose
-                         };
-                     } else if (historyData && historyData.historical && historyData.historical.length === 1) {
-                        // If we only have one day of data, we can use it as the current price, but can't calculate today's G/L
-                         return {
-                             currentPrice: historyData.historical[0].close,
-                             previousClosePrice: null
-                         };
-                     }
+                     return { currentPrice: null, previousClosePrice: null }; // Fail gracefully
                  }
 
-                 // Fallback to quote-short for non-funds or if historical fails, though it can be less reliable for funds.
-                 const url = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/quote-short/${symbol}?apikey=${FMP_API_KEY}`;
-                 const r = await fetch(url);
-                 const d = await r.json();
-
-                 if (r.ok && Array.isArray(d) && d.length > 0) {
-                     // quote-short doesn't provide previous close, so this is a partial result.
-                     return { currentPrice: d[0].price || null, previousClosePrice: null };
-                 }
+                 const historyData = await historyRes.json();
                  
-                 return { currentPrice: null, previousClosePrice: null };
+                 // We require at least 2 data points to be sure we have the correct values.
+                 if (historyData && historyData.historical && historyData.historical.length >= 2) {
+                     const latestClose = historyData.historical[0].close;
+                     const previousDayClose = historyData.historical[1].close;
+                     return {
+                         currentPrice: latestClose,
+                         previousClosePrice: previousDayClose
+                     };
+                 } else {
+                     console.warn(`FMP did not return sufficient historical data for ${symbol}.`);
+                     return { currentPrice: null, previousClosePrice: null }; // Fail gracefully
+                 }
              } catch (e) {
-                  console.error("FMP fetch error:", e);
+                  console.error(`A network error occurred during the FMP fetch for ${symbol}:`, e);
                   return { currentPrice: null, previousClosePrice: null };
              }
         }
@@ -2603,5 +2604,7 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
+
 
 
