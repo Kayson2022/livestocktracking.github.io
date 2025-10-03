@@ -1870,7 +1870,6 @@
             closeHoldingEditModal();
         }
 
-        // CORRECTED: Added async keyword because this function uses 'await'.
         async function toggleTransactionHistory(key) {
             uiState.expandedTransactions[key] = !uiState.expandedTransactions[key];
             await saveDataToFirestore();
@@ -2153,7 +2152,6 @@
                         updateDisplay();
                        showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
                     });
-                    // CORRECTED: Moved this line here to ensure the file input is cleared after parsing.
                     e.target.value = null;
                 },
                 error: (err) => {
@@ -2167,10 +2165,10 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            const mutualFundHoldings = currentHoldings.filter(h => h.type === 'Mutual Fund');
+            const mutualFundHoldings = currentHoldings.filter(h => h.symbol.endsWith('X'));
 
             if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No mutual funds to refresh.", null);
+                showConfirmationModal("No mutual funds (symbols ending in 'X') to refresh.", null);
                 return;
             }
 
@@ -2180,9 +2178,12 @@
             updateDataStatus('loading');
 
             for (const holding of mutualFundHoldings) {
-                await delay(API_THROTTLE_DELAY); // Respect API limits
-                
-                const priceData = await fetchPrice(holding); // fetchPrice already has the FMP -> Alpha Vantage logic
+                // This now specifically uses the MF-friendly APIs, skipping Finnhub
+                let priceData = await fetchPriceFromFMP(holding.symbol);
+                if (!priceData || !priceData.currentPrice || priceData.currentPrice <= 0) {
+                    await delay(API_THROTTLE_DELAY);
+                    priceData = await fetchPriceFromAlphaVantage(holding.symbol);
+                }
 
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
@@ -2195,6 +2196,7 @@
             await saveDataToFirestore(); // Save the updated prices
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
+            showConfirmationModal("Mutual fund price refresh complete.", null);
         }
 
 
