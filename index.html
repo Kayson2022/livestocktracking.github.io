@@ -885,10 +885,17 @@
 
             const now = Date.now();
             for (const holding of currentHoldings) {
+                // During an auto-refresh (when forceRefresh is false), we only want to update
+                // fast-moving assets like Stocks and ETFs to conserve API calls.
+                // Manual refreshes will update everything.
+                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
+                if (!forceRefresh && !isFastMoving) {
+                    continue; // Skip slow-moving assets like Mutual Funds on auto-refresh.
+                }
+
                 if (holding.type === 'Manual') continue;
 
                 const cached = priceCache[holding.symbol];
-                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
                 // If NOT forcing a refresh, check the cache and continue if it's still fresh.
@@ -1875,9 +1882,11 @@
 
         // --- Utility and Charting Functions ---
         function formatCurrency(amount) {
+            if (typeof amount !== 'number') { return '$0.00'; }
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
         }
         function formatPercentage(value) {
+            if (typeof value !== 'number') { return '0.00%'; }
             return (value * 100).toFixed(2) + '%';
         }
         function applyTheme(theme) {
