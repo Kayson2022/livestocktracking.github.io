@@ -1877,18 +1877,27 @@
         }
 
         // --- Utility and Charting Functions ---
-        function formatCurrency(amount) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount); }
-        function formatPercentage(value) { return (value * 100).toFixed(2) + '%'; }
-        function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙'; }
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+        }
+        function formatPercentage(value) {
+            return (value * 100).toFixed(2) + '%';
+        }
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
         function toggleTheme() {
-             const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark';
-             localStorage.setItem(THEME_KEY, newTheme);
-             applyTheme(newTheme);
+            const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark';
+            localStorage.setItem(THEME_KEY, newTheme);
+            applyTheme(newTheme);
             const currentHoldings = calculateHoldingsAndCash();
             const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
             filterChart(activeChartFilter, portfolioHistory, currentHoldings);
         }
-        function loadTheme() { applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
+        function loadTheme() {
+            applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+        }
 
         function debouncedUpdateUserName() {
             clearTimeout(userNameUpdateTimeout);
@@ -2185,22 +2194,21 @@
             updateDataStatus('loading');
 
             for (const holding of mutualFundHoldings) {
-                // This now specifically uses the MF-friendly APIs, skipping Finnhub
-                let priceData = await fetchPriceFromFMP(holding.symbol);
-                if (!priceData || !priceData.currentPrice || priceData.currentPrice <= 0) {
-                    await delay(API_THROTTLE_DELAY);
-                    priceData = await fetchPriceFromAlphaVantage(holding.symbol);
-                }
+                // Use the main fetchPrice function for consistent, robust fetching
+                const priceData = await fetchPrice(holding);
 
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
-                    priceCache[holding.symbol].lastFetchTimestamp = Date.now(); // Update timestamp to show it's fresh
+                    priceCache[holding.symbol].lastFetchTimestamp = Date.now();
                 }
+                // A delay here is good practice to avoid hammering APIs in a loop.
+                // fetchPrice has its own internal delays, but this spaces out calls for *different* symbols.
+                await delay(API_THROTTLE_DELAY); 
             }
 
-            await saveDataToFirestore(); // Save the updated prices
+            await saveDataToFirestore();
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
             showConfirmationModal("Mutual fund price refresh complete.", null);
@@ -2544,3 +2552,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
