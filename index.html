@@ -2055,25 +2055,43 @@
         async function fetchPriceFromFMP(symbol) {
              if (!FMP_API_KEY) return { currentPrice: null, previousClosePrice: null };
              try {
-                 // FMP real-time quote endpoint for latest price
+                 // For mutual funds, the most reliable "current" price during the day is the previous day's close (NAV).
+                 // We will fetch the last 2 days of historical data.
+                 // The most recent (index 0) is yesterday's close, which we'll use as the current price.
+                 // The one before that (index 1) is the day-before's close, which is our previous close.
+                 const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
+                 const historyRes = await fetch(historyUrl);
+                 if (!historyRes.ok) {
+                     console.warn(`FMP historical fetch failed for ${symbol}: ${historyRes.status}`);
+                     // Don't return here, let it fall back to quote-short
+                 } else {
+                     const historyData = await historyRes.json();
+                     if (historyData && historyData.historical && historyData.historical.length >= 2) {
+                         const latestClose = historyData.historical[0].close;
+                         const previousDayClose = historyData.historical[1].close;
+                         return {
+                             currentPrice: latestClose,
+                             previousClosePrice: previousDayClose
+                         };
+                     } else if (historyData && historyData.historical && historyData.historical.length === 1) {
+                        // If we only have one day of data, we can use it as the current price, but can't calculate today's G/L
+                         return {
+                             currentPrice: historyData.historical[0].close,
+                             previousClosePrice: null
+                         };
+                     }
+                 }
+
+                 // Fallback to quote-short for non-funds or if historical fails, though it can be less reliable for funds.
                  const url = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/quote-short/${symbol}?apikey=${FMP_API_KEY}`;
                  const r = await fetch(url);
                  const d = await r.json();
 
-                 // FMP returns an array of quotes, check if the array is not empty
                  if (r.ok && Array.isArray(d) && d.length > 0) {
-                     const data = d[0];
-                     // Attempt to get previous close from a different endpoint as quote-short doesn't provide it
-                     const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
-                     const historyRes = await fetch(historyUrl);
-                     const historyData = await historyRes.json();
-                     const previousClose = historyData?.historical?.[1]?.close || null;
-
-                     return {
-                         currentPrice: data.price || null,
-                         previousClosePrice: previousClose
-                     };
+                     // quote-short doesn't provide previous close, so this is a partial result.
+                     return { currentPrice: d[0].price || null, previousClosePrice: null };
                  }
+                 
                  return { currentPrice: null, previousClosePrice: null };
              } catch (e) {
                   console.error("FMP fetch error:", e);
@@ -2585,4 +2603,5 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
 
