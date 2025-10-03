@@ -891,11 +891,8 @@
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                if (forceRefresh && !isFastMoving && cached && (now - cached.lastFetchTimestamp < staleTime)) {
-                    console.log(`Skipping forced refresh for slow asset ${holding.symbol} due to fresh cache.`);
-                    continue;
-                }
-
+                // If NOT forcing a refresh, check the cache and continue if it's still fresh.
+                // If forceRefresh is true, this check is skipped, and a new price is always fetched.
                 if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
                     console.log(`Using fresh cached price for ${holding.symbol}`);
                     continue;
@@ -2018,7 +2015,28 @@
         }
 
         function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
-        async function fetchPriceFromFinnhub(symbol) { if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null }; try { const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`; const r = await fetch(url); const d = await r.json(); return (r.ok && d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null }; } catch (e) { console.error(e); return { currentPrice: null, previousClosePrice: null }; } }
+        async function fetchPriceFromFinnhub(symbol) {
+            if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null };
+            try {
+                const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
+                const r = await fetch(url);
+
+                if (!r.ok) {
+                    if (r.status === 403) {
+                        console.log(`Finnhub fetch for ${symbol} was forbidden. This is expected for most mutual funds on the free plan. Trying next provider.`);
+                    } else {
+                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
+                    }
+                    return { currentPrice: null, previousClosePrice: null };
+                }
+
+                const d = await r.json();
+                return (d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null };
+            } catch (e) {
+                console.error(`A network error occurred while fetching from Finnhub for ${symbol}:`, e);
+                return { currentPrice: null, previousClosePrice: null };
+            }
+        }
 
         /**
          * Fetches price from Financial Modeling Prep (FMP). Used as the first fallback for Mutual Funds.
@@ -2028,17 +2046,23 @@
         async function fetchPriceFromFMP(symbol) {
              if (!FMP_API_KEY) return { currentPrice: null, previousClosePrice: null };
              try {
-                 // FMP quotes endpoint for latest price
-                 const url = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${FMP_API_KEY}`;
+                 // FMP real-time quote endpoint for latest price
+                 const url = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/quote-short/${symbol}?apikey=${FMP_API_KEY}`;
                  const r = await fetch(url);
                  const d = await r.json();
 
                  // FMP returns an array of quotes, check if the array is not empty
                  if (r.ok && Array.isArray(d) && d.length > 0) {
                      const data = d[0];
+                     // Attempt to get previous close from a different endpoint as quote-short doesn't provide it
+                     const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
+                     const historyRes = await fetch(historyUrl);
+                     const historyData = await historyRes.json();
+                     const previousClose = historyData?.historical?.[1]?.close || null;
+
                      return {
                          currentPrice: data.price || null,
-                         previousClosePrice: data.previousClose || null
+                         previousClosePrice: previousClose
                      };
                  }
                  return { currentPrice: null, previousClosePrice: null };
