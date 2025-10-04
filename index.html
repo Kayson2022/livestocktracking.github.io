@@ -549,7 +549,7 @@
             const portfolioColRef = collection(userDocRef, 'data');
 
             const portfolioDocRef = doc(portfolioColRef, FIRESTORE_DATA_DOC);
-            unsubscribePortfolio = onSnapshot(portfolioDocRef, (docSnap) => {
+            unsubscribePortfolio = onSnapshot(portfolioDocRef, async (docSnap) => {
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
                 } else {
@@ -562,12 +562,12 @@
                 cleanUpActivityLog();
 
                 if (!hasRecurringCheckRun) {
-                    checkAndProcessRecurringTransactions();
+                    await checkAndProcessRecurringTransactions();
                     hasRecurringCheckRun = true;
                 }
 
                 isInitialDataLoaded = true; // Set flag after first data load
-                updateDisplay();
+                await updateDisplay();
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
             }, (error) => console.error("Error listening to portfolio:", error));
 
@@ -981,25 +981,29 @@
             return calculatedHoldings;
         }
 
-        function buildPortfolioHistoryFromTransactions(holdings) {
+        function buildPortfolioHistoryFromTransactions() {
             const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
-            if (nonWatchlistTransactions.length === 0) return [];
+            if (!nonWatchlistTransactions || nonWatchlistTransactions.length === 0) return [];
 
             const dailySnapshots = {};
             const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            const allSymbols = [...new Set(sorted.filter(t => t.symbol && !t.symbol.startsWith('_CASH')).map(t => t.symbol))];
-
-            if (allSymbols.length === 0 && sorted.every(t => t.symbol.startsWith('_CASH'))) return [];
-
+            
             const firstDate = new Date(sorted[0].date);
             const today = new Date();
             let portfolioHistory = [];
+
+            // Pre-calculate symbol types to avoid finding it in the loop
+            const symbolTypes = {};
+            sorted.forEach(t => {
+                if (t.symbol && !symbolTypes[t.symbol]) {
+                    symbolTypes[t.symbol] = t.type;
+                }
+            });
 
             for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
                 const dateString = d.toISOString().split('T')[0];
                 const transactionsUpToDate = sorted.filter(t => new Date(t.date).toISOString().split('T')[0] <= dateString);
 
-                let dailyTotalValue = 0;
                 const tempHoldings = {};
 
                 transactionsUpToDate.forEach(t => {
@@ -1015,20 +1019,31 @@
                         tempHoldings[symbol].totalShares += shares;
                         tempHoldings[symbol].totalCost += shares * price;
                     } else if (type === 'SELL') {
-                        if (tempHoldings[symbol].totalShares > 0) { // Avoid division by zero
+                        let costReduction = 0;
+                        if (tempHoldings[symbol].totalShares > 0.00001) { // Avoid division by zero
                             const avgCost = tempHoldings[symbol].totalCost / tempHoldings[symbol].totalShares;
-                            tempHoldings[symbol].totalCost -= shares * avgCost;
+                            costReduction = Math.min(tempHoldings[symbol].totalCost, shares * avgCost);
                         }
                         tempHoldings[symbol].totalShares -= shares;
+                        tempHoldings[symbol].totalCost -= costReduction;
                     }
                 });
 
+                let dailyTotalPortfolioCost = 0;
                 Object.entries(tempHoldings).forEach(([symbol, holding]) => {
-                    const avgCost = (holding.totalShares > 0) ? (holding.totalCost / holding.totalShares) : 0;
-                    const price = priceCache[symbol]?.currentPrice || avgCost;
-                   dailyTotalValue += holding.totalShares * price;
+                    // For the historical graph, we now consistently use cost basis for non-cash assets
+                    // to provide a stable view of investment growth without daily market fluctuations.
+                    // The main "Total Portfolio Value" card shows the live market value.
+                    if (isCashEquivalentType(symbolTypes[symbol])) {
+                        // Cash-like funds are valued at $1 per share. Their "cost" is their value.
+                        dailyTotalPortfolioCost += holding.totalShares;
+                    } else {
+                        // All other assets are valued at their cumulative cost basis.
+                        dailyTotalPortfolioCost += holding.totalCost;
+                    }
                 });
-                dailySnapshots[dateString] = dailyTotalValue;
+                
+                dailySnapshots[dateString] = dailyTotalPortfolioCost;
             }
 
             portfolioHistory = Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
@@ -1225,7 +1240,7 @@
             }
             logActivity('Refreshed prices for all assets.');
             await saveDataToFirestore();
-            updateDisplay(); // Re-render the UI with the new prices
+            await updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Now';
             refreshButton.disabled = false;
         }
@@ -2035,13 +2050,12 @@
         }
 
         // --- Main Update Function ---
-        function updateDisplay() {
+        async function updateDisplay() {
             const currentHoldings = calculateHoldingsAndCash();
             const stats = calculateOverallStats(currentHoldings);
             updateUserNameDisplay();
             updateStats(stats);
-            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
-            filterChart(activeChartFilter, portfolioHistory, currentHoldings);
+            await filterChart(activeChartFilter); 
             populatePlatformFilter();
             renderInvestments(currentHoldings);
             renderAllTransactions();
@@ -2218,13 +2232,11 @@
             document.documentElement.setAttribute('data-theme', theme);
             document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙';
         }
-        function toggleTheme() {
+        async function toggleTheme() {
             const newTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark';
             localStorage.setItem(THEME_KEY, newTheme);
             applyTheme(newTheme);
-            const currentHoldings = calculateHoldingsAndCash();
-            const portfolioHistory = buildPortfolioHistoryFromTransactions(currentHoldings);
-            filterChart(activeChartFilter, portfolioHistory, currentHoldings);
+            await filterChart(activeChartFilter);
         }
         function loadTheme() {
             applyTheme(localStorage.getItem(THEME_KEY) || 'light');
@@ -2459,8 +2471,10 @@
             }
         }
 
-        function filterChart(period, portfolioHistory) {
-            const currentHoldings = calculateHoldingsAndCash();
+        async function filterChart(period) {
+            const holdings = calculateHoldingsAndCash();
+            const history = await buildPortfolioHistoryFromTransactions();
+            
             activeChartFilter = period;
             document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.remove('active'));
             const activeBtn = Array.from(document.querySelectorAll('.chart-filter-btn')).find(b => b.textContent === period);
@@ -2473,10 +2487,10 @@
                 case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
                 case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
                 case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
-                default: updateCharts(portfolioHistory, currentHoldings); return;
+                default: updateCharts(history, holdings); return;
             }
-            const filteredData = portfolioHistory.filter(dp => new Date(dp.date) >= startDate);
-            updateCharts(filteredData, currentHoldings);
+            const filteredData = history.filter(dp => new Date(dp.date) >= startDate);
+            updateCharts(filteredData, holdings);
         }
 
         function showTab(tabName) {
@@ -2645,7 +2659,7 @@
             }
             logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
-            updateDisplay(); // Re-render the UI with the new prices
+            await updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
             showConfirmationModal("Mutual fund price refresh complete.", null);
@@ -2659,7 +2673,7 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
-        window.filterChart = (p) => filterChart(p, buildPortfolioHistoryFromTransactions(calculateHoldingsAndCash()));
+        window.filterChart = filterChart;
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
         window.validateSymbol = validateSymbol;
@@ -2938,7 +2952,7 @@
         </div>
         <div class="charts-section">
             <div class="chart-container">
-                <h3>Portfolio Performance History</h3>
+                <h3>Portfolio Growth (Cost Basis)</h3>
                 <div class="chart-filters">
                     <button class="chart-filter-btn" onclick="filterChart('1M')">1M</button>
                     <button class="chart-filter-btn" onclick="filterChart('6M')">6M</button>
