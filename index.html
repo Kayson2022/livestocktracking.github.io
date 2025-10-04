@@ -150,8 +150,8 @@
         .modal-close-btn { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-color-secondary); }
         .btn-confirm { background: linear-gradient(45deg, #27ae60, #2ecc71); }
         .btn-cancel { background: linear-gradient(45deg, #95a5a6, #7f8c8d); }
-        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content { text-align: left; }
-        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group { margin-bottom: 12px; }
+        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content, #recurringPurchaseModal .modal-content { text-align: left; }
+        #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group, #recurringPurchaseModal .form-group { margin-bottom: 12px; }
         #editHoldingModal .form-group small { color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block; }
         #firebaseConfigModal .form-group { margin-bottom: 12px; }
         #firebaseConfigModal .form-group label { font-size: 0.9em; }
@@ -244,6 +244,14 @@
             margin: 0 2px;
         }
 
+        /* Recurring Purchases List */
+        #recurring-purchases-list { margin-top: 20px; max-height: 200px; overflow-y: auto; }
+        .recurring-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-radius: 6px; margin-bottom: 8px; background-color: var(--bg-color); border: 1px solid var(--border-color); }
+        .recurring-item-info { font-size: 0.9em; }
+        .recurring-item-info strong { color: var(--accent-color-1); }
+        .recurring-item-actions .btn-danger { padding: 4px 8px; font-size: 12px; }
+
+
         .countdown-timer {
             position: fixed;
             bottom: 20px;
@@ -335,7 +343,8 @@
 
         let portfolioData = {
              username: '',
-             transactions: []
+             transactions: [],
+             recurringTransactions: []
         };
         let uiState = {
             expandedGroups: {},
@@ -358,6 +367,7 @@
         let lastEditedField = 'shares';
         let userNameUpdateTimeout = null;
         let isInitialDataLoaded = false; // Prevents race conditions on load
+        let hasRecurringCheckRun = false; // Prevents multiple recurring checks per session
 
         // --- INITIALIZATION ---
         function handleConfigFileImport(event) {
@@ -501,8 +511,16 @@
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
                 } else {
+                    // Ensure new fields exist for old data structures
+                    if (!portfolioData.recurringTransactions) portfolioData.recurringTransactions = [];
                     setDoc(portfolioDocRef, portfolioData);
                 }
+                
+                if (!hasRecurringCheckRun) {
+                    checkAndProcessRecurringTransactions();
+                    hasRecurringCheckRun = true;
+                }
+
                 isInitialDataLoaded = true; // Set flag after first data load
                 updateDisplay();
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
@@ -602,6 +620,150 @@
                 location.reload();
             });
         }
+
+        // --- Recurring Transactions Logic ---
+        function openRecurringPurchaseModal() {
+            renderRecurringPurchasesList();
+            document.getElementById('recurringPurchaseModal').style.display = 'flex';
+            document.getElementById('recurringStartDate').valueAsDate = new Date();
+        }
+
+        function closeRecurringPurchaseModal() {
+            document.getElementById('recurringPurchaseModal').style.display = 'none';
+        }
+
+        async function saveRecurringPurchase() {
+            const symbol = document.getElementById('recurringSymbol').value.trim().toUpperCase();
+            if (!symbol) {
+                showConfirmationModal("Symbol is required.", null);
+                return;
+            }
+            // A simple validation to ensure it looks like a ticker.
+            // More robust validation can be added later if needed.
+            if (symbol.length < 1 || symbol.length > 10 || symbol.includes(' ')) {
+                showConfirmationModal(`"${symbol}" does not look like a valid stock symbol.`, null);
+                return;
+            }
+
+            const newRecurring = {
+                id: Date.now(),
+                symbol: symbol,
+                amount: parseFloat(document.getElementById('recurringAmount').value),
+                frequency: document.getElementById('recurringFrequency').value,
+                startDate: document.getElementById('recurringStartDate').value,
+                accountType: document.getElementById('recurringAccountType').value,
+                platform: document.getElementById('recurringPlatform').value,
+                lastExecutionDate: null // Will be set on first run
+            };
+
+            if (!newRecurring.amount || newRecurring.amount <= 0 || !newRecurring.startDate || !newRecurring.accountType || !newRecurring.platform) {
+                showConfirmationModal("All fields are required and amount must be greater than zero.", null);
+                return;
+            }
+            if (!portfolioData.recurringTransactions) {
+                portfolioData.recurringTransactions = [];
+            }
+            portfolioData.recurringTransactions.push(newRecurring);
+            await saveDataToFirestore();
+            renderRecurringPurchasesList();
+            // Clear form
+            document.getElementById('recurringSymbol').value = '';
+            document.getElementById('recurringAmount').value = '';
+        }
+        
+        async function deleteRecurringPurchase(id) {
+            portfolioData.recurringTransactions = portfolioData.recurringTransactions.filter(rt => rt.id !== id);
+            await saveDataToFirestore();
+            renderRecurringPurchasesList();
+        }
+
+        function renderRecurringPurchasesList() {
+            const listEl = document.getElementById('recurring-purchases-list');
+            listEl.innerHTML = '';
+            const recurring = portfolioData.recurringTransactions || [];
+
+            if (recurring.length === 0) {
+                listEl.innerHTML = '<p style="text-align: center; color: var(--text-color-secondary);">No recurring purchases set up.</p>';
+                return;
+            }
+
+            recurring.forEach(rt => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'recurring-item';
+                itemEl.innerHTML = `
+                    <div class="recurring-item-info">
+                        Purchasing <strong>${formatCurrency(rt.amount)}</strong> of <strong>${rt.symbol}</strong> ${rt.frequency}, starting ${rt.startDate}.
+                    </div>
+                    <div class="recurring-item-actions">
+                        <button class="btn btn-danger" onclick="deleteRecurringPurchase(${rt.id})">Delete</button>
+                    </div>
+                `;
+                listEl.appendChild(itemEl);
+            });
+        }
+        
+        async function checkAndProcessRecurringTransactions() {
+            if (!isInitialDataLoaded || !portfolioData.recurringTransactions || portfolioData.recurringTransactions.length === 0) {
+                return;
+            }
+
+            let didCreateTransactions = false;
+            const today = new Date();
+            today.setHours(0,0,0,0); // Normalize to start of day for comparison
+
+            for (const rule of portfolioData.recurringTransactions) {
+                const startDate = new Date(rule.startDate + 'T00:00:00'); // Ensure correct date parsing
+                let nextDate = startDate;
+                
+                if (rule.lastExecutionDate) {
+                    const lastDate = new Date(rule.lastExecutionDate + 'T00:00:00');
+                    nextDate = new Date(lastDate);
+                    // Calculate next date based on frequency
+                    if (rule.frequency === 'weekly') {
+                        nextDate.setDate(nextDate.getDate() + 7);
+                    } else if (rule.frequency === 'bi-weekly') {
+                        nextDate.setDate(nextDate.getDate() + 14);
+                    } else if (rule.frequency === 'monthly') {
+                        nextDate.setMonth(nextDate.getMonth() + 1);
+                    }
+                }
+                
+                // If next scheduled date is today or in the past, process it
+                if (nextDate <= today) {
+                    console.log(`Processing recurring purchase for ${rule.symbol}`);
+                    const priceData = await fetchPrice({ symbol: rule.symbol, type: 'ETF' }); // Assume ETF for fetching
+                    if (priceData && priceData.currentPrice > 0) {
+                        const shares = rule.amount / priceData.currentPrice;
+
+                        const newTransaction = {
+                            id: Date.now() + Math.random(),
+                            transactionType: 'BUY',
+                            date: today.toISOString().split('T')[0],
+                            symbol: rule.symbol,
+                            name: priceCache[rule.symbol]?.name || rule.symbol, // Use cached name or symbol
+                            type: 'ETF', // Assume ETF
+                            shares: shares,
+                            price: priceData.currentPrice,
+                            accountType: rule.accountType,
+                            platform: rule.platform,
+                            dividend: 0
+                        };
+                        
+                        portfolioData.transactions.push(newTransaction);
+                        rule.lastExecutionDate = today.toISOString().split('T')[0];
+                        didCreateTransactions = true;
+                    } else {
+                        console.warn(`Could not fetch price for recurring purchase of ${rule.symbol}. Skipping.`);
+                    }
+                }
+            }
+
+            if (didCreateTransactions) {
+                await saveDataToFirestore();
+                showConfirmationModal("One or more recurring purchases were automatically logged.", null);
+            }
+        }
+
 
         // --- Core Data Calculation Logic ---
         function calculateHoldingsAndCash() {
@@ -930,6 +1092,7 @@
             }
 
             await saveDataToFirestore();
+            updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Now';
             refreshButton.disabled = false;
         }
@@ -2113,11 +2276,19 @@
                 }
 
                 const ts = d['Time Series (Daily)'];
-                if (ts) {
-                    const dates = Object.keys(ts);
+                if (ts && Object.keys(ts).length >= 2) {
+                    // Object.keys does not guarantee order. We must sort the dates descending to get the latest.
+                    const sortedDates = Object.keys(ts).sort((a, b) => new Date(b) - new Date(a));
+                    
+                    const latestDate = sortedDates[0];
+                    const previousDate = sortedDates[1];
+
+                    const currentPrice = parseFloat(ts[latestDate]['4. close']);
+                    const previousClosePrice = parseFloat(ts[previousDate]['4. close']);
+
                     return {
-                        currentPrice: parseFloat(ts[dates[0]]['4. close']),
-                        previousClosePrice: dates[1] ? parseFloat(ts[dates[1]]['4. close']) : null
+                        currentPrice: currentPrice,
+                        previousClosePrice: previousClosePrice
                     };
                 }
                 return { currentPrice: null, previousClosePrice: null };
@@ -2227,6 +2398,9 @@
             
             const currentHoldings = calculateHoldingsAndCash();
             const mutualFundHoldings = currentHoldings.filter(h => {
+                // Exclude holdings marked as 'Manual' to save API calls
+                if (h.type === 'Manual') return false;
+
                 const isMFType = h.type === 'Mutual Fund';
                 const hasXSuffix = h.symbol && h.symbol.trim().toUpperCase().endsWith('X');
                 const looksLikeTicker = h.symbol && !h.symbol.includes(' ');
@@ -2261,6 +2435,7 @@
             }
 
             await saveDataToFirestore();
+            updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
             showConfirmationModal("Mutual fund price refresh complete.", null);
@@ -2297,6 +2472,10 @@
         window.saveTransactionEdit = saveTransactionEdit;
         window.removeTransaction = removeTransaction;
         window.refreshMutualFunds = refreshMutualFunds;
+        window.openRecurringPurchaseModal = openRecurringPurchaseModal;
+        window.closeRecurringPurchaseModal = closeRecurringPurchaseModal;
+        window.saveRecurringPurchase = saveRecurringPurchase;
+        window.deleteRecurringPurchase = deleteRecurringPurchase;
     </script>
 
     <!-- MODALS -->
@@ -2451,6 +2630,61 @@
         </div>
     </div>
 
+    <div id="recurringPurchaseModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close-btn" onclick="closeRecurringPurchaseModal()">×</button>
+            <h3>Set Up Recurring Purchase</h3>
+            <div class="form-group">
+                <label for="recurringSymbol">Symbol</label>
+                <input type="text" id="recurringSymbol" placeholder="e.g., VOO, VTI" required>
+            </div>
+            <div class="form-group">
+                <label for="recurringAmount">Purchase Amount ($)</label>
+                <input type="number" id="recurringAmount" step="any" min="0" placeholder="100.00" required>
+            </div>
+            <div class="form-group">
+                <label for="recurringFrequency">Frequency</label>
+                <select id="recurringFrequency" required>
+                    <option value="weekly">Weekly</option>
+                    <option value="bi-weekly">Every 2 Weeks</option>
+                    <option value="monthly">Monthly</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="recurringStartDate">Start Date</label>
+                <input type="date" id="recurringStartDate" required>
+            </div>
+            <div class="form-group">
+                <label for="recurringAccountType">Account Type</label>
+                <select id="recurringAccountType" required>
+                    <option value="">Select Account</option>
+                    <option value="Regular Brokerage">Regular Brokerage</option>
+                    <option value="Roth IRA">Roth IRA</option>
+                    <option value="401(k)">401(k)</option>
+                    <option value="529 College Saving">529 College Saving</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="recurringPlatform">Platform</label>
+                 <select id="recurringPlatform" required>
+                    <option value="">Select Platform</option>
+                    <option value="Fidelity">Fidelity</option>
+                    <option value="Vanguard">Vanguard</option>
+                    <option value="Charles Schwab">Charles Schwab</option>
+                    <option value="Merrill Edge">Merrill Edge</option>
+                    <option value="E*TRADE">E*TRADE</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            <div class="modal-buttons" style="margin-top: 10px;">
+                <button class="btn btn-confirm" onclick="saveRecurringPurchase()">Save Schedule</button>
+            </div>
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+            <h4>Active Schedules</h4>
+            <div id="recurring-purchases-list"></div>
+        </div>
+    </div>
+
     <div class="container">
         <div class="header">
             <div id="auth-container">
@@ -2594,17 +2828,15 @@
             </div>
         </div>
         <div id="dataTransfer" class="card-panel">
-            <h2>Data Transfer</h2>
+            <h2>Data Transfer & Management</h2>
             <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+            <button class="btn btn-secondary" onclick="openRecurringPurchaseModal()">Set Up Recurring</button>
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
-
-
 
