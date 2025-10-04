@@ -952,7 +952,11 @@
             const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
             if (sorted.length === 0) return [];
             
-            const allSymbols = [...new Set(sorted.map(t => t.symbol).filter(s => s && !isCashEquivalentType(s) && t.type !== 'Manual'))];
+            const allSymbols = [...new Set(
+                sorted
+                    .filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual')
+                    .map(t => t.symbol)
+            )];
 
             // Fetch historical data for any symbols we haven't already fetched in this session.
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
@@ -3068,4 +3072,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
