@@ -152,13 +152,10 @@
         .modal-close-btn { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-color-secondary); }
         .btn-confirm { background: linear-gradient(45deg, #27ae60, #2ecc71); }
         .btn-cancel { background: linear-gradient(45deg, #95a5a6, #7f8c8d); }
-        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content, #recurringPurchaseModal .modal-content, #activityLogModal .modal-content { text-align: left; }
+        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #recurringPurchaseModal .modal-content, #activityLogModal .modal-content { text-align: left; }
         #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group, #recurringPurchaseModal .form-group { margin-bottom: 12px; }
         #editHoldingModal .form-group small { color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block; }
-        #firebaseConfigModal .form-group { margin-bottom: 12px; }
-        #firebaseConfigModal .form-group label { font-size: 0.9em; }
-        #firebaseConfigModal .form-group input { font-size: 0.9em; padding: 10px; }
-        #firebaseConfigModal .modal-buttons .btn { flex-grow: 1; }
+        
         /* Consolidated Card Styles */
         .investment-header-summary { text-align: right; }
         .investment-item.consolidated .investment-details {
@@ -361,12 +358,11 @@
 
     <script type="module">
         // Firebase App (the core Firebase SDK) is always required and must be listed first
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
-        const LOCAL_STORAGE_FIREBASE_CONFIG_KEY = 'myPortfolioFirebaseConfig_v4';
         const FIRESTORE_DATA_DOC = 'portfolioData';
         const FIRESTORE_UI_STATE_DOC = 'uiState';
         const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
@@ -426,56 +422,11 @@
         let historicalPriceCache = {}; // Session cache for historical price data
 
         // --- INITIALIZATION ---
-        function handleConfigFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                try {
-                    const config = {};
-                    const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
-                    const startIndex = text.indexOf('{');
-                    const endIndex = text.lastIndexOf('}');
-                    if (startIndex === -1 || endIndex === -1) {
-                        throw new Error("Could not find a configuration object { ... } in the file.");
-                    }
-                    const content = text.substring(startIndex + 1, endIndex);
-
-                    content.split(',').forEach(line => {
-                        if (line.trim() === '') return;
-                        const parts = line.split(':');
-                        if (parts.length < 2) return;
-                        const key = parts[0].trim().replace(/['"]/g, '');
-                        let value = parts.slice(1).join(':').trim();
-                        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                            value = value.substring(1, value.length - 1);
-                        }
-                        if (requiredKeys.includes(key)) {
-                            config[key] = value;
-                        }
-                    });
-
-                    const hasAllKeys = requiredKeys.every(key => config[key]);
-                    if (!hasAllKeys) {
-                        throw new Error("The configuration object is missing required Firebase keys. Please ensure the file contains the full `firebaseConfig` object.");
-                    }
-
-                    localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
-                    closeFirebaseConfigModal();
-                    location.reload();
-                } catch (error) {
-                    showConfirmationModal("Failed to import configuration from file. Error: " + error.message, null);
-                }
-            };
-            reader.readAsText(file);
-        }
-
+        
         window.addEventListener('DOMContentLoaded', startApp);
 
         async function startApp() {
             document.getElementById('transactionDate').valueAsDate = new Date();
-            document.getElementById('firebaseConfigFileInput').addEventListener('change', handleConfigFileImport);
             loadTheme();
             loadApiKeys();
             loadAutoRefreshInterval();
@@ -492,14 +443,30 @@
         }
 
         async function initializeFirebase() {
-            const storedConfig = localStorage.getItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
-            if (!storedConfig) {
-                showFirebaseConfigModal();
-                return;
+            // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
+            const firebaseConfig = {
+                apiKey: "YOUR_API_KEY",
+                authDomain: "YOUR_AUTH_DOMAIN",
+                projectId: "YOUR_PROJECT_ID",
+                storageBucket: "YOUR_STORAGE_BUCKET",
+                messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+                appId: "YOUR_APP_ID"
+            };
+            // --- END OF CONFIGURATION ---
+
+            // Check if the user has replaced the placeholder configuration
+            if (firebaseConfig.apiKey === "YOUR_API_KEY" || !firebaseConfig.apiKey) {
+                showConfirmationModal("Configuration Needed: Please edit the index.html file and replace the placeholder 'YOUR_API_KEY', etc., with your actual Firebase project configuration values.", null);
+                return; // Stop execution to prevent Firebase errors
             }
+            
             try {
-                const firebaseConfig = JSON.parse(storedConfig);
-                firebaseApp = initializeApp(firebaseConfig);
+                // Initialize Firebase only if it hasn't been already
+                if (getApps().length === 0) {
+                    firebaseApp = initializeApp(firebaseConfig);
+                } else {
+                    firebaseApp = getApps()[0];
+                }
                 db = getFirestore(firebaseApp);
                 auth = getAuth(firebaseApp);
 
@@ -529,8 +496,7 @@
 
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
-                updateDataStatus('error', "Config Error. Please Reset Connection.");
-                showFirebaseConfigModal(true);
+                showConfirmationModal("Firebase connection failed. Please check your configuration in the code.", null);
             }
         }
 
@@ -582,20 +548,25 @@
                     needsSave = true;
                 }
                 
-                cleanUpActivityLog();
+                if(cleanUpActivityLog()) {
+                    needsSave = true;
+                }
 
                 if (!hasRecurringCheckRun) {
                     const processed = await checkAndProcessRecurringTransactions();
                     if(processed) needsSave = true;
                     hasRecurringCheckRun = true;
                 }
-
-                isInitialDataLoaded = true; // Set flag after first data load
                 
                 if (needsSave) {
                     await saveDataToFirestore();
+                } 
+
+                if (!isInitialDataLoaded) {
+                    isInitialDataLoaded = true;
+                    await updateDisplay();
                 } else {
-                    await updateDisplay(); // Only update display if no save is needed, as save triggers a re-render
+                    await updateDisplay(false); // Subsequent updates won't re-fetch historical data
                 }
 
                 if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
@@ -654,48 +625,7 @@
                 };
             }
         }
-
-        function showFirebaseConfigModal(isErrorState = false) {
-            const modal = document.getElementById('firebaseConfigModal');
-            const errorMsg = document.getElementById('firebaseConfigError');
-            errorMsg.style.display = isErrorState ? 'block' : 'none';
-            modal.style.display = 'flex';
-        }
-
-        function closeFirebaseConfigModal() {
-            document.getElementById('firebaseConfigModal').style.display = 'none';
-        }
-
-        window.saveFirebaseConfig = function() {
-            const config = {
-                apiKey: document.getElementById('fbApiKey').value.trim(),
-                authDomain: document.getElementById('fbAuthDomain').value.trim(),
-                projectId: document.getElementById('fbProjectId').value.trim(),
-                storageBucket: document.getElementById('fbStorageBucket').value.trim(),
-                messagingSenderId: document.getElementById('fbMessagingSenderId').value.trim(),
-                appId: document.getElementById('fbAppId').value.trim()
-            };
-            if (Object.values(config).some(v => !v)) {
-                showConfirmationModal("All fields are required. Please check your values from the Firebase console.", null);
-                return;
-            }
-
-            try {
-                localStorage.setItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY, JSON.stringify(config));
-                closeFirebaseConfigModal();
-                location.reload();
-            } catch (error) {
-                showConfirmationModal("Failed to save configuration. Please try again.", null);
-            }
-        }
-
-        window.resetFirebaseConnection = function() {
-            showConfirmationModal("Are you sure? This will clear your current connection settings and reload the page.", () => {
-                localStorage.removeItem(LOCAL_STORAGE_FIREBASE_CONFIG_KEY);
-                location.reload();
-            });
-        }
-
+        
         // --- Activity Log ---
         function cleanUpActivityLog() {
             if (!portfolioData.activityLog) {
@@ -2122,13 +2052,15 @@
         }
 
         // --- Main Update Function ---
-        async function updateDisplay() {
+        async function updateDisplay(fetchHistorical = true) {
             if (!isInitialDataLoaded) return;
             const currentHoldings = calculateHoldingsAndCash();
             const stats = calculateOverallStats(currentHoldings);
             updateUserNameDisplay();
             updateStats(stats);
-            await filterChart(activeChartFilter); 
+            if (fetchHistorical) {
+                await filterChart(activeChartFilter);
+            }
             populatePlatformFilter();
             renderInvestments(currentHoldings);
             renderAllTransactions();
@@ -2813,50 +2745,7 @@
             </div>
         </div>
     </div>
-    <div id="firebaseConfigModal" class="modal-overlay">
-        <div class="modal-content">
-            <h3>Firebase Configuration Required</h3>
-            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
-                To connect to your private cloud database, please enter the configuration values from your Firebase project settings.
-            </p>
-            <div id="firebaseConfigError" style="display:none; background: #ffdddd; border: 1px solid #ffaaaa; color: #D8000C; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-                Your previous connection attempt failed. Please double-check your values.
-            </div>
-            <div class="form-group">
-                <label for="fbApiKey">apiKey</label>
-                <input type="text" id="fbApiKey" placeholder="Enter your apiKey">
-            </div>
-            <div class="form-group">
-                <label for="fbAuthDomain">authDomain</label>
-                <input type="text" id="fbAuthDomain" placeholder="Enter your authDomain">
-            </div>
-            <div class="form-group">
-                <label for="fbProjectId">projectId</label>
-                <input type="text" id="fbProjectId" placeholder="Enter your projectId">
-            </div>
-            <div class="form-group">
-                <label for="fbStorageBucket">storageBucket</label>
-                <input type="text" id="fbStorageBucket" placeholder="Enter your storageBucket">
-            </div>
-            <div class="form-group">
-                <label for="fbMessagingSenderId">messagingSenderId</label>
-                <input type="text" id="fbMessagingSenderId" placeholder="Enter your messagingSenderId">
-            </div>
-            <div class="form-group">
-                <label for="fbAppId">appId</label>
-                <input type="text" id="fbAppId" placeholder="Enter your appId">
-            </div>
-            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
-            <p style="margin: 10px 0 20px; color: var(--text-color-secondary); font-size: 0.9em;">
-                Or, import the configuration from a text or JSON file.
-            </p>
-            <input type="file" id="firebaseConfigFileInput" accept=".json,.txt" style="display: none;">
-            <div class="modal-buttons" style="margin-top: 20px;">
-                <button class="btn btn-cancel" onclick="document.getElementById('firebaseConfigFileInput').click()">Import from File</button>
-                <button class="btn btn-confirm" onclick="saveFirebaseConfig()">Save & Connect</button>
-            </div>
-        </div>
-    </div>
+    
     <div id="editTransactionModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close-btn" onclick="closeEditModal()">×</button>
@@ -2943,12 +2832,7 @@
                 <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
                 <small>Minimum 30 seconds to respect API limits.</small>
             </div>
-            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 20px 0;">
-            <div class="form-group">
-                <label>Firebase Connection</label>
-                <button class="btn btn-cancel" onclick="resetFirebaseConnection()">Reset Connection</button>
-                <small>Use this if you need to enter a new Firebase configuration.</small>
-            </div>
+            
             <div class="modal-buttons" style="margin-top: 20px;">
                 <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
             </div>
