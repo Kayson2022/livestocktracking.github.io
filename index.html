@@ -410,6 +410,7 @@
         let isInitialDataLoaded = false; // Prevents race conditions on load
         let hasRecurringCheckRun = false; // Prevents multiple recurring checks per session
         let activeTab = 'investments';
+        let historicalPriceCache = {}; // Session cache for historical price data
 
         // --- INITIALIZATION ---
         function handleConfigFileImport(event) {
@@ -981,29 +982,53 @@
             return calculatedHoldings;
         }
 
-        function buildPortfolioHistoryFromTransactions() {
+        async function buildPortfolioHistoryFromTransactions() {
             const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
-            if (!nonWatchlistTransactions || nonWatchlistTransactions.length === 0) return [];
+            if (nonWatchlistTransactions.length === 0) return [];
+
+            const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+            if (sorted.length === 0) return [];
+            
+            const allSymbols = [...new Set(sorted.map(t => t.symbol).filter(s => s && !isCashEquivalentType(s)))];
+
+            // Fetch historical data for any symbols we haven't already fetched in this session.
+            const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
+            if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
+                console.log('Fetching historical data for chart:', symbolsToFetch);
+                for (const symbol of symbolsToFetch) {
+                    await delay(API_THROTTLE_DELAY * 2.5); // Use a longer delay for Alpha Vantage's strict limits
+                    try {
+                        const outputSize = 'compact'; // Fetches the last 100 data points.
+                        const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=${outputSize}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        
+                        if (data.Information || data.Note) {
+                            console.warn(`Alpha Vantage API limit likely reached for historical fetch of ${symbol}.`);
+                            historicalPriceCache[symbol] = {}; // Mark as tried to prevent re-fetching this session
+                        } else if (data['Time Series (Daily)']) {
+                            historicalPriceCache[symbol] = data['Time Series (Daily)'];
+                        } else {
+                            console.warn(`No historical data returned for ${symbol}.`);
+                            historicalPriceCache[symbol] = {}; // Mark as tried
+                        }
+                    } catch (e) {
+                        console.error(`Network error fetching historical data for ${symbol}:`, e);
+                        historicalPriceCache[symbol] = {}; // Mark as tried
+                    }
+                }
+            }
 
             const dailySnapshots = {};
-            const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
-            
             const firstDate = new Date(sorted[0].date);
             const today = new Date();
-            let portfolioHistory = [];
-
-            // Pre-calculate symbol types to avoid finding it in the loop
-            const symbolTypes = {};
-            sorted.forEach(t => {
-                if (t.symbol && !symbolTypes[t.symbol]) {
-                    symbolTypes[t.symbol] = t.type;
-                }
-            });
+            const lastKnownPrices = {};
 
             for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
                 const dateString = d.toISOString().split('T')[0];
-                const transactionsUpToDate = sorted.filter(t => new Date(t.date).toISOString().split('T')[0] <= dateString);
+                const transactionsUpToDate = sorted.filter(t => new Date(t.date) <= d);
 
+                let dailyTotalValue = 0;
                 const tempHoldings = {};
 
                 transactionsUpToDate.forEach(t => {
@@ -1013,41 +1038,55 @@
                     if (!t.symbol) return;
                     const symbol = t.symbol.toUpperCase();
 
-                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0, totalCost: 0 };
+                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0, totalCost: 0, type: t.type };
 
                     if (type === 'BUY') {
                         tempHoldings[symbol].totalShares += shares;
                         tempHoldings[symbol].totalCost += shares * price;
                     } else if (type === 'SELL') {
-                        let costReduction = 0;
-                        if (tempHoldings[symbol].totalShares > 0.00001) { // Avoid division by zero
+                        if (tempHoldings[symbol].totalShares > 0) {
                             const avgCost = tempHoldings[symbol].totalCost / tempHoldings[symbol].totalShares;
-                            costReduction = Math.min(tempHoldings[symbol].totalCost, shares * avgCost);
+                            tempHoldings[symbol].totalCost -= shares * avgCost;
                         }
                         tempHoldings[symbol].totalShares -= shares;
-                        tempHoldings[symbol].totalCost -= costReduction;
                     }
                 });
 
-                let dailyTotalPortfolioCost = 0;
                 Object.entries(tempHoldings).forEach(([symbol, holding]) => {
-                    // For the historical graph, we now consistently use cost basis for non-cash assets
-                    // to provide a stable view of investment growth without daily market fluctuations.
-                    // The main "Total Portfolio Value" card shows the live market value.
-                    if (isCashEquivalentType(symbolTypes[symbol])) {
-                        // Cash-like funds are valued at $1 per share. Their "cost" is their value.
-                        dailyTotalPortfolioCost += holding.totalShares;
-                    } else {
-                        // All other assets are valued at their cumulative cost basis.
-                        dailyTotalPortfolioCost += holding.totalCost;
+                    if (holding.totalShares <= 0) return;
+
+                    // For cash equivalents, value is just the number of "shares" (i.e., the dollar amount)
+                    if (isCashEquivalentType(holding.type)) {
+                        dailyTotalValue += holding.totalShares;
+                        return;
                     }
+                    
+                    let priceForDate = lastKnownPrices[symbol]; // Default to previous day's price to fill weekends/holidays
+
+                    const symbolHistory = historicalPriceCache[symbol];
+                    if (symbolHistory && symbolHistory[dateString]) {
+                        priceForDate = parseFloat(symbolHistory[dateString]['4. close']);
+                    }
+                    
+                    // Fallback logic
+                    if (priceForDate === undefined) {
+                        // On the very last day, if we have a current price from a normal refresh, use that.
+                        if (dateString === today.toISOString().split('T')[0] && priceCache[symbol]?.currentPrice) {
+                            priceForDate = priceCache[symbol].currentPrice;
+                        } else {
+                            // Otherwise, for historical points without data, use average cost as a last resort.
+                            priceForDate = (holding.totalShares > 0) ? (holding.totalCost / holding.totalShares) : 0;
+                        }
+                    }
+                    
+                    dailyTotalValue += holding.totalShares * priceForDate;
+                    lastKnownPrices[symbol] = priceForDate; // Carry forward this price for the next day (in case it's a weekend)
                 });
-                
-                dailySnapshots[dateString] = dailyTotalPortfolioCost;
+
+                dailySnapshots[dateString] = dailyTotalValue;
             }
 
-            portfolioHistory = Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
-            return portfolioHistory;
+            return Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
         }
 
         // --- Data Persistence Functions ---
@@ -2952,7 +2991,7 @@
         </div>
         <div class="charts-section">
             <div class="chart-container">
-                <h3>Portfolio Growth (Cost Basis)</h3>
+                <h3>Portfolio Performance History</h3>
                 <div class="chart-filters">
                     <button class="chart-filter-btn" onclick="filterChart('1M')">1M</button>
                     <button class="chart-filter-btn" onclick="filterChart('6M')">6M</button>
