@@ -60,13 +60,14 @@
         .header { text-align: center; margin-bottom: 30px; color: var(--header-text-color); position: relative; }
         .header h1 { font-size: 2.5em; font-weight: 700; margin-bottom: 10px; }
         #userNameDisplay { color: var(--text-color-primary); }
-        .data-status { position: absolute; top: 10px; right: 60px; /* Adjusted for settings icon */ background: rgba(255, 255, 255, 0.2); padding: 8px 12px; border-radius: 20px; font-size: 0.8em; color: var(--text-color-primary); backdrop-filter: blur(10px); white-space: nowrap; transition: background-color 0.3s ease; border: 1px solid var(--border-color); }
+        .data-status { position: absolute; top: 10px; right: 110px; /* Adjusted for new icons */ background: rgba(255, 255, 255, 0.2); padding: 8px 12px; border-radius: 20px; font-size: 0.8em; color: var(--text-color-primary); backdrop-filter: blur(10px); white-space: nowrap; transition: background-color 0.3s ease; border: 1px solid var(--border-color); }
         .data-status.saved { background: rgba(22, 163, 74, 0.2); border-color: rgba(22, 163, 74, 0.5); }
         .data-status.loading { background: rgba(255, 193, 7, 0.2); border-color: rgba(255, 193, 7, 0.5); }
         .data-status.error { background: rgba(220, 38, 38, 0.2); border-color: rgba(220, 38, 38, 0.5); }
         .header-icon { background: var(--card-bg-color); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--border-color); font-size: 1.2em; color: var(--text-color-secondary); position: absolute; top: 10px; z-index: 10; box-shadow: 0 2px 4px var(--shadow-color); }
         .theme-toggle { left: 10px; }
         .settings-toggle { right: 10px; font-size: 1.4em; }
+        .activity-log-toggle { right: 60px; }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: var(--card-bg-color); padding: 25px 15px; border-radius: 15px; text-align: center; box-shadow: 0 4px 10px var(--shadow-color); border: 1px solid var(--border-color); transition: transform 0.3s ease, box-shadow 0.3s ease; }
         .stat-card:hover { transform: translateY(-8px); box-shadow: 0 8px 20px var(--shadow-color); }
@@ -150,7 +151,7 @@
         .modal-close-btn { position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-color-secondary); }
         .btn-confirm { background: linear-gradient(45deg, #27ae60, #2ecc71); }
         .btn-cancel { background: linear-gradient(45deg, #95a5a6, #7f8c8d); }
-        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content, #recurringPurchaseModal .modal-content { text-align: left; }
+        #editTransactionModal .modal-content, #editHoldingModal .modal-content, #settingsModal .modal-content, #firebaseConfigModal .modal-content, #recurringPurchaseModal .modal-content, #activityLogModal .modal-content { text-align: left; }
         #editTransactionModal .form-group, #editHoldingModal .form-group, #settingsModal .form-group, #recurringPurchaseModal .form-group { margin-bottom: 12px; }
         #editHoldingModal .form-group small { color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block; }
         #firebaseConfigModal .form-group { margin-bottom: 12px; }
@@ -250,6 +251,45 @@
         .recurring-item-info { font-size: 0.9em; }
         .recurring-item-info strong { color: var(--accent-color-1); }
         .recurring-item-actions .btn-danger { padding: 4px 8px; font-size: 12px; }
+        
+        /* Activity Log Styles */
+        #activity-log-list { font-size: 0.9em; }
+        .log-group { margin-bottom: 15px; }
+        .log-group h4 { padding-bottom: 5px; border-bottom: 1px solid var(--border-color); margin-bottom: 8px; }
+        .log-entry { display: flex; margin-bottom: 5px; }
+        .log-time { color: var(--text-color-secondary); min-width: 70px; }
+        .log-message { }
+
+        /* Tab Styles */
+        .tabs-nav {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .tab-link {
+            padding: 10px 20px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--text-color-secondary);
+            transition: all 0.2s ease;
+        }
+        .tab-link:hover {
+            color: var(--text-color-primary);
+        }
+        .tab-link.active {
+            color: var(--accent-color-1);
+            border-bottom-color: var(--accent-color-1);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
 
 
         .countdown-timer {
@@ -344,7 +384,8 @@
         let portfolioData = {
              username: '',
              transactions: [],
-             recurringTransactions: []
+             recurringTransactions: [],
+             activityLog: []
         };
         let uiState = {
             expandedGroups: {},
@@ -368,6 +409,7 @@
         let userNameUpdateTimeout = null;
         let isInitialDataLoaded = false; // Prevents race conditions on load
         let hasRecurringCheckRun = false; // Prevents multiple recurring checks per session
+        let activeTab = 'investments';
 
         // --- INITIALIZATION ---
         function handleConfigFileImport(event) {
@@ -513,9 +555,12 @@
                 } else {
                     // Ensure new fields exist for old data structures
                     if (!portfolioData.recurringTransactions) portfolioData.recurringTransactions = [];
+                    if (!portfolioData.activityLog) portfolioData.activityLog = [];
                     setDoc(portfolioDocRef, portfolioData);
                 }
                 
+                cleanUpActivityLog();
+
                 if (!hasRecurringCheckRun) {
                     checkAndProcessRecurringTransactions();
                     hasRecurringCheckRun = true;
@@ -621,6 +666,82 @@
             });
         }
 
+        // --- Activity Log ---
+        function cleanUpActivityLog() {
+            if (!portfolioData.activityLog) {
+                return;
+            }
+            const fifteenYearsAgo = new Date();
+            fifteenYearsAgo.setFullYear(fifteenYearsAgo.getFullYear() - 15);
+            const originalLength = portfolioData.activityLog.length;
+            portfolioData.activityLog = portfolioData.activityLog.filter(log => new Date(log.date) > fifteenYearsAgo);
+            if (originalLength > portfolioData.activityLog.length) {
+                console.log(`Cleaned up ${originalLength - portfolioData.activityLog.length} old log entries.`);
+            }
+        }
+        
+        function logActivity(message) {
+            if (!portfolioData.activityLog) {
+                portfolioData.activityLog = [];
+            }
+            
+            const logEntry = {
+                date: new Date().toISOString(),
+                message: message
+            };
+            portfolioData.activityLog.unshift(logEntry); // Add to the beginning of the array
+
+            // No need to call saveDataToFirestore here, it will be called by the function that triggered the log.
+        }
+
+        function openActivityLogModal() {
+            renderActivityLog();
+            document.getElementById('activityLogModal').style.display = 'flex';
+        }
+
+        function closeActivityLogModal() {
+            document.getElementById('activityLogModal').style.display = 'none';
+        }
+
+        function renderActivityLog() {
+            const listEl = document.getElementById('activity-log-list');
+            listEl.innerHTML = '';
+            const log = portfolioData.activityLog || [];
+
+            if (log.length === 0) {
+                listEl.innerHTML = '<p style="text-align: center; color: var(--text-color-secondary);">No recent activity.</p>';
+                return;
+            }
+
+            const groupedByDate = log.reduce((acc, log) => {
+                const date = new Date(log.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+                if (!acc[date]) {
+                    acc[date] = [];
+                }
+                acc[date].push(log);
+                return acc;
+            }, {});
+
+            let html = '';
+            const sortedDates = Object.keys(groupedByDate).sort((a, b) => new Date(b) - new Date(a));
+            
+            for (const date of sortedDates) {
+                html += `<div class="log-group"><h4>${date}</h4>`;
+                groupedByDate[date].forEach(log => {
+                    const time = new Date(log.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                    html += `
+                        <div class="log-entry">
+                            <span class="log-time">${time}</span>
+                            <span class="log-message">${log.message}</span>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            }
+            listEl.innerHTML = html;
+        }
+
+
         // --- Recurring Transactions Logic ---
         function openRecurringPurchaseModal() {
             renderRecurringPurchasesList();
@@ -664,6 +785,7 @@
                 portfolioData.recurringTransactions = [];
             }
             portfolioData.recurringTransactions.push(newRecurring);
+            logActivity(`Created new recurring purchase for ${newRecurring.symbol}.`);
             await saveDataToFirestore();
             renderRecurringPurchasesList();
             // Clear form
@@ -672,7 +794,11 @@
         }
         
         async function deleteRecurringPurchase(id) {
+            const itemToDelete = portfolioData.recurringTransactions.find(rt => rt.id === id);
             portfolioData.recurringTransactions = portfolioData.recurringTransactions.filter(rt => rt.id !== id);
+            if (itemToDelete) {
+                logActivity(`Deleted recurring purchase rule for ${itemToDelete.symbol}.`);
+            }
             await saveDataToFirestore();
             renderRecurringPurchasesList();
         }
@@ -751,9 +877,11 @@
                         
                         portfolioData.transactions.push(newTransaction);
                         rule.lastExecutionDate = today.toISOString().split('T')[0];
+                        logActivity(`Auto-logged recurring purchase: ${formatCurrency(rule.amount)} of ${rule.symbol}.`);
                         didCreateTransactions = true;
                     } else {
                         console.warn(`Could not fetch price for recurring purchase of ${rule.symbol}. Skipping.`);
+                        logActivity(`Failed to auto-log recurring purchase for ${rule.symbol} (price fetch failed).`);
                     }
                 }
             }
@@ -938,7 +1066,7 @@
             showConfirmationModal('Are you sure you want to clear ALL transaction data from the cloud? This cannot be undone.', async () => {
                 if (!userId) return;
 
-                portfolioData = { username: '', transactions: [] };
+                portfolioData = { username: '', transactions: [], recurringTransactions: [], activityLog: [] };
                 uiState = { expandedGroups: {}, expandedTransactions: {} };
                 priceCache = {};
 
@@ -947,7 +1075,9 @@
                 await setDoc(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
                 await setDoc(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
                 await setDoc(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
-
+                
+                logActivity('Cleared all portfolio data.');
+                await saveDataToFirestore(); // Save the final state with the log
                 updateDisplay();
                 updateDataStatus(false, "Data cleared");
             });
@@ -982,6 +1112,9 @@
             localStorage.setItem(ALPHA_VANTAGE_API_KEY_STORAGE, ALPHA_VANTAGE_API_KEY);
             localStorage.setItem(FMP_API_KEY_STORAGE, FMP_API_KEY); // Save FMP key
             localStorage.setItem(REFRESH_INTERVAL_KEY, autoRefreshIntervalSeconds);
+
+            logActivity('Application settings saved.');
+            saveDataToFirestore();
 
             showConfirmationModal("Settings have been saved successfully.", null);
             closeSettingsModal();
@@ -1090,7 +1223,7 @@
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
                 }
             }
-
+            logActivity('Refreshed prices for all assets.');
             await saveDataToFirestore();
             updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Now';
@@ -1283,6 +1416,7 @@
                 accountType: accountType,
                 platform: platform,
             };
+            let logMessage = '';
 
             if (transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') {
                 const amount = parseFloat(document.getElementById('amount').value);
@@ -1296,6 +1430,7 @@
                 mainTransaction.price = 1;
                 mainTransaction.type = 'CASH'; // Assume deposits/withdrawals are cash-equivalents
                 transactionsToAdd.push(mainTransaction);
+                logMessage = `Logged ${transactionType}: ${formatCurrency(amount)} for ${symbol}.`;
             } else { // BUY, SELL, DIVIDEND
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
                 const shares = parseFloat(document.getElementById('shares').value);
@@ -1318,6 +1453,7 @@
                          mainTransaction.price = 1;
                          mainTransaction.type = cashFund.type;
                          transactionsToAdd.push(mainTransaction);
+                         logMessage = `Logged ${transactionType}: ${formatCurrency(amount)} from ${symbol}.`;
                      } else {
                          showConfirmationModal(`No cash/money market fund found in ${accountType} on ${platform} to deposit dividend. Please add a cash fund (e.g., SPAXX) first.`, null);
                          return;
@@ -1328,6 +1464,7 @@
                         dividend: parseFloat(document.getElementById('dividend').value) || 0, type: type
                     });
                     transactionsToAdd.push(mainTransaction);
+                    logMessage = `Logged ${transactionType}: ${shares.toFixed(4)} shares of ${symbol} at ${formatCurrency(price)}.`;
                 }
 
                 const isMoneyMarket = isCashEquivalentType(type);
@@ -1368,13 +1505,18 @@
             }
 
             portfolioData.transactions.push(...transactionsToAdd);
+            logActivity(logMessage);
             await saveDataToFirestore();
             clearForm();
         }
 
         async function removeTransaction(id) {
             showConfirmationModal('Are you sure you want to remove this transaction?', async () => {
+                const transaction = portfolioData.transactions.find(t => t.id == id);
                 portfolioData.transactions = portfolioData.transactions.filter(t => t.id != id);
+                if (transaction) {
+                    logActivity(`Removed transaction: ${transaction.transactionType} of ${transaction.symbol}.`);
+                }
                 await saveDataToFirestore();
             });
         }
@@ -1382,6 +1524,7 @@
         async function removeHolding(symbol, accountType, platform) {
             showConfirmationModal(`Are you sure you want to delete ${symbol} from ${accountType} - ${platform} and all its associated transactions? This cannot be undone.`, async () => {
                 portfolioData.transactions = portfolioData.transactions.filter(t => !(t.symbol === symbol && t.accountType === accountType && t.platform === platform));
+                logActivity(`Removed holding ${symbol} from ${accountType} - ${platform}.`);
                 await saveDataToFirestore();
             });
         }
@@ -1901,6 +2044,7 @@
             filterChart(activeChartFilter, portfolioHistory, currentHoldings);
             populatePlatformFilter();
             renderInvestments(currentHoldings);
+            renderAllTransactions();
         }
 
         // --- MODAL Functions for Editing Data ---
@@ -1959,6 +2103,7 @@
                 transaction.price = parseFloat(document.getElementById('editPrice').value);
             }
 
+            logActivity(`Edited transaction for ${transaction.symbol}.`);
             await saveDataToFirestore();
             closeEditModal();
         }
@@ -2034,6 +2179,7 @@
                             platform: platform,
                         };
                         portfolioData.transactions = [...otherTransactions, summaryTransaction];
+                        logActivity(`Edited holding (summary) for ${symbol}.`);
                         await saveDataToFirestore();
                     });
                 } else if (typeChanged) {
@@ -2043,8 +2189,10 @@
                             t.type = newType;
                         }
                     });
+                    logActivity(`Changed holding type for ${symbol} to ${newType}.`);
                     await saveDataToFirestore();
                 } else {
+                    logActivity(`Updated manual price for ${symbol}.`);
                     await saveDataToFirestore(); // Only save manual price change if nothing else was modified
                 }
             }
@@ -2331,6 +2479,65 @@
             updateCharts(filteredData, currentHoldings);
         }
 
+        function showTab(tabName) {
+            activeTab = tabName;
+            
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.getElementById(`${tabName}Tab`).classList.add('active');
+            
+            document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function renderAllTransactions() {
+            const container = document.getElementById('allTransactionsList');
+            const transactions = portfolioData.transactions || [];
+            
+            if (transactions.length === 0) {
+                container.innerHTML = `<div class="empty-state">📊<p>No transactions found.</p></div>`;
+                return;
+            }
+
+            // Sort transactions by date, most recent first
+            const sorted = [...transactions].sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            const tableHtml = `
+                <table class="transaction-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Type</th>
+                            <th>Shares</th>
+                            <th>Price</th>
+                            <th>Total</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sorted.map(t => `
+                            <tr>
+                                <td>${t.date}</td>
+                                <td>${t.accountType} (${t.platform})</td>
+                                <td>${t.symbol}</td>
+                                <td>${t.transactionType}</td>
+                                <td>${t.shares ? t.shares.toLocaleString(undefined, {maximumFractionDigits: 4}) : 'N/A'}</td>
+                                <td>${t.price ? formatCurrency(t.price) : 'N/A'}</td>
+                                <td>${t.shares && t.price ? formatCurrency(t.shares * t.price) : (t.amount ? formatCurrency(t.amount) : 'N/A')}</td>
+                                <td class="transaction-actions">
+                                    <button class="btn btn-edit" onclick="openEditModal(${t.id})">Edit</button>
+                                    <button class="btn btn-danger" onclick="removeTransaction(${t.id})">Del</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            container.innerHTML = tableHtml;
+        }
+
         // --- Import/Export Functions ---
         function exportCSV() {
             if (!portfolioData.transactions || portfolioData.transactions.length === 0) {
@@ -2343,6 +2550,8 @@
             link.href = URL.createObjectURL(blob);
             link.download = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
             link.click();
+            logActivity('Exported transactions to CSV.');
+            saveDataToFirestore();
         }
 
         function triggerCsvImport() {
@@ -2380,6 +2589,7 @@
                     });
                     showConfirmationModal(`You are about to import ${transactionsToImport.length} transactions. This will overwrite ALL current data in the cloud. Continue?`, async () => {
                         portfolioData.transactions = transactionsToImport;
+                        logActivity(`Imported ${transactionsToImport.length} transactions from CSV.`);
                         await saveDataToFirestore();
                         updateDisplay();
                        showConfirmationModal(`Successfully imported ${transactionsToImport.length} transactions.`, null);
@@ -2433,7 +2643,7 @@
                 // fetchPrice has its own internal delays, but this spaces out calls for *different* symbols.
                 await delay(API_THROTTLE_DELAY); 
             }
-
+            logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             updateDisplay(); // Re-render the UI with the new prices
             refreshButton.textContent = 'Refresh Mutual Funds';
@@ -2476,6 +2686,9 @@
         window.closeRecurringPurchaseModal = closeRecurringPurchaseModal;
         window.saveRecurringPurchase = saveRecurringPurchase;
         window.deleteRecurringPurchase = deleteRecurringPurchase;
+        window.openActivityLogModal = openActivityLogModal;
+        window.closeActivityLogModal = closeActivityLogModal;
+        window.showTab = showTab;
     </script>
 
     <!-- MODALS -->
@@ -2684,6 +2897,15 @@
             <div id="recurring-purchases-list"></div>
         </div>
     </div>
+    
+    <div id="activityLogModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close-btn" onclick="closeActivityLogModal()">×</button>
+            <h3>Activity Log (Last 15 Years)</h3>
+            <div id="activity-log-list" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
 
     <div class="container">
         <div class="header">
@@ -2696,6 +2918,7 @@
                 </div>
             </div>
             <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
+            <div class="activity-log-toggle header-icon" onclick="openActivityLogModal()">📜</div>
             <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
             <div class="data-status" id="dataStatus">...</div>
             <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
@@ -2805,26 +3028,35 @@
 				</div>
 			</div>
             <div class="investments-list card-panel">
-                <h2>Your Investments</h2>
-                <div class="controls-bar">
-                    <div class="form-group">
-                        <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
-                    </div>
-                    <div class="form-group">
-                        <select id="sortOptions">
-                            <option value="default">Sort: Default</option>
-                            <option value="symbol-asc">Sort: Symbol (A-Z)</option>
-                            <option value="value-desc">Sort: Highest Value</option>
-                            <option value="gain-desc">Sort: Biggest Gainer ($)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <select id="filterPlatform">
-                            <option value="all">Filter: All Platforms</option>
-                        </select>
-                    </div>
+                <h2>Your Portfolio</h2>
+                <div class="tabs-nav">
+                    <button class="tab-link active" onclick="showTab('investments')">Your Investments</button>
+                    <button class="tab-link" onclick="showTab('transactions')">All Transactions</button>
                 </div>
-                <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
+                <div id="investmentsTab" class="tab-content active">
+                    <div class="controls-bar">
+                        <div class="form-group">
+                            <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
+                        </div>
+                        <div class="form-group">
+                            <select id="sortOptions">
+                                <option value="default">Sort: Default</option>
+                                <option value="symbol-asc">Sort: Symbol (A-Z)</option>
+                                <option value="value-desc">Sort: Highest Value</option>
+                                <option value="gain-desc">Sort: Biggest Gainer ($)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <select id="filterPlatform">
+                                <option value="all">Filter: All Platforms</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
+                </div>
+                <div id="transactionsTab" class="tab-content">
+                    <div id="allTransactionsList"></div>
+                </div>
             </div>
         </div>
         <div id="dataTransfer" class="card-panel">
