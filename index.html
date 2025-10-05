@@ -475,14 +475,12 @@
         async function initializeFirebase() {
             // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
             const firebaseConfig = {
-                apiKey: "AIzaSyAFnNTpbZc1K8Z_CwEFgCBfdK_rW2-ZlRg",
-  authDomain: "smart-retirement-tracker.firebaseapp.com",
-  databaseURL: "https://smart-retirement-tracker-default-rtdb.firebaseio.com",
-  projectId: "smart-retirement-tracker",
-  storageBucket: "smart-retirement-tracker.appspot.com", // Note: I corrected a small typo here from your example, it should end with .appspot.com
-  messagingSenderId: "798740254583",
-  appId: "1:798740254583:web:5d0835f78daa7f86fa9b72",
-  measurementId: "G-9PXK08TWR8"
+                apiKey: "YOUR_API_KEY",
+                authDomain: "YOUR_AUTH_DOMAIN",
+                projectId: "YOUR_PROJECT_ID",
+                storageBucket: "YOUR_STORAGE_BUCKET",
+                messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+                appId: "YOUR_APP_ID"
             };
             // --- END OF CONFIGURATION ---
 
@@ -984,11 +982,8 @@
             const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
             if (sorted.length === 0) return [];
             
-            const allSymbols = [...new Set(
-                sorted
-                    .filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual')
-                    .map(t => t.symbol)
-            )];
+            const relevantTransactions = sorted.filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual');
+            const allSymbols = [...new Set(relevantTransactions.map(t => t.symbol))];
 
             // Fetch historical data for any symbols we haven't already fetched in this session.
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
@@ -3113,5 +3108,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
 
