@@ -57,10 +57,23 @@
             transition: background-color 0.3s ease, color 0.3s ease;
         }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; color: var(--header-text-color); position: relative; }
+        .header { text-align: center; margin-bottom: 30px; color: var(--header-text-color); }
+        .header-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            min-height: 40px;
+        }
+        .header-left, .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
         .header h1 { font-size: 2.5em; font-weight: 700; margin-bottom: 10px; }
         #userNameDisplay { color: var(--text-color-primary); }
-        .data-status { position: absolute; top: 10px; right: 160px; /* Adjusted for new icons */ background: rgba(255, 255, 255, 0.2); padding: 8px 12px; border-radius: 20px; font-size: 0.8em; color: var(--text-color-primary); backdrop-filter: blur(10px); white-space: nowrap; transition: background-color 0.3s ease; border: 1px solid var(--border-color); }
+        .data-status { background: rgba(255, 255, 255, 0.2); padding: 8px 12px; border-radius: 20px; font-size: 0.8em; color: var(--text-color-primary); backdrop-filter: blur(10px); white-space: nowrap; transition: background-color 0.3s ease; border: 1px solid var(--border-color); }
         .data-status.saved { background: rgba(22, 163, 74, 0.2); border-color: rgba(22, 163, 74, 0.5); }
         .data-status.loading { background: rgba(255, 193, 7, 0.2); border-color: rgba(255, 193, 7, 0.5); }
         .data-status.error { background: rgba(220, 38, 38, 0.2); border-color: rgba(220, 38, 38, 0.5); }
@@ -77,16 +90,6 @@
             font-size: 1.2em;
             color: var(--text-color-secondary);
             box-shadow: 0 2px 4px var(--shadow-color);
-            position: relative; /* Changed from absolute */
-        }
-        .theme-toggle { position: absolute; left: 10px; top: 10px; z-index: 10; }
-        .header-icons-right {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            display: flex;
-            gap: 10px;
-            z-index: 10;
         }
         .visibility-toggle { font-size: 1.5em; }
         .settings-toggle { font-size: 1.4em; }
@@ -328,11 +331,13 @@
 
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } 
-            .header { padding-top: 70px; } 
-            .data-status { position: static; margin: 0 auto 15px auto; display: block; width: fit-content; font-size: 0.75em; } 
-            .theme-toggle { top: 15px; left: 15px; } 
-            #auth-container { position: absolute; left: 65px; top: 10px; }
-            .header-icons-right { top: 15px; right: 15px; }
+            .header-top-row { flex-wrap: wrap; justify-content: center; }
+            .header-left, .header-right { flex-basis: 50%; }
+            .header-left { justify-content: flex-start; }
+            .header-right { justify-content: flex-end; }
+            .data-status { order: -1; width: 100%; margin-bottom: 15px; text-align: center; }
+            #auth-container { min-width: 0; }
+            #user-info span, #signOutBtn { display: none; } /* Hide text on mobile for auth */
 
             .pie-charts-container { grid-template-columns: 1fr; }
             .refresh-button-container { text-align: center; }
@@ -351,7 +356,7 @@
             }
         }
         /* Styles for Auth and Collapse Button */
-        #auth-container { position: absolute; top: 10px; left: 60px; z-index: 10; display: flex; align-items: center; gap: 10px; }
+        #auth-container { display: flex; align-items: center; gap: 10px; }
         #user-info { display: flex; align-items: center; gap: 10px; background: var(--card-bg-color); padding: 5px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px var(--shadow-color); }
         #user-info img { width: 30px; height: 30px; border-radius: 50%; }
         #user-info span { font-weight: 600; font-size: 0.9em; }
@@ -2932,21 +2937,25 @@
 
     <div class="container">
         <div class="header">
-            <div id="auth-container">
-                <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
-                <div id="user-info" style="display:none;">
-                    <img id="userPhoto" src="" alt="User photo">
-                    <span id="userName"></span>
-                    <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
+            <div class="header-top-row">
+                <div class="header-left">
+                    <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
+                    <div id="auth-container">
+                        <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
+                        <div id="user-info" style="display:none;">
+                            <img id="userPhoto" src="" alt="User photo">
+                            <span id="userName"></span>
+                            <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="data-status" id="dataStatus">...</div>
+                <div class="header-right">
+                    <div class="visibility-toggle header-icon" onclick="toggleStatsVisibility()">👁️</div>
+                    <div class="activity-log-toggle header-icon" onclick="openActivityLogModal()">📜</div>
+                    <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
                 </div>
             </div>
-            <div class="theme-toggle header-icon" onclick="toggleTheme()">☀️</div>
-            <div class="header-icons-right">
-                <div class="visibility-toggle header-icon" onclick="toggleStatsVisibility()">👁️</div>
-                <div class="activity-log-toggle header-icon" onclick="openActivityLogModal()">📜</div>
-                <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
-            </div>
-            <div class="data-status" id="dataStatus">...</div>
             <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
             <p>Track your investments with a detailed transaction log</p>
             <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
@@ -3097,5 +3106,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
 
