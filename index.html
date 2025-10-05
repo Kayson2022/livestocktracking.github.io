@@ -2339,14 +2339,44 @@
                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
                 if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
+            
+            const chartTooltipCallback = function(context) {
+                const label = context.label || '';
+                const value = context.raw;
+                const total = context.chart.getDatasetMeta(0).total;
+                const percentage = ((value / total) * 100).toFixed(2) + '%';
+                return `${label}: ${formatCurrency(value)} (${percentage})`;
+            };
+
+            const chartLegendLabelGenerator = function(chart) {
+                const data = chart.data;
+                if (data.labels.length && data.datasets.length) {
+                    const total = data.datasets[0].data.reduce((sum, item) => sum + item, 0);
+                    if (total === 0) {
+                        return data.labels.map((label, i) => {
+                            const meta = chart.getDatasetMeta(0);
+                            const style = meta.controller.getStyle(i);
+                             return { text: `${label}: 0.00%`, fillStyle: style.backgroundColor, strokeStyle: style.borderColor, lineWidth: style.borderWidth, hidden: !chart.getDataVisibility(i), index: i };
+                        });
+                    }
+                    return data.labels.map((label, i) => {
+                        const meta = chart.getDatasetMeta(0);
+                        const style = meta.controller.getStyle(i);
+                        const value = data.datasets[0].data[i];
+                        const percentage = ((value / total) * 100).toFixed(2) + '%';
+                        return { text: `${label}: ${percentage}`, fillStyle: style.backgroundColor, strokeStyle: style.borderColor, lineWidth: style.borderWidth, hidden: !chart.getDataVisibility(i), index: i };
+                    });
+                }
+                return [];
+            };
 
             if(Object.keys(accountData).length > 0) {
                  const accountColors = {'Regular Brokerage': '#3498db', 'Roth IRA': '#e74c3c', '401(k)': '#f39c12', '529 College Saving': '#9b59b6', 'Yahoo Finance': '#20c997'};
-                 accountChart = new Chart(document.getElementById('accountChart').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
+                 accountChart = new Chart(document.getElementById('accountChart').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
             }
            if(Object.keys(investmentData).length > 0) {
                  const investmentColors = {'Stock': '#2ecc71', 'ETF': '#3498db', 'Market Index': '#1abc9c', 'Bond': '#f39c12', 'Mutual Fund': '#9b59b6', 'Cryptocurrency': '#e67e22', 'Other': '#95a5a6', 'CASH': '#4CAF50', 'Money Market': '#4CAF50', '401k': '#f39c12'};
-                 investmentChart = new Chart(document.getElementById('investmentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor } } } } });
+                 investmentChart = new Chart(document.getElementById('investmentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
             }
             if (chartData && chartData.length > 0) {
                 historicalChart = new Chart(document.getElementById('historicalChart').getContext('2d'), { type: 'line', data: { labels: chartData.map(dp => new Date(dp.date).toLocaleDateString()), datasets: [{ label: 'Portfolio Value', data: chartData.map(dp => dp.value), borderColor: 'var(--accent-color-1)', backgroundColor: 'rgba(109, 40, 217, 0.1)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, x: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
