@@ -1178,6 +1178,11 @@
             startAutoRefresh();
         }
 
+        /**
+         * Core price fetching function with a smart waterfall logic.
+         * Prioritizes Finnhub for stocks/ETFs and FMP for Mutual Funds,
+         * falling back to Alpha Vantage last to conserve its free limit.
+         */
         async function fetchPrice(holding) {
             if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
@@ -1186,36 +1191,15 @@
             const symbol = holding.symbol;
             const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
             
-            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`); // Debug log to trace logic
+            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`);
 
-            // --- Waterfall Approach ---
             let priceData;
 
-            // Attempt 1: Finnhub (Fastest, will get stocks/ETFs, but will fail for MFs)
-            priceData = await fetchPriceFromFinnhub(symbol);
-            if (priceData && priceData.currentPrice > 0) {
-                console.log(`Price for ${symbol} found via Finnhub.`);
-                return priceData;
-            }
-            await delay(API_THROTTLE_DELAY);
-
-            // For Mutual Funds, try AlphaVantage next as it's more reliable for NAV.
-            // For other assets, try FMP next as it's faster.
             if (isMutualFund) {
-                priceData = await fetchPriceFromAlphaVantage(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via Alpha Vantage.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-
-                // Fallback to FMP for the mutual fund if AV fails
-                priceData = await fetchPriceFromFMP(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via FMP (fallback).`);
-                    return priceData;
-                }
-            } else { // For Stocks, ETFs, etc.
+                // --- Mutual Fund Priority: FMP -> Alpha Vantage ---
+                
+                // 1. Try FMP (User requested primary source for MF)
+                console.log(`Trying FMP for Mutual Fund ${symbol}`);
                 priceData = await fetchPriceFromFMP(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via FMP.`);
@@ -1223,12 +1207,44 @@
                 }
                 await delay(API_THROTTLE_DELAY);
 
-                // Fallback to AlphaVantage if FMP fails
+                // 2. Fallback to Alpha Vantage
+                console.log(`FMP failed, trying Alpha Vantage for Mutual Fund ${symbol}`);
                 priceData = await fetchPriceFromAlphaVantage(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via Alpha Vantage (fallback).`);
                     return priceData;
                 }
+                await delay(API_THROTTLE_DELAY);
+
+            } else {
+                // --- Stock/ETF Priority: Finnhub -> FMP -> Alpha Vantage ---
+                
+                // 1. Try Finnhub (Fastest and best for stocks/ETFs)
+                console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
+                priceData = await fetchPriceFromFinnhub(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Finnhub.`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
+
+                // 2. Fallback to FMP
+                console.log(`Finnhub failed, trying FMP for Stock/ETF ${symbol}`);
+                priceData = await fetchPriceFromFMP(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via FMP.`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
+
+                // 3. Fallback to Alpha Vantage
+                console.log(`FMP failed, trying Alpha Vantage for Stock/ETF ${symbol}`);
+                priceData = await fetchPriceFromAlphaVantage(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Alpha Vantage (last fallback).`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
             }
 
             console.warn(`All price providers failed for symbol: ${symbol}`);
@@ -2813,6 +2829,7 @@
     <!-- MODALS -->
     <div id="confirmationModal" class="modal-overlay">
         <div class="modal-content">
+            <button class="modal-close-btn" onclick="document.getElementById('confirmationModal').style.display='none'">×</button>
             <p id="modalMessage" class="modal-message"></p>
             <div class="modal-buttons">
                 <button id="modalConfirmBtn" class="btn btn-confirm">Confirm</button>
@@ -3149,4 +3166,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
