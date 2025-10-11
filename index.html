@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -992,22 +993,11 @@
             const relevantTransactions = sorted.filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual');
             const allSymbols = [...new Set(relevantTransactions.map(t => t.symbol))];
 
-            // Filter out symbols for which we already have data in the session cache
+            // Fetch historical data for any symbols we haven't already fetched in this session.
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
-            
-            // Limit API calls for historical data to avoid hitting the Alpha Vantage daily limit.
-            // We are using AV for historical charts because other APIs lack simple free historical endpoints.
             if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
-                 const MAX_AV_HISTORICAL_CALLS = 5; // Use a very low number to protect the free key
-                 const symbolsToFetchLimited = symbolsToFetch.slice(0, MAX_AV_HISTORICAL_CALLS);
-                
-                console.log(`Attempting to fetch historical data for ${symbolsToFetchLimited.length} of ${symbolsToFetch.length} symbols using Alpha Vantage...`);
-                
-                if (symbolsToFetch.length > MAX_AV_HISTORICAL_CALLS) {
-                    console.warn(`NOTE: Skipped historical fetch for ${symbolsToFetch.length - MAX_AV_HISTORICAL_CALLS} symbols to conserve Alpha Vantage limit.`);
-                }
-                
-                for (const symbol of symbolsToFetchLimited) {
+                console.log('Fetching historical data for chart:', symbolsToFetch);
+                for (const symbol of symbolsToFetch) {
                     await delay(API_THROTTLE_DELAY * 2.5); // Use a longer delay for Alpha Vantage's strict limits
                     try {
                         const outputSize = 'compact'; // Fetches the last 100 data points.
@@ -1029,13 +1019,6 @@
                         historicalPriceCache[symbol] = {}; // Mark as tried
                     }
                 }
-                
-                // Mark the remaining skipped symbols as "tried" (empty object) so they aren't attempted again this session.
-                symbolsToFetch.slice(MAX_AV_HISTORICAL_CALLS).forEach(s => {
-                    historicalPriceCache[s] = {};
-                });
-            } else if (symbolsToFetch.length > 0 && !ALPHA_VANTAGE_API_KEY) {
-                 console.warn("Alpha Vantage API key is missing. Cannot fetch historical data for chart.");
             }
 
             const dailySnapshots = {};
@@ -1196,11 +1179,6 @@
             startAutoRefresh();
         }
 
-        /**
-         * Core price fetching function with a smart waterfall logic.
-         * Prioritizes Finnhub for stocks/ETFs and FMP for Mutual Funds,
-         * falling back to Alpha Vantage last to conserve its free limit.
-         */
         async function fetchPrice(holding) {
             if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
@@ -1209,15 +1187,36 @@
             const symbol = holding.symbol;
             const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
             
-            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`);
+            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`); // Debug log to trace logic
 
+            // --- Waterfall Approach ---
             let priceData;
 
+            // Attempt 1: Finnhub (Fastest, will get stocks/ETFs, but will fail for MFs)
+            priceData = await fetchPriceFromFinnhub(symbol);
+            if (priceData && priceData.currentPrice > 0) {
+                console.log(`Price for ${symbol} found via Finnhub.`);
+                return priceData;
+            }
+            await delay(API_THROTTLE_DELAY);
+
+            // For Mutual Funds, try AlphaVantage next as it's more reliable for NAV.
+            // For other assets, try FMP next as it's faster.
             if (isMutualFund) {
-                // --- Mutual Fund Priority: FMP -> Alpha Vantage ---
-                
-                // 1. Try FMP (User requested primary source for MF)
-                console.log(`Trying FMP for Mutual Fund ${symbol}`);
+                priceData = await fetchPriceFromAlphaVantage(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Alpha Vantage.`);
+                    return priceData;
+                }
+                await delay(API_THROTTLE_DELAY);
+
+                // Fallback to FMP for the mutual fund if AV fails
+                priceData = await fetchPriceFromFMP(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via FMP (fallback).`);
+                    return priceData;
+                }
+            } else { // For Stocks, ETFs, etc.
                 priceData = await fetchPriceFromFMP(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via FMP.`);
@@ -1225,44 +1224,12 @@
                 }
                 await delay(API_THROTTLE_DELAY);
 
-                // 2. Fallback to Alpha Vantage
-                console.log(`FMP failed, trying Alpha Vantage for Mutual Fund ${symbol}`);
+                // Fallback to AlphaVantage if FMP fails
                 priceData = await fetchPriceFromAlphaVantage(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via Alpha Vantage (fallback).`);
                     return priceData;
                 }
-                await delay(API_THROTTLE_DELAY);
-
-            } else {
-                // --- Stock/ETF Priority: Finnhub -> FMP -> Alpha Vantage ---
-                
-                // 1. Try Finnhub (Fastest and best for stocks/ETFs)
-                console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromFinnhub(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via Finnhub.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-
-                // 2. Fallback to FMP
-                console.log(`Finnhub failed, trying FMP for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromFMP(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via FMP.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-
-                // 3. Fallback to Alpha Vantage
-                console.log(`FMP failed, trying Alpha Vantage for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromAlphaVantage(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via Alpha Vantage (last fallback).`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
             }
 
             console.warn(`All price providers failed for symbol: ${symbol}`);
@@ -2847,7 +2814,6 @@
     <!-- MODALS -->
     <div id="confirmationModal" class="modal-overlay">
         <div class="modal-content">
-            <button class="modal-close-btn" onclick="document.getElementById('confirmationModal').style.display='none'">×</button>
             <p id="modalMessage" class="modal-message"></p>
             <div class="modal-buttons">
                 <button id="modalConfirmBtn" class="btn btn-confirm">Confirm</button>
@@ -3184,3 +3150,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
