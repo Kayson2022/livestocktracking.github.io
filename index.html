@@ -992,11 +992,22 @@
             const relevantTransactions = sorted.filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual');
             const allSymbols = [...new Set(relevantTransactions.map(t => t.symbol))];
 
-            // Fetch historical data for any symbols we haven't already fetched in this session.
+            // Filter out symbols for which we already have data in the session cache
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
+            
+            // Limit API calls for historical data to avoid hitting the Alpha Vantage daily limit.
+            // We are using AV for historical charts because other APIs lack simple free historical endpoints.
             if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
-                console.log('Fetching historical data for chart:', symbolsToFetch);
-                for (const symbol of symbolsToFetch) {
+                 const MAX_AV_HISTORICAL_CALLS = 5; // Use a very low number to protect the free key
+                 const symbolsToFetchLimited = symbolsToFetch.slice(0, MAX_AV_HISTORICAL_CALLS);
+                
+                console.log(`Attempting to fetch historical data for ${symbolsToFetchLimited.length} of ${symbolsToFetch.length} symbols using Alpha Vantage...`);
+                
+                if (symbolsToFetch.length > MAX_AV_HISTORICAL_CALLS) {
+                    console.warn(`NOTE: Skipped historical fetch for ${symbolsToFetch.length - MAX_AV_HISTORICAL_CALLS} symbols to conserve Alpha Vantage limit.`);
+                }
+                
+                for (const symbol of symbolsToFetchLimited) {
                     await delay(API_THROTTLE_DELAY * 2.5); // Use a longer delay for Alpha Vantage's strict limits
                     try {
                         const outputSize = 'compact'; // Fetches the last 100 data points.
@@ -1018,6 +1029,13 @@
                         historicalPriceCache[symbol] = {}; // Mark as tried
                     }
                 }
+                
+                // Mark the remaining skipped symbols as "tried" (empty object) so they aren't attempted again this session.
+                symbolsToFetch.slice(MAX_AV_HISTORICAL_CALLS).forEach(s => {
+                    historicalPriceCache[s] = {};
+                });
+            } else if (symbolsToFetch.length > 0 && !ALPHA_VANTAGE_API_KEY) {
+                 console.warn("Alpha Vantage API key is missing. Cannot fetch historical data for chart.");
             }
 
             const dailySnapshots = {};
