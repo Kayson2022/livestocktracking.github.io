@@ -1863,18 +1863,22 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
 
-            // Only use holdings that have a price for calculation, or they are cash (where currentPrice is 1.0)
-            const pricedHoldings = holdings.filter(h => h.currentPrice !== null);
+            // Filter holdings to only include those with a valid price or cash equivalents (price=1.0)
+            const pricedHoldings = holdings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
 
             const totalGroupValue = pricedHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * h.currentPrice, 0);
-            const totalGroupInvestedCostBasis = pricedHoldings
-                .filter(h => !isCashEquivalentType(h.type))
-                .reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
-            const investedValue = pricedHoldings.filter(h => !isCashEquivalentType(h.type)).reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * h.currentPrice), 0);
-            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis;
+            
+            // Filter non-cash assets *from the priced list* to calculate cost basis and invested value
+            const investedHoldings = pricedHoldings.filter(h => !isCashEquivalentType(h.type));
+
+            const totalGroupInvestedCostBasis = investedHoldings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
+            const investedValue = investedHoldings.reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * h.currentPrice), 0);
+            
+            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis; // Calculate G/L using the strictly valued portions
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
-            let totalGroupDailyGainLoss = pricedHoldings.reduce((sum, h) => {
-                if (h.currentPrice && h.previousClosePrice > 0 && !isCashEquivalentType(h.type)) {
+            
+            let totalGroupDailyGainLoss = investedHoldings.reduce((sum, h) => {
+                if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
                 return sum;
