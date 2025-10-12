@@ -969,11 +969,20 @@
                 if (isCashEquivalentType(h.type)) {
                     h.currentPrice = 1.0;
                 }
+                // Check if manual price is set (and valid)
                 else if (cachedInfo.manualPrice != null && cachedInfo.manualPrice >= 0) {
                     h.currentPrice = cachedInfo.manualPrice;
-                } else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
+                } 
+                // Check if live price is set (and valid)
+                else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
                     h.currentPrice = cachedInfo.currentPrice;
-                } else {
+                } 
+                // If it's a 'Manual' entry and has no price set, treat as null.
+                else if (h.type === 'Manual' || h.type === 'Other') { 
+                    h.currentPrice = null;
+                }
+                // Otherwise, it's null (price failed to fetch)
+                else {
                     h.currentPrice = null;
                 }
                 h.previousClosePrice = cachedInfo.previousClosePrice || null;
@@ -996,9 +1005,8 @@
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
             
             // Limit API calls for historical data to avoid hitting the Alpha Vantage daily limit.
-            // We are using AV for historical charts because other APIs lack simple free historical endpoints.
             if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
-                 const MAX_AV_HISTORICAL_CALLS = 5; // Use a very low number to protect the free key
+                 const MAX_AV_HISTORICAL_CALLS = 10; // Increased to 10 for better chart coverage
                  const symbolsToFetchLimited = symbolsToFetch.slice(0, MAX_AV_HISTORICAL_CALLS);
                 
                 console.log(`Attempting to fetch historical data for ${symbolsToFetchLimited.length} of ${symbolsToFetch.length} symbols using Alpha Vantage...`);
@@ -1087,14 +1095,22 @@
                         priceForDate = parseFloat(symbolHistory[dateString]['4. close']);
                     }
                     
-                    // Fallback logic
-                    if (priceForDate === undefined) {
-                        // On the very last day, if we have a current price from a normal refresh, use that.
+                    // Fallback logic for days with missing historical data:
+                    if (priceForDate === undefined || priceForDate === null || priceForDate <= 0) {
+                        // 1. Try today's current price (if we are calculating today's point)
                         if (dateString === today.toISOString().split('T')[0] && priceCache[symbol]?.currentPrice) {
                             priceForDate = priceCache[symbol].currentPrice;
+                        } 
+                        // 2. Fallback to using the latest known price from the cache if it's available.
+                        // This helps connect the line to the current market value even if historical data is sparse.
+                        else if (priceCache[symbol]?.currentPrice) {
+                            priceForDate = priceCache[symbol].currentPrice;
+                        }
+                        // 3. If all else fails, use average cost.
+                        else if (holding.totalShares > 0) { 
+                            priceForDate = (holding.totalCost / holding.totalShares) || 0;
                         } else {
-                            // Otherwise, for historical points without data, use average cost as a last resort.
-                            priceForDate = (holding.totalShares > 0) ? (holding.totalCost / holding.totalShares) : 0;
+                            priceForDate = 0;
                         }
                     }
                     
@@ -1738,10 +1754,13 @@
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
 
             const filteredHoldings = portfolioHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            
+            // Filter only holdings that have a valid price before calculating their market value.
+            const validPricedHoldings = filteredHoldings.filter(h => h.currentPrice !== null);
 
-            filteredHoldings.forEach(h => {
+            validPricedHoldings.forEach(h => {
                 const isCashEquivalent = isCashEquivalentType(h.type);
-                const displayPrice = h.currentPrice || h.averagePurchasePrice;
+                const displayPrice = h.currentPrice; // Use currentPrice, which is guaranteed to be non-null and > 0 if filtered
                 const currentValue = (Number(h.totalShares) || 0) * displayPrice;
                 totalValue += currentValue;
 
@@ -1751,9 +1770,11 @@
                     totalCostBasis += Number(h.totalCost) || 0;
                     estimatedAnnualIncome += (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
 
-                    if (h.currentPrice !== null && h.currentPrice > 0 && h.previousClosePrice > 0) {
+                    // Calculation for Today's G/L relies on both current and previous price being available
+                    if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                         totalDailyGainLoss += (currentValue - ((Number(h.totalShares) || 0) * h.previousClosePrice));
                     }
+                    
                     const unrealizedGain = currentValue - (Number(h.totalCost) || 0);
                     if (unrealizedGain > bestPerformer.gain) {
                         bestPerformer = { symbol: h.symbol, gain: unrealizedGain };
@@ -1764,11 +1785,12 @@
                 }
             });
 
-            const investedAssetsValue = filteredHoldings
+            // Recalculate invested assets value using ONLY the valid priced holdings for consistency
+            const investedAssetsValue = validPricedHoldings
                 .filter(h => !isCashEquivalentType(h.type))
                 .reduce((sum, h) => {
-                    const displayPrice = h.currentPrice || h.averagePurchasePrice;
-                    return sum + ((Number(h.totalShares) || 0) * displayPrice);
+                    // h.currentPrice is guaranteed to be non-null and > 0 here
+                    return sum + ((Number(h.totalShares) || 0) * h.currentPrice);
                 }, 0);
 
             const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
@@ -1844,15 +1866,22 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
 
-            const totalGroupValue = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice), 0);
-            const totalGroupInvestedCostBasis = holdings
-                .filter(h => !isCashEquivalentType(h.type))
-                .reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
-            const investedValue = holdings.filter(h => !isCashEquivalentType(h.type)).reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice)), 0);
-            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis;
+            // Filter holdings to only include those with a valid price or cash equivalents (price=1.0)
+            const pricedHoldings = holdings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
+
+            const totalGroupValue = pricedHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * h.currentPrice, 0);
+            
+            // Filter non-cash assets *from the priced list* to calculate cost basis and invested value
+            const investedHoldings = pricedHoldings.filter(h => !isCashEquivalentType(h.type));
+
+            const totalGroupInvestedCostBasis = investedHoldings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
+            const investedValue = investedHoldings.reduce((sum, h) => sum + ((Number(h.totalShares) || 0) * h.currentPrice), 0);
+            
+            const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis; // Calculate G/L using the strictly valued portions
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
-            let totalGroupDailyGainLoss = holdings.reduce((sum, h) => {
-                if (h.currentPrice && h.previousClosePrice > 0 && !isCashEquivalentType(h.type)) {
+            
+            let totalGroupDailyGainLoss = investedHoldings.reduce((sum, h) => {
+                if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
                 return sum;
@@ -1921,8 +1950,12 @@
 
         function renderIndividualHolding(h) {
             const hasLivePrice = h.currentPrice !== null && h.currentPrice > 0;
-            const displayPrice = h.currentPrice || h.averagePurchasePrice;
-            const currentValue = (Number(h.totalShares) || 0) * displayPrice;
+            // Fallback price logic for display only: if live price fails, show average purchase price (cost basis)
+            const displayPrice = h.currentPrice || h.averagePurchasePrice; 
+            
+            // Only calculate current value if we have a valid price
+            const currentValue = hasLivePrice ? (Number(h.totalShares) || 0) * h.currentPrice : (Number(h.totalShares) || 0) * (Number(h.averagePurchasePrice) || 0);
+            
             const totalGainLoss = currentValue - h.totalCost;
             const totalReturnPercentage = h.totalCost > 0 ? (totalGainLoss / h.totalCost) : 0;
             const annualIncome = (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
@@ -1970,9 +2003,9 @@
                     <div class="detail-item"><div class="detail-label">Avg. Cost</div><div class="detail-value">${formatCurrency(h.averagePurchasePrice)}</div></div>
                     <div class="detail-item"><div class="detail-label">Current Price</div><div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(h.totalCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${formatCurrency(currentValue)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGainLoss)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalReturnPercentage)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
@@ -2029,7 +2062,10 @@
             const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
             const currentPrice = holdings[0]?.currentPrice || 0;
             const previousClosePrice = holdings[0]?.previousClosePrice || 0;
-            const totalValue = totalShares * currentPrice;
+            
+            // Only calculate total value if we have a valid price
+            const totalValue = hasLivePrice ? totalShares * currentPrice : 0; 
+            
             const avgCostBasis = totalShares > 0 ? totalCost / totalShares : 0;
             const overallPL = hasLivePrice ? totalValue - totalCost : 0;
             const overallPLPercent = hasLivePrice && totalCost > 0 ? overallPL / totalCost : 0;
@@ -2365,13 +2401,13 @@
 
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
             const accountData = portfolioHoldings.reduce((acc, h) => {
-                const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
-                if(h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
+                if(h.currentPrice !== null && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => {
-                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || h.averagePurchasePrice);
-                if(h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
+                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
+                if(h.currentPrice !== null && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
             
             const chartTooltipCallback = function(context) {
