@@ -966,26 +966,35 @@
 
             const calculatedHoldings = Object.values(holdings).map(h => {
                 const cachedInfo = priceCache[h.symbol] || {};
+                
+                // 1. Cash Equivalent (Price = $1.00)
                 if (isCashEquivalentType(h.type)) {
                     h.currentPrice = 1.0;
+                    h.previousClosePrice = 1.0; // Assume cash doesn't change
                 }
-                // Check if manual price is set (and valid)
+                // 2. Manual Price (for current price)
                 else if (cachedInfo.manualPrice != null && cachedInfo.manualPrice >= 0) {
                     h.currentPrice = cachedInfo.manualPrice;
+                    h.previousClosePrice = cachedInfo.manualPreviousClosePrice || null; // Use manual PC if available
                 } 
-                // Check if live price is set (and valid)
+                // 3. Live Price (for current and previous close price)
                 else if (cachedInfo.currentPrice && cachedInfo.currentPrice > 0) {
                     h.currentPrice = cachedInfo.currentPrice;
+                    h.previousClosePrice = cachedInfo.previousClosePrice || null;
                 } 
-                // If it's a 'Manual' entry and has no price set, treat as null.
+                // 4. Manual/Other without price
                 else if (h.type === 'Manual' || h.type === 'Other') { 
                     h.currentPrice = null;
+                    h.previousClosePrice = null;
                 }
-                // Otherwise, it's null (price failed to fetch)
+                // 5. Failed fetch
                 else {
                     h.currentPrice = null;
+                    h.previousClosePrice = null;
                 }
-                h.previousClosePrice = cachedInfo.previousClosePrice || null;
+                
+                // If currentPrice is set but previousClose is missing, we use null for PC unless it's a cash equivalent (fixed above).
+                
                 return h;
             });
             return calculatedHoldings;
@@ -1314,8 +1323,8 @@
 
                 // If NOT forcing a refresh, check the cache and continue if it's still fresh.
                 // If forceRefresh is true, this check is skipped, and a new price is always fetched.
-                if (!forceRefresh && cached && (now - cached.lastFetchTimestamp < staleTime)) {
-                    console.log(`Using fresh cached price for ${holding.symbol}`);
+                if (!forceRefresh && cached && (cached.manualPrice != null || cached.manualPreviousClosePrice != null || (now - cached.lastFetchTimestamp < staleTime))) {
+                    console.log(`Using fresh cached price or manual override for ${holding.symbol}`);
                     continue;
                 }
 
@@ -1323,8 +1332,13 @@
                 const priceData = await fetchPrice(holding);
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                    priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                    priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    
+                    // Only update live price/PC if no manual price is set, or if explicitly forcing a refresh (manual price takes priority)
+                    if (cached?.manualPrice == null || forceRefresh) {
+                        priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                        priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    }
+                    
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
                 }
             }
@@ -1866,7 +1880,7 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
 
-            // Filter holdings to only include those with a valid price or cash equivalents (price=1.0)
+            // Filter holdings to only include those with a valid currentPrice (not null and > 0)
             const pricedHoldings = holdings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
 
             const totalGroupValue = pricedHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * h.currentPrice, 0);
@@ -1881,6 +1895,7 @@
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
             
             let totalGroupDailyGainLoss = investedHoldings.reduce((sum, h) => {
+                // Calculate daily G/L only if previous close price is also available
                 if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
@@ -1953,7 +1968,7 @@
             // Fallback price logic for display only: if live price fails, show average purchase price (cost basis)
             const displayPrice = h.currentPrice || h.averagePurchasePrice; 
             
-            // Only calculate current value if we have a valid price
+            // Only calculate current value if we have a valid current price (from live fetch or manual override)
             const currentValue = hasLivePrice ? (Number(h.totalShares) || 0) * h.currentPrice : (Number(h.totalShares) || 0) * (Number(h.averagePurchasePrice) || 0);
             
             const totalGainLoss = currentValue - h.totalCost;
@@ -1964,7 +1979,7 @@
             let todayGainLossAmount = 0;
             let todayGainLossPercentage = 0;
 
-            if (hasLivePrice && !isCashEquivalentType(h.type) && h.previousClosePrice > 0) {
+            if (hasLivePrice && !isCashEquivalentType(h.type) && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                 const previousCloseValue = h.previousClosePrice * (Number(h.totalShares) || 0);
                 todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0);
                 todayGainLossPercentage = previousCloseValue > 0 ? (todayGainLossAmount / previousCloseValue) : 0;
@@ -2258,9 +2273,15 @@
             document.getElementById('editHoldingTotalShares').value = holding.totalShares;
             document.getElementById('editHoldingAvgPrice').value = holding.averagePurchasePrice;
             
-            const manualPriceInput = document.getElementById('editHoldingManualPrice');
             const cachedInfo = priceCache[symbol] || {};
+            
+            // Populate Current Price field
+            const manualPriceInput = document.getElementById('editHoldingManualPrice');
             manualPriceInput.value = cachedInfo.manualPrice || '';
+            
+            // Populate Previous Close Price field
+            const manualPCInput = document.getElementById('editHoldingManualPC');
+            manualPCInput.value = cachedInfo.manualPreviousClosePrice || '';
 
             modal.style.display = 'flex';
         }
@@ -2280,15 +2301,32 @@
             
             const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
             const newAvgPrice = parseFloat(document.getElementById('editHoldingAvgPrice').value);
+            
             const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
+            const newManualPC = parseFloat(document.getElementById('editHoldingManualPC').value);
 
             if (!priceCache[symbol]) priceCache[symbol] = {};
+            
+            // --- Update Manual Current Price ---
             if (!isNaN(newManualPrice) && newManualPrice >= 0) {
                 priceCache[symbol].manualPrice = newManualPrice;
-                priceCache[symbol].currentPrice = newManualPrice;
+                priceCache[symbol].currentPrice = newManualPrice; // Also set current price for immediate UI update
             } else {
                 delete priceCache[symbol].manualPrice;
+                // If manual price is cleared, revert current price to live price if available, otherwise clear it.
+                if (priceCache[symbol].currentPrice != null) delete priceCache[symbol].currentPrice;
             }
+            
+            // --- Update Manual Previous Close Price ---
+            if (!isNaN(newManualPC) && newManualPC >= 0) {
+                priceCache[symbol].manualPreviousClosePrice = newManualPC;
+                priceCache[symbol].previousClosePrice = newManualPC; // Also set previousClose for immediate UI update
+            } else {
+                delete priceCache[symbol].manualPreviousClosePrice;
+                // If manual PC is cleared, revert previous close to live PC if available, otherwise clear it.
+                if (priceCache[symbol].previousClosePrice != null) delete priceCache[symbol].previousClosePrice;
+            }
+
 
             if (holding) {
                 const sharesChanged = Math.abs(newTotalShares - holding.totalShares) > 0.00001;
@@ -2326,7 +2364,7 @@
                     logActivity(`Changed holding type for ${symbol} to ${newType}.`);
                     await saveDataToFirestore();
                 } else {
-                    logActivity(`Updated manual price for ${symbol}.`);
+                    logActivity(`Updated manual prices for ${symbol}.`);
                     await saveDataToFirestore(); // Only save manual price change if nothing else was modified
                 }
             }
@@ -2402,12 +2440,12 @@
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
             const accountData = portfolioHoldings.reduce((acc, h) => {
                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                if(h.currentPrice !== null && h.currentPrice > 0 && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => {
                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
+                if(h.currentPrice !== null && h.currentPrice > 0 && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
             
             const chartTooltipCallback = function(context) {
@@ -2950,6 +2988,11 @@
                 <input type="number" id="editHoldingManualPrice" step="any" min="0">
                 <small>Use this to override the live price if fetching fails. Leave blank to use live data.</small>
             </div>
+            <div class="form-group">
+                <label for="editHoldingManualPC">Manual Previous Close Price / Share (Optional)</label>
+                <input type="number" id="editHoldingManualPC" step="any" min="0">
+                <small>Required to manually calculate **Today's G/L** when using a manual current price.</small>
+            </div>
             <div class="modal-buttons">
                 <button class="btn btn-confirm" onclick="saveHoldingEdit()">Save</button>
                 <button class="btn btn-cancel" onclick="closeHoldingEditModal()">Cancel</button>
@@ -3137,7 +3180,7 @@
                             <!-- Options will be populated dynamically -->
                         </select>
                     </div>
-                    <div class="form-group"> <label for="platform">Platform</label>
+					<div class="form-group"> <label for="platform">Platform</label>
                         <select id="platform" name="platform" required>
                             <option value="">Select Platform</option>
                             <option value="Fidelity">Fidelity</option>
