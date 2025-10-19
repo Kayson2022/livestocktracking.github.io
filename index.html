@@ -104,7 +104,7 @@
         .chart-container { background: var(--card-bg-color); padding: 25px; border-radius: 15px; box-shadow: 0 4px 10px var(--shadow-color); border: 1px solid var(--border-color); }
         .chart-container h3 { text-align: center; margin-bottom: 15px; color: var(--text-color-primary); font-weight: 600; }
         .chart-wrapper { position: relative; height: 300px; }
-        .chart-filters { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .chart-filters { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;}
         .chart-filter-btn { background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-color-secondary); padding: 6px 12px; border-radius: 20px; cursor: pointer; transition: all 0.2s ease; font-size: 0.8em; font-weight: 500; }
         .chart-filter-btn:hover { background: #e5e7eb; }
         .chart-filter-btn.active { background: var(--accent-color-1); color: white; border-color: var(--accent-color-1); }
@@ -2671,10 +2671,13 @@
             const now = new Date();
             let startDate;
             switch (period) {
+                case '1W': startDate = new Date(new Date().setDate(now.getDate() - 7)); break;
                 case '1M': startDate = new Date(new Date().setMonth(now.getMonth() - 1)); break;
                 case '6M': startDate = new Date(new Date().setMonth(now.getMonth() - 6)); break;
                 case 'YTD': startDate = new Date(now.getFullYear(), 0, 1); break;
                 case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
+                case '3Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 3)); break;
+                case '5Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 5)); break;
                 default: updateCharts(history, holdings); return;
             }
             const filteredData = history.filter(dp => new Date(dp.date) >= startDate);
@@ -3132,10 +3135,13 @@
             <div class="chart-container">
                 <h3>Portfolio Performance History</h3>
                 <div class="chart-filters">
+                    <button class="chart-filter-btn" onclick="filterChart('1W')">1W</button>
                     <button class="chart-filter-btn" onclick="filterChart('1M')">1M</button>
                     <button class="chart-filter-btn" onclick="filterChart('6M')">6M</button>
                     <button class="chart-filter-btn" onclick="filterChart('YTD')">YTD</button>
                     <button class="chart-filter-btn" onclick="filterChart('1Y')">1Y</button>
+                    <button class="chart-filter-btn" onclick="filterChart('3Y')">3Y</button>
+                    <button class="chart-filter-btn" onclick="filterChart('5Y')">5Y</button>
                     <button class="chart-filter-btn active" onclick="filterChart('All')">All</button>
                 </div>
                 <div class="chart-wrapper"> <canvas id="historicalChart"></canvas> </div>
