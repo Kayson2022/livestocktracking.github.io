@@ -394,12 +394,14 @@
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        // Import getDoc for the new session logic
+        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
         const FIRESTORE_DATA_DOC = 'portfolioData';
         const FIRESTORE_UI_STATE_DOC = 'uiState';
         const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
+        const FIRESTORE_SESSION_DOC = 'sessionManagement'; // <-- NEW: For session tracking
 
         const THEME_KEY = 'myPortfolioTheme_v4';
         const AUTO_REFRESH_STATE_KEY = 'myPortfolioAutoRefreshState_v4';
@@ -414,7 +416,6 @@
         const API_THROTTLE_DELAY = 350; // ms to wait between API calls
         const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
-        const FRESHNESS_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours in milliseconds for API data
 
         let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
         let ALPHA_VANTAGE_API_KEY = '0ZPH51BZ2N5O9G8Q';
@@ -422,7 +423,7 @@
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
 
         let firebaseApp, db, auth, userId;
-        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache;
+        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; // <-- NEW: Add session listener
 
         let portfolioData = {
              username: '',
@@ -512,22 +513,51 @@
                     const signInBtn = document.getElementById('signInBtn');
                     const userInfoDiv = document.getElementById('user-info');
                     isInitialDataLoaded = false; // Reset on auth change
+                    
+                    // <-- NEW: Detach old session listener on any auth change
+                    if (unsubscribeSession) unsubscribeSession();
+
                     if (user && !user.isAnonymous) {
                         userId = user.uid;
                         signInBtn.style.display = 'none';
                         userInfoDiv.style.display = 'flex';
                         document.getElementById('userName').textContent = user.displayName || 'User';
                         document.getElementById('userPhoto').src = user.photoURL || 'https://placehold.co/30x30/6D28D9/FFFFFF?text=U';
-                        await setupFirestoreListeners();
+                        
+                        // --- NEW SESSION LOGIC ---
+                        // 1. Get/Set local session ID
+                        let localSessionId = sessionStorage.getItem('myAppSessionId');
+                        if (!localSessionId) {
+                            localSessionId = crypto.randomUUID();
+                            sessionStorage.setItem('myAppSessionId', localSessionId);
+                        }
+
+                        // 2. Set this session as the active one in Firestore
+                        try {
+                            const userDocRef = doc(db, 'users', userId);
+                            const portfolioColRef = collection(userDocRef, 'data');
+                            const sessionDocRef = doc(portfolioColRef, FIRESTORE_SESSION_DOC);
+                            // This overwrites any existing session, making this device the active one.
+                            await setDoc(sessionDocRef, { activeSessionId: localSessionId });
+                        } catch (e) {
+                            console.error("Error setting initial session:", e);
+                        }
+                        // --- END NEW SESSION LOGIC ---
+
+                        await setupFirestoreListeners(localSessionId); // Pass session ID
                         updateDataStatus(true);
                     } else {
                         userId = user?.uid; // Keep anonymous ID if exists
                         signInBtn.style.display = 'block';
                         userInfoDiv.style.display = 'none';
+                        
+                        // <-- NEW: Clear session ID on sign-out/anonymous
+                        sessionStorage.removeItem('myAppSessionId');
+
                         if (!user) {
                            await signInAnonymously(auth);
                         } else {
-                           await setupFirestoreListeners();
+                           await setupFirestoreListeners(null); // No session for anonymous
                         }
                     }
                 });
@@ -550,6 +580,7 @@
 
         async function signOutUser() {
             try {
+                sessionStorage.removeItem('myAppSessionId'); // <-- NEW: Clear local session
                 await signOut(auth);
                 location.reload();
             } catch (error) {
@@ -558,11 +589,43 @@
             }
         }
 
-        async function setupFirestoreListeners() {
+        // <-- NEW: Function to sign out other devices
+        async function signOutOtherDevices() {
+            if (!userId || !auth.currentUser || auth.currentUser.isAnonymous) {
+                showConfirmationModal("You must be signed in to use this feature.", null);
+                return;
+            }
+
+            // 1. Generate a new, unique session ID for *this* device
+            const newSessionId = crypto.randomUUID();
+            
+            // 2. Save it to this device's session storage
+            sessionStorage.setItem('myAppSessionId', newSessionId);
+
+            try {
+                // 3. Save this new ID to Firestore as the *only* active session
+                const userDocRef = doc(db, 'users', userId);
+                const portfolioColRef = collection(userDocRef, 'data');
+                const sessionDocRef = doc(portfolioColRef, FIRESTORE_SESSION_DOC);
+
+                await setDoc(sessionDocRef, { activeSessionId: newSessionId });
+                
+                showConfirmationModal("All other devices have been signed out. This device remains active.", null);
+                closeSettingsModal(); // Close modal if it was opened from there
+            } catch (error) {
+                console.error("Error signing out other devices:", error);
+                showConfirmationModal(`An error occurred: ${error.message}`, null);
+            }
+        }
+
+
+        // <-- NEW: Modified signature to accept localSessionId
+        async function setupFirestoreListeners(localSessionId) {
             if (!userId) return;
             if (unsubscribePortfolio) unsubscribePortfolio();
             if (unsubscribeUiState) unsubscribeUiState();
             if (unsubscribePriceCache) unsubscribePriceCache();
+            if (unsubscribeSession) unsubscribeSession(); // <-- NEW: Detach old session listener
 
             const userDocRef = doc(db, 'users', userId);
             const portfolioColRef = collection(userDocRef, 'data');
@@ -623,6 +686,30 @@
                     priceCache = docSnap.data();
                 }
             });
+
+            // --- NEW SESSION LISTENER ---
+            if (localSessionId) { // Only for signed-in, non-anonymous users
+                const sessionDocRef = doc(portfolioColRef, FIRESTORE_SESSION_DOC);
+                
+                unsubscribeSession = onSnapshot(sessionDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const activeSessionId = docSnap.data().activeSessionId;
+                        const mySessionId = sessionStorage.getItem('myAppSessionId');
+
+                        if (mySessionId && activeSessionId && mySessionId !== activeSessionId) {
+                            // Mismatch! Another device has taken over.
+                            console.warn("Session mismatch. Signing out this device.");
+                            if (unsubscribeSession) unsubscribeSession(); // Stop listening
+                            
+                            // Show modal *before* sign-out to inform user
+                            showConfirmationModal("You have been signed out because a new session was started on another device.", () => {
+                                signOutUser(); // Sign out after user clicks OK
+                            });
+                        }
+                    }
+                }, (error) => console.error("Error listening to session:", error));
+            }
+            // --- END NEW SESSION LISTENER ---
         }
 
         // --- MODALS (Confirmation, Firebase Config, Edit, etc.) ---
@@ -988,10 +1075,10 @@
                     h.currentPrice = null;
                     h.previousClosePrice = null;
                 }
-                // 5. Failed fetch or price is 0
+                // 5. Failed fetch
                 else {
-                    h.currentPrice = cachedInfo.currentPrice; // This might be 0, which is correct
-                    h.previousClosePrice = cachedInfo.previousClosePrice || null;
+                    h.currentPrice = null;
+                    h.previousClosePrice = null;
                 }
                 
                 // If currentPrice is set but previousClose is missing, we use null for PC unless it's a cash equivalent (fixed above).
@@ -1152,6 +1239,7 @@
                 batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
                 batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
                 batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
+                // Note: Session doc is saved separately by its own functions, not in this batch.
 
                 await batch.commit();
                 updateDataStatus(true);
@@ -1174,6 +1262,8 @@
                 await setDoc(doc(portfolioColRef, FIRESTORE_DATA_DOC), portfolioData);
                 await setDoc(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
                 await setDoc(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
+                // Also clear the session doc
+                await setDoc(doc(portfolioColRef, FIRESTORE_SESSION_DOC), { activeSessionId: null });
                 
                 logActivity('Cleared all portfolio data.');
                 await saveDataToFirestore(); // Save the final state with the log
@@ -1341,7 +1431,6 @@
                     }
                     
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                    delete priceCache[holding.symbol].manualUpdateTimestamp; // Clear manual timestamp when API fetch succeeds
                 }
             }
             logActivity('Refreshed prices for all assets.');
@@ -1751,34 +1840,6 @@
         }
 
         // --- Calculation and Rendering Logic ---
-
-        // Helper function to check if data is "fresh"
-        function isDataFresh(holding) {
-            const cachedInfo = priceCache[holding.symbol];
-            if (!cachedInfo) return false; // No price info at all
-
-            const now = Date.now();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0); // Start of today
-
-            // Check for recent API fetch
-            if (cachedInfo.lastFetchTimestamp && (now - cachedInfo.lastFetchTimestamp < FRESHNESS_THRESHOLD)) {
-                return true;
-            }
-
-            // Check for manual update today
-            if (cachedInfo.manualUpdateTimestamp) {
-                const manualUpdateDate = new Date(cachedInfo.manualUpdateTimestamp);
-                manualUpdateDate.setHours(0, 0, 0, 0); // Start of the update day
-                if (manualUpdateDate.getTime() === today.getTime()) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-
         function isCashEquivalentType(type) {
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
@@ -1792,7 +1853,7 @@
             let totalCostBasis = 0;
             let totalValue = 0;
             let totalCashValue = 0;
-            let totalDailyGainLoss = 0; // This will now only include G/L from FRESH data
+            let totalDailyGainLoss = 0;
             let estimatedAnnualIncome = 0;
             let bestPerformer = { symbol: 'N/A', gain: -Infinity };
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
@@ -1804,23 +1865,20 @@
 
             validPricedHoldings.forEach(h => {
                 const isCashEquivalent = isCashEquivalentType(h.type);
-                const displayPrice = h.currentPrice; // Use currentPrice, which is guaranteed to be non-null
+                const displayPrice = h.currentPrice; // Use currentPrice, which is guaranteed to be non-null and > 0 if filtered
                 const currentValue = (Number(h.totalShares) || 0) * displayPrice;
                 totalValue += currentValue;
 
                 if (isCashEquivalent) {
                     totalCashValue += currentValue;
-                    // Cash equivalents don't contribute to daily G/L calculation
                 } else {
                     totalCostBasis += Number(h.totalCost) || 0;
                     estimatedAnnualIncome += (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
 
-                    // --- APPROACH A IMPLEMENTATION ---
-                    // Only add to totalDailyGainLoss if data is fresh
-                    if (isDataFresh(h) && h.previousClosePrice !== null && h.previousClosePrice > 0) {
+                    // Calculation for Today's G/L relies on both current and previous price being available
+                    if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                         totalDailyGainLoss += (currentValue - ((Number(h.totalShares) || 0) * h.previousClosePrice));
                     }
-                    // --- END APPROACH A ---
                     
                     const unrealizedGain = currentValue - (Number(h.totalCost) || 0);
                     if (unrealizedGain > bestPerformer.gain) {
@@ -1836,7 +1894,7 @@
             const investedAssetsValue = validPricedHoldings
                 .filter(h => !isCashEquivalentType(h.type))
                 .reduce((sum, h) => {
-                    // h.currentPrice is guaranteed to be non-null here
+                    // h.currentPrice is guaranteed to be non-null and > 0 here
                     return sum + ((Number(h.totalShares) || 0) * h.currentPrice);
                 }, 0);
 
@@ -1913,8 +1971,8 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
 
-            // Filter holdings to only include those with a valid currentPrice (not null)
-            const pricedHoldings = holdings.filter(h => h.currentPrice !== null);
+            // Filter holdings to only include those with a valid currentPrice (not null and > 0)
+            const pricedHoldings = holdings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
 
             const totalGroupValue = pricedHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * h.currentPrice, 0);
             
@@ -1927,8 +1985,8 @@
             const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis; // Calculate G/L using the strictly valued portions
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
             
-            // This calculation remains the same - it shows the group's G/L based on its last known data
             let totalGroupDailyGainLoss = investedHoldings.reduce((sum, h) => {
+                // Calculate daily G/L only if previous close price is also available
                 if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
@@ -1997,8 +2055,11 @@
         }
 
         function renderIndividualHolding(h) {
-            const hasLivePrice = h.currentPrice !== null;
-            const displayPrice = h.currentPrice !== null ? h.currentPrice : h.averagePurchasePrice; 
+            const hasLivePrice = h.currentPrice !== null && h.currentPrice > 0;
+            // Fallback price logic for display only: if live price fails, show average purchase price (cost basis)
+            const displayPrice = h.currentPrice || h.averagePurchasePrice; 
+            
+            // Only calculate current value if we have a valid current price (from live fetch or manual override)
             const currentValue = hasLivePrice ? (Number(h.totalShares) || 0) * h.currentPrice : (Number(h.totalShares) || 0) * (Number(h.averagePurchasePrice) || 0);
             
             const totalGainLoss = currentValue - h.totalCost;
@@ -2006,19 +2067,18 @@
             const annualIncome = (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
             const yieldOnCost = h.totalCost > 0 ? (annualIncome / h.totalCost) : 0;
             const isWatchlist = h.accountType === WATCHLIST_ACCOUNT_TYPE;
-            
-            // Calculate Today's G/L based on last known data, regardless of freshness for display here
             let todayGainLossAmount = 0;
             let todayGainLossPercentage = 0;
+
             if (hasLivePrice && !isCashEquivalentType(h.type) && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                 const previousCloseValue = h.previousClosePrice * (Number(h.totalShares) || 0);
                 todayGainLossAmount = (h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0);
                 todayGainLossPercentage = previousCloseValue > 0 ? (todayGainLossAmount / previousCloseValue) : 0;
             }
-
             let headerHtml = '';
             let detailsHtml = '';
 
+            // Determine classes for daily performance
             const todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
             if (isWatchlist) {
                 headerHtml = `
@@ -2029,7 +2089,7 @@
                         <div class="investment-header-summary">
                             <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
                             <div class="detail-value ${todayGLLabelClass}">
-                                ${hasLivePrice && h.previousClosePrice !== null ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
+                                ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
                             </div>
                         </div>
                 `;
@@ -2052,8 +2112,8 @@
                     <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && h.previousClosePrice !== null ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && h.previousClosePrice !== null ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
                     <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
@@ -2105,16 +2165,17 @@
         function renderConsolidatedHolding(symbol, accountType, holdings) {
             const totalShares = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
             const totalCost = holdings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
-            const hasLivePrice = holdings[0]?.currentPrice !== null;
+            const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
             const currentPrice = holdings[0]?.currentPrice || 0;
             const previousClosePrice = holdings[0]?.previousClosePrice || 0;
             
+            // Only calculate total value if we have a valid price
             const totalValue = hasLivePrice ? totalShares * currentPrice : 0; 
+            
             const avgCostBasis = totalShares > 0 ? totalCost / totalShares : 0;
             const overallPL = hasLivePrice ? totalValue - totalCost : 0;
             const overallPLPercent = hasLivePrice && totalCost > 0 ? overallPL / totalCost : 0;
 
-             // Calculate Today's G/L based on last known data, regardless of freshness for display here
             let todayPL = 0;
             let todayPLPercent = 0;
             if (hasLivePrice && previousClosePrice > 0) {
@@ -2181,7 +2242,7 @@
                     </div>
                     <div class="investment-header-summary">
                        <div class="detail-value" style="font-size: 1.4em;">${hasLivePrice ? formatCurrency(currentPrice) : '...'}</div>
-                       <div class="detail-value ${todayPLLabelClass}">${hasLivePrice && previousClosePrice !== null ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
+                       <div class="detail-value ${todayPLLabelClass}">${hasLivePrice ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
                     </div>
                 </div>
                 <div class="investment-details">
@@ -2196,7 +2257,7 @@
                     </div>
                     <div class="consolidated-footer">
                         <div class="summary-item"><span>Overall P/L:</span> <span class="detail-value ${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice && previousClosePrice !== null ? formatCurrency(todayPL) : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
                     </div>
                            ${transactionsHtml}
                 </div>
@@ -2334,7 +2395,6 @@
             
             const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
             const newManualPC = parseFloat(document.getElementById('editHoldingManualPC').value);
-            let manualUpdateOccurred = false; // Flag to track if manual prices were set
 
             if (!priceCache[symbol]) priceCache[symbol] = {};
             
@@ -2342,33 +2402,20 @@
             if (!isNaN(newManualPrice) && newManualPrice >= 0) {
                 priceCache[symbol].manualPrice = newManualPrice;
                 priceCache[symbol].currentPrice = newManualPrice; // Also set current price for immediate UI update
-                manualUpdateOccurred = true;
             } else {
                 delete priceCache[symbol].manualPrice;
-                // If manual price is cleared, we might need to refetch or clear the current price later
+                // If manual price is cleared, revert current price to live price if available, otherwise clear it.
+                if (priceCache[symbol].currentPrice != null) delete priceCache[symbol].currentPrice;
             }
             
             // --- Update Manual Previous Close Price ---
             if (!isNaN(newManualPC) && newManualPC >= 0) {
                 priceCache[symbol].manualPreviousClosePrice = newManualPC;
                 priceCache[symbol].previousClosePrice = newManualPC; // Also set previousClose for immediate UI update
-                 manualUpdateOccurred = true;
             } else {
                 delete priceCache[symbol].manualPreviousClosePrice;
-                 // If manual PC is cleared, we might need to refetch or clear the previous close later
-            }
-
-            // --- Set Manual Update Timestamp if manual prices were entered ---
-            if (manualUpdateOccurred) {
-                priceCache[symbol].manualUpdateTimestamp = Date.now();
-                 // Clear API timestamp if manual data is provided, forces isDataFresh to rely on manual timestamp
-                 delete priceCache[symbol].lastFetchTimestamp;
-            } else {
-                // If both manual fields are cleared, remove the manual timestamp
-                 delete priceCache[symbol].manualUpdateTimestamp;
-                 // We might want to trigger a refresh here if manual prices were just cleared
-                 // to revert to live data, but let's keep it simple for now.
-                 // A manual refresh by the user will achieve this.
+                // If manual PC is cleared, revert previous close to live PC if available, otherwise clear it.
+                if (priceCache[symbol].previousClosePrice != null) delete priceCache[symbol].previousClosePrice;
             }
 
 
@@ -2396,10 +2443,8 @@
                         };
                         portfolioData.transactions = [...otherTransactions, summaryTransaction];
                         logActivity(`Edited holding (summary) for ${symbol}.`);
-                        await saveDataToFirestore(); // Save transaction changes + price cache changes
-                        closeHoldingEditModal();
+                        await saveDataToFirestore();
                     });
-                     return; // Prevent double saving below if confirmation is needed
                 } else if (typeChanged) {
                      // If only the type changed, update all associated transactions
                     portfolioData.transactions.forEach(t => {
@@ -2408,14 +2453,12 @@
                         }
                     });
                     logActivity(`Changed holding type for ${symbol} to ${newType}.`);
-                    // Fall through to save price cache changes
-                } else if (manualUpdateOccurred) {
+                    await saveDataToFirestore();
+                } else {
                     logActivity(`Updated manual prices for ${symbol}.`);
-                    // Fall through to save price cache changes
+                    await saveDataToFirestore(); // Only save manual price change if nothing else was modified
                 }
             }
-             // Save price cache changes (occurs if type changed, manual prices changed, or nothing changed)
-            await saveDataToFirestore();
             closeHoldingEditModal();
         }
 
@@ -2488,12 +2531,12 @@
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
             const accountData = portfolioHoldings.reduce((acc, h) => {
                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                if(h.currentPrice !== null && h.currentPrice > 0 && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => {
                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
+                if(h.currentPrice !== null && h.currentPrice > 0 && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
             
             const chartTooltipCallback = function(context) {
@@ -2613,7 +2656,7 @@
                 }
 
                 const d = await r.json();
-                return (d && typeof d.c === 'number') ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null };
+                return (d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null };
             } catch (e) {
                 console.error(`A network error occurred while fetching from Finnhub for ${symbol}:`, e);
                 return { currentPrice: null, previousClosePrice: null };
@@ -2891,7 +2934,6 @@
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                    delete priceCache[holding.symbol].manualUpdateTimestamp; // Clear manual on API success
                 }
                 // A delay here is good practice to avoid hammering APIs in a loop.
                 // fetchPrice has its own internal delays, but this spaces out calls for *different* symbols.
@@ -2968,6 +3010,7 @@
         window.closeActivityLogModal = closeActivityLogModal;
         window.showTab = showTab;
         window.toggleStatsVisibility = toggleStatsVisibility;
+        window.signOutOtherDevices = signOutOtherDevices; // <-- NEW: Make function global
     </script>
 
     <!-- MODALS -->
@@ -3072,6 +3115,13 @@
                 <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
                 <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
                 <small>Minimum 30 seconds to respect API limits.</small>
+            </div>
+            
+            <!-- NEW: Sign Out Other Devices Button -->
+            <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 15px;">
+                <label>Security</label>
+                <button class="btn btn-danger" id="signOutOthersBtn" onclick="signOutOtherDevices()" style="width: 100%; background: #c0392b;">Sign Out All Other Devices</button>
+                <small>This will sign out all other active sessions of this app.</small>
             </div>
             
             <div class="modal-buttons" style="margin-top: 20px;">
@@ -3242,7 +3292,7 @@
                             <option value="Vanguard">Vanguard</option>
                             <option value="Charles Schwab">Charles Schwab</option>
                             <option value="Merrill Edge">Merrill Edge</option>
-                            <option value="E*TRADE">E*TRADE</option>
+                            <option valuef="E*TRADE">E*TRADE</option>
                             <option value="Other">Other</option>
                         </select>
                     </div>
@@ -3318,4 +3368,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
