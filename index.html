@@ -698,13 +698,12 @@
 
                         if (mySessionId && activeSessionId && mySessionId !== activeSessionId) {
                             // Mismatch! Another device has taken over.
-                            console.warn("Session mismatch. Signing out this device.");
+                            console.warn("Session mismatch. Signing out this device immediately.");
                             if (unsubscribeSession) unsubscribeSession(); // Stop listening
                             
-                            // Show modal *before* sign-out to inform user
-                            showConfirmationModal("You have been signed out because a new session was started on another device.", () => {
-                                signOutUser(); // Sign out after user clicks OK
-                            });
+                            // *** MODIFIED: Sign out directly, no modal ***
+                            signOutUser(); 
+                            
                         }
                     }
                 }, (error) => console.error("Error listening to session:", error));
@@ -3368,3 +3367,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
