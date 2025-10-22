@@ -987,10 +987,10 @@
                     h.currentPrice = null;
                     h.previousClosePrice = null;
                 }
-                // 5. Failed fetch
+                // 5. Failed fetch or price is 0
                 else {
-                    h.currentPrice = null;
-                    h.previousClosePrice = null;
+                    h.currentPrice = cachedInfo.currentPrice; // This might be 0, which is correct
+                    h.previousClosePrice = cachedInfo.previousClosePrice || null;
                 }
                 
                 // If currentPrice is set but previousClose is missing, we use null for PC unless it's a cash equivalent (fixed above).
@@ -1774,7 +1774,7 @@
 
             validPricedHoldings.forEach(h => {
                 const isCashEquivalent = isCashEquivalentType(h.type);
-                const displayPrice = h.currentPrice; // Use currentPrice, which is guaranteed to be non-null and > 0 if filtered
+                const displayPrice = h.currentPrice; // Use currentPrice, which is guaranteed to be non-null
                 const currentValue = (Number(h.totalShares) || 0) * displayPrice;
                 totalValue += currentValue;
 
@@ -1803,7 +1803,7 @@
             const investedAssetsValue = validPricedHoldings
                 .filter(h => !isCashEquivalentType(h.type))
                 .reduce((sum, h) => {
-                    // h.currentPrice is guaranteed to be non-null and > 0 here
+                    // h.currentPrice is guaranteed to be non-null here
                     return sum + ((Number(h.totalShares) || 0) * h.currentPrice);
                 }, 0);
 
@@ -1880,8 +1880,9 @@
         function renderInvestmentGroup(groupName, holdings) {
             const isWatchlist = groupName === WATCHLIST_ACCOUNT_TYPE;
 
-            // Filter holdings to only include those with a valid currentPrice (not null and > 0)
-            const pricedHoldings = holdings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
+            // Filter holdings to only include those with a valid currentPrice (not null)
+            // *** FIX: Changed from h.currentPrice > 0 to h.currentPrice !== null to match overall stats logic ***
+            const pricedHoldings = holdings.filter(h => h.currentPrice !== null);
 
             const totalGroupValue = pricedHoldings.reduce((sum, h) => sum + (Number(h.totalShares) || 0) * h.currentPrice, 0);
             
@@ -1964,9 +1965,10 @@
         }
 
         function renderIndividualHolding(h) {
-            const hasLivePrice = h.currentPrice !== null && h.currentPrice > 0;
+            // *** FIX: Changed from h.currentPrice > 0 to h.currentPrice !== null ***
+            const hasLivePrice = h.currentPrice !== null;
             // Fallback price logic for display only: if live price fails, show average purchase price (cost basis)
-            const displayPrice = h.currentPrice || h.averagePurchasePrice; 
+            const displayPrice = h.currentPrice !== null ? h.currentPrice : h.averagePurchasePrice; 
             
             // Only calculate current value if we have a valid current price (from live fetch or manual override)
             const currentValue = hasLivePrice ? (Number(h.totalShares) || 0) * h.currentPrice : (Number(h.totalShares) || 0) * (Number(h.averagePurchasePrice) || 0);
@@ -1998,7 +2000,7 @@
                         <div class="investment-header-summary">
                             <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
                             <div class="detail-value ${todayGLLabelClass}">
-                                ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
+                                ${hasLivePrice && h.previousClosePrice !== null ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
                             </div>
                         </div>
                 `;
@@ -2021,8 +2023,8 @@
                     <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && h.previousClosePrice !== null ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice && h.previousClosePrice !== null ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
                     <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
@@ -2074,7 +2076,8 @@
         function renderConsolidatedHolding(symbol, accountType, holdings) {
             const totalShares = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
             const totalCost = holdings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
-            const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
+            // *** FIX: Changed from h.currentPrice > 0 to h.currentPrice !== null ***
+            const hasLivePrice = holdings[0]?.currentPrice !== null;
             const currentPrice = holdings[0]?.currentPrice || 0;
             const previousClosePrice = holdings[0]?.previousClosePrice || 0;
             
@@ -2151,7 +2154,7 @@
                     </div>
                     <div class="investment-header-summary">
                        <div class="detail-value" style="font-size: 1.4em;">${hasLivePrice ? formatCurrency(currentPrice) : '...'}</div>
-                       <div class="detail-value ${todayPLLabelClass}">${hasLivePrice ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
+                       <div class="detail-value ${todayPLLabelClass}">${hasLivePrice && previousClosePrice !== null ? `${formatCurrency(currentPrice - previousClosePrice)} (${formatPercentage(todayPLPercent)})` : '...'}</div>
                     </div>
                 </div>
                 <div class="investment-details">
@@ -2166,7 +2169,7 @@
                     </div>
                     <div class="consolidated-footer">
                         <div class="summary-item"><span>Overall P/L:</span> <span class="detail-value ${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice && previousClosePrice !== null ? formatCurrency(todayPL) : '...'}</span></div>
                     </div>
                            ${transactionsHtml}
                 </div>
@@ -2440,12 +2443,12 @@
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
             const accountData = portfolioHoldings.reduce((acc, h) => {
                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.currentPrice > 0 && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                if(h.currentPrice !== null && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
                 return acc;
             }, {});
             const investmentData = portfolioHoldings.reduce((acc, h) => {
                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); // Use 0 if currentPrice is null
-                if(h.currentPrice !== null && h.currentPrice > 0 && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
+                if(h.currentPrice !== null && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
             
             const chartTooltipCallback = function(context) {
@@ -2565,7 +2568,7 @@
                 }
 
                 const d = await r.json();
-                return (d && typeof d.c === 'number' && d.c > 0) ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null };
+                return (d && typeof d.c === 'number') ? { currentPrice: d.c, previousClosePrice: d.pc || null } : { currentPrice: null, previousClosePrice: null };
             } catch (e) {
                 console.error(`A network error occurred while fetching from Finnhub for ${symbol}:`, e);
                 return { currentPrice: null, previousClosePrice: null };
@@ -3193,7 +3196,7 @@
                             <option value="Vanguard">Vanguard</option>
                             <option value="Charles Schwab">Charles Schwab</option>
                             <option value="Merrill Edge">Merrill Edge</option>
-                            <option value="E*TRADE">E*TRADE</option>
+                            <option value."E*TRADE">E*TRADE</option>
                             <option value="Other">Other</option>
                         </select>
                     </div>
