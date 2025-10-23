@@ -546,7 +546,7 @@
                         // --- END INTEGRATED SESSION LOGIC ---
 
                         await setupFirestoreListeners(); // Setup listeners, including the session listener
-                        updateDataStatus(true);
+                        updateDataStatus(true); // Call updateDataStatus here - FIXED
                     } else {
                         userId = user?.uid; // Keep anonymous ID if exists
                         signInBtn.style.display = 'block';
@@ -1388,7 +1388,7 @@
             const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
             refreshButton.textContent = 'Refreshing...';
             refreshButton.disabled = true;
-            updateDataStatus('loading');
+            updateDataStatus('loading'); // THIS LINE CAUSED THE ERROR
 
             const now = Date.now();
             for (const holding of currentHoldings) {
@@ -2705,6 +2705,23 @@
 
             container.innerHTML = tableHtml;
         }
+
+        // --- ADDED: Definition for updateDataStatus ---
+        function updateDataStatus(isSaved, msg = "") {
+             const el = document.getElementById('dataStatus');
+             el.classList.remove('saved', 'loading', 'error');
+             if (isSaved === true) {
+                 el.textContent = '☁️ Synced'; el.classList.add('saved');
+             } else if (isSaved === 'loading') {
+                 el.textContent = '🔄 Syncing...'; el.classList.add('loading');
+             } else if (isSaved === 'error') {
+                el.textContent = `⚠️ Error: ${msg}`; el.classList.add('error');
+             } else {
+                 el.textContent = '...';
+            }
+        }
+        // --- END ADDED DEFINITION ---
+
         // --- End Utility/Charting ---
 
         // --- Import/Export Functions (Unchanged from uploaded file) ---
@@ -3237,3 +3254,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
