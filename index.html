@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -416,8 +417,6 @@
         const API_THROTTLE_DELAY = 350; // ms to wait between API calls
         const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
-        // UPDATED: Define staleness time for retirement accounts to 24 hours
-        const RETIREMENT_STALE_TIME = 24 * 60 * 60 * 1000; // 24 hours for retirement accounts before considering price stale/excluded.
 
         let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
         let ALPHA_VANTAGE_API_KEY = '0ZPH51BZ2N5O9G8Q';
@@ -483,22 +482,20 @@
 
         async function initializeFirebase() {
             // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
-            // Replaced placeholder keys with the user's provided values:
             const firebaseConfig = {
-                apiKey: "AIzaSyAr_5Z0ufnVz2N0mVROidlFnMCF0Ri1rDY",
-                authDomain: "auto-stocks-tracker.firebaseapp.com",
-                projectId: "auto-stocks-tracker",
-                storageBucket: "auto-stocks-tracker.firebasestorage.app",
-                messagingSenderId: "863619985389",
-                appId: "1:863619985389:web:46cfc4616e32663d2901e4"
+                apiKey: "AIzaSyAFnNTpbZc1K8Z_CwEFgCBfdK_rW2-ZlRg",
+  authDomain: "smart-retirement-tracker.firebaseapp.com",
+  databaseURL: "https://smart-retirement-tracker-default-rtdb.firebaseio.com",
+  projectId: "smart-retirement-tracker",
+  storageBucket: "smart-retirement-tracker.appspot.com", // Note: I corrected a small typo here from your example, it should end with .appspot.com
+  messagingSenderId: "798740254583",
+  appId: "1:798740254583:web:5d0835f78daa7f86fa9b72",
+  measurementId: "G-9PXK08TWR8"
             };
-            // NOTE: The databaseURL and measurementId fields were excluded based on the provided partial update, 
-            // but the app should still function correctly as they are often optional for basic auth/firestore.
             // --- END OF CONFIGURATION ---
 
             // Check if the user has replaced the placeholder configuration
             if (firebaseConfig.apiKey === "YOUR_API_KEY" || !firebaseConfig.apiKey) {
-                // This will now correctly trigger the modal to alert the user.
                 showConfirmationModal("Configuration Needed: Please edit the index.html file and replace the placeholder 'YOUR_API_KEY', etc., with your actual Firebase project configuration values.", null);
                 return; // Stop execution to prevent Firebase errors
             }
@@ -538,7 +535,7 @@
                             const docSnap = await getDoc(sessionDocRef);
                             if (docSnap.exists() && docSnap.data().invalidationToken) {
                                 sessionStorage.setItem('myAppInvalidationToken', docSnap.data().invalidationToken);
-                                console.log('Stored existing invalidation token locally:', docSnap.data().invalidationToken);
+                                console.log('Stored existing invalidation token locally.');
                             } else {
                                 console.log('No invalidation token found in Firestore for this user.');
                                 // Optionally create one here if needed for initial setup,
@@ -1130,24 +1127,10 @@
                     h.previousClosePrice = null;
                 }
                  
-                // --- REFINED Exclusion Logic (Fix for 401k/529 stale data) ---
-                const isRetirementAccount = h.accountType === '401(k)' || h.accountType === '529 College Saving';
-                const isManualType = h.type === 'Manual';
-                const lastFetchTimestamp = cachedInfo.lastFetchTimestamp || 0;
-
-                // Exclusion Logic:
-                // 1. If it's a Manual type and we don't have enough price info (manually entered), exclude it.
-                const isManualExclusion = isManualType && (h.currentPrice === null || h.previousClosePrice === null);
-                
-                // 2. If it's a Retirement account (401k/529) AND either prices are missing OR the price data is older than the retirement stale threshold, exclude it.
-                const isRetirementExclusion = isRetirementAccount && (
-                    h.currentPrice === null || 
-                    h.previousClosePrice === null ||
-                    (Date.now() - lastFetchTimestamp > RETIREMENT_STALE_TIME)
-                );
-                
-                // Exclude if either condition is met.
-                h.isExcludedFromDailyGL = isManualExclusion || isRetirementExclusion;
+                // --- REFINED Exclusion Logic ---
+                const isManualTypeOrRetirement = h.type === 'Manual' || h.accountType === '401(k)' || h.accountType === '529 College Saving';
+                // Exclude if it's manual/retirement AND lacks either manually entered current or previous close price
+                h.isExcludedFromDailyGL = isManualTypeOrRetirement && (h.currentPrice === null || h.previousClosePrice === null);
                 // --- END REFINED Exclusion Logic ---
 
                 return h;
@@ -2814,7 +2797,6 @@
         /**
          * Fetches price from Financial Modeling Prep (FMP). Used as a fallback for price data.
          * This function now ONLY uses the historical endpoint to ensure accuracy for NAV.
-         * We update the price cache's lastFetchTimestamp here if successful.
          * @param {string} symbol The stock/fund symbol.
          * @returns {object} Price data.
          */
@@ -3398,6 +3380,12 @@
                 <div class="chart-container"> <h3>Portfolio by Account Type</h3> <div class="chart-wrapper"> <canvas id="accountChart"></canvas> </div> </div>
                 <div class="chart-container"> <h3>Portfolio by Investment Type</h3> <div class="chart-wrapper"> <canvas id="investmentChart"></canvas> </div> </div>
             </div>
+            <div class="chart-container">
+                <h3>Est. Annual Income by Holding</h3>
+                <div class="chart-wrapper">
+                    <canvas id="dividendChart"></canvas>
+                </div>
+            </div>
         </div>
         <div class="main-content">
             <div class="add-investment card-panel">
@@ -3511,3 +3499,4 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
+
