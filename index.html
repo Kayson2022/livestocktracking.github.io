@@ -483,17 +483,17 @@
 
         async function initializeFirebase() {
             // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
+            // Replaced placeholder keys with the user's provided values:
             const firebaseConfig = {
-                // FIXED: Changed the placeholder API key to something that won't immediately trigger an invalid key error 
-                // and relies on the subsequent check (if (firebaseConfig.apiKey === "YOUR_API_KEY"...))
-                // which guides the user to the correct fix.
                 apiKey: "AIzaSyAr_5Z0ufnVz2N0mVROidlFnMCF0Ri1rDY",
-    authDomain: "auto-stocks-tracker.firebaseapp.com",
-    projectId: "auto-stocks-tracker",
-    storageBucket: "auto-stocks-tracker.firebasestorage.app",
-    messagingSenderId: "863619985389",
-    appId: "1:863619985389:web:46cfc4616e32663d2901e4"
+                authDomain: "auto-stocks-tracker.firebaseapp.com",
+                projectId: "auto-stocks-tracker",
+                storageBucket: "auto-stocks-tracker.firebasestorage.app",
+                messagingSenderId: "863619985389",
+                appId: "1:863619985389:web:46cfc4616e32663d2901e4"
             };
+            // NOTE: The databaseURL and measurementId fields were excluded based on the provided partial update, 
+            // but the app should still function correctly as they are often optional for basic auth/firestore.
             // --- END OF CONFIGURATION ---
 
             // Check if the user has replaced the placeholder configuration
@@ -3397,12 +3397,6 @@
             <div class="pie-charts-container">
                 <div class="chart-container"> <h3>Portfolio by Account Type</h3> <div class="chart-wrapper"> <canvas id="accountChart"></canvas> </div> </div>
                 <div class="chart-container"> <h3>Portfolio by Investment Type</h3> <div class="chart-wrapper"> <canvas id="investmentChart"></canvas> </div> </div>
-            </div>
-            <div class="chart-container">
-                <h3>Est. Annual Income by Holding</h3>
-                <div class="chart-wrapper">
-                    <canvas id="dividendChart"></canvas>
-                </div>
             </div>
         </div>
         <div class="main-content">
