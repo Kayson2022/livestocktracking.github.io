@@ -469,13 +469,37 @@
             loadAutoRefreshInterval();
             loadAutoRefreshState();
             loadStatsVisibility();
-            document.getElementById('sortOptions').addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
-            document.getElementById('filterPlatform').addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
-            document.getElementById('searchInput').addEventListener('input', e => { currentSearchTerm = e.target.value; updateDisplay(); });
-            document.getElementById('csvFileInput').addEventListener('change', handleCsvImport);
-            document.getElementById('userNameInput').addEventListener('input', debouncedUpdateUserName);
-            document.getElementById('signInBtn').addEventListener('click', signInWithGoogle);
-            document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+
+             // --- FIXED: Added null checks before adding listeners ---
+            const sortOptionsEl = document.getElementById('sortOptions');
+            if (sortOptionsEl) sortOptionsEl.addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
+            else console.error("Element with ID 'sortOptions' not found!");
+
+            const filterPlatformEl = document.getElementById('filterPlatform');
+            if (filterPlatformEl) filterPlatformEl.addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
+             else console.error("Element with ID 'filterPlatform' not found!");
+
+            const searchInputEl = document.getElementById('searchInput');
+            if (searchInputEl) searchInputEl.addEventListener('input', e => { currentSearchTerm = e.target.value; updateDisplay(); });
+             else console.error("Element with ID 'searchInput' not found!");
+
+            const csvFileInputEl = document.getElementById('csvFileInput');
+            if (csvFileInputEl) csvFileInputEl.addEventListener('change', handleCsvImport);
+             else console.error("Element with ID 'csvFileInput' not found!");
+
+            const userNameInputEl = document.getElementById('userNameInput');
+            if (userNameInputEl) userNameInputEl.addEventListener('input', debouncedUpdateUserName); 
+             else console.error("Element with ID 'userNameInput' not found!");
+
+            const signInBtnEl = document.getElementById('signInBtn');
+            if (signInBtnEl) signInBtnEl.addEventListener('click', signInWithGoogle);
+             else console.error("Element with ID 'signInBtn' not found!");
+
+            const signOutBtnEl = document.getElementById('signOutBtn');
+            if (signOutBtnEl) signOutBtnEl.addEventListener('click', signOutUser);
+             else console.error("Element with ID 'signOutBtn' not found!");
+             // --- END FIX ---
+
             await initializeFirebase();
         }
 
