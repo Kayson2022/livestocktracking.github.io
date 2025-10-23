@@ -1277,7 +1277,7 @@
         }
         // --- End Data Persistence ---
 
-        // --- API & Price Fetching (Unchanged from uploaded file) ---
+        // --- API & Price Fetching (INTEGRATED MISSING FUNCTIONS) ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
@@ -1350,7 +1350,7 @@
             } else {
                 // --- Stock/ETF Priority: Finnhub -> FMP -> Alpha Vantage ---
                 console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromFinnhub(symbol);
+                priceData = await fetchPriceFromFinnhub(symbol); // THIS WAS CAUSING THE ERROR
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via Finnhub.`);
                     return priceData;
@@ -1377,6 +1377,102 @@
             console.warn(`All price providers failed for symbol: ${symbol}`);
             return { currentPrice: null, previousClosePrice: null };
         }
+        
+        // --- ADDED MISSING HELPER FUNCTIONS ---
+        async function fetchPriceFromFinnhub(symbol) {
+            if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null };
+            try {
+                const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
+                const r = await fetch(url);
+
+                if (!r.ok) {
+                    if (r.status === 403) {
+                        console.log(`Finnhub fetch for ${symbol} was forbidden. This is expected for most mutual funds on the free plan. Trying next provider.`);
+                    } else {
+                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
+                    }
+                    return { currentPrice: null, previousClosePrice: null };
+                }
+
+                const d = await r.json();
+                // Ensure 'c' (current) and 'pc' (previous close) are valid numbers
+                const currentPrice = (d && typeof d.c === 'number' && d.c > 0) ? d.c : null;
+                const previousClosePrice = (d && typeof d.pc === 'number' && d.pc > 0) ? d.pc : null;
+                
+                return { currentPrice, previousClosePrice };
+            } catch (e) {
+                console.error(`A network error occurred while fetching from Finnhub for ${symbol}:`, e);
+                return { currentPrice: null, previousClosePrice: null };
+            }
+        }
+
+        async function fetchPriceFromFMP(symbol) {
+             if (!FMP_API_KEY) return { currentPrice: null, previousClosePrice: null };
+             try {
+                 const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
+                 const historyRes = await fetch(historyUrl);
+                 
+                 if (!historyRes.ok) {
+                     console.warn(`FMP historical fetch failed for ${symbol}: ${historyRes.status}`);
+                     return { currentPrice: null, previousClosePrice: null }; 
+                 }
+
+                 const historyData = await historyRes.json();
+                 
+                 if (historyData && historyData.historical && historyData.historical.length >= 2) {
+                     const latestClose = historyData.historical[0].close;
+                     const previousDayClose = historyData.historical[1].close;
+                      // Validate that prices are numbers > 0
+                     const currentPrice = (typeof latestClose === 'number' && latestClose > 0) ? latestClose : null;
+                     const previousClosePrice = (typeof previousDayClose === 'number' && previousDayClose > 0) ? previousDayClose : null;
+                     return { currentPrice, previousClosePrice };
+                 } else {
+                     console.warn(`FMP did not return sufficient historical data for ${symbol}.`);
+                     return { currentPrice: null, previousClosePrice: null }; 
+                 }
+             } catch (e) {
+                  console.error(`A network error occurred during the FMP fetch for ${symbol}:`, e);
+                  return { currentPrice: null, previousClosePrice: null };
+             }
+        }
+
+        async function fetchPriceFromAlphaVantage(symbol) {
+            if (!ALPHA_VANTAGE_API_KEY) return { currentPrice: null, previousClosePrice: null };
+            try {
+                const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+                const r = await fetch(url);
+                const d = await r.json();
+
+                if (d.Information || d.Note) {
+                   console.warn(`Alpha Vantage API limit reached for ${symbol}. Price not updated.`);
+                   return { currentPrice: null, previousClosePrice: null };
+                }
+
+                const ts = d['Time Series (Daily)'];
+                if (ts && Object.keys(ts).length >= 2) {
+                    const sortedDates = Object.keys(ts).sort((a, b) => new Date(b) - new Date(a));
+                    
+                    const latestDate = sortedDates[0];
+                    const previousDate = sortedDates[1];
+
+                    const latestClose = parseFloat(ts[latestDate]['4. close']);
+                    const previousDayClose = parseFloat(ts[previousDate]['4. close']);
+
+                     // Validate that prices are numbers > 0
+                    const currentPrice = (!isNaN(latestClose) && latestClose > 0) ? latestClose : null;
+                    const previousClosePrice = (!isNaN(previousDayClose) && previousDayClose > 0) ? previousDayClose : null;
+
+                    return { currentPrice, previousClosePrice };
+                }
+                console.warn(`Alpha Vantage did not return sufficient data for ${symbol}.`);
+                return { currentPrice: null, previousClosePrice: null };
+            } catch (e) {
+                console.error(`Alpha Vantage fetch error for ${symbol}:`, e);
+                return { currentPrice: null, previousClosePrice: null };
+            }
+        }
+        // --- END ADDED HELPER FUNCTIONS ---
+
 
         async function refreshAllPrices(forceRefresh = false) {
             if (!isInitialDataLoaded) return;
