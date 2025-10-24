@@ -1952,7 +1952,7 @@
         }
         // --- End Settings Modal ---
 
-        // --- Calculation and Rendering Logic (Unchanged from uploaded file - preserving G/L) ---
+        // --- Calculation and Rendering Logic (MODIFIED for G/L) ---
         function isCashEquivalentType(type) {
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
@@ -1985,9 +1985,27 @@
                     totalCostBasis += Number(h.totalCost) || 0;
                     estimatedAnnualIncome += (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
 
-                    if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
+                    // --- MODIFIED G/L LOGIC ---
+                    const isRetirementOr529 = h.accountType === '401(k)' || h.accountType === '529 College Saving';
+                    const cachedInfo = priceCache[h.symbol] || {};
+                    let canIncludeDailyGL = true; // Default to true
+
+                    if (isRetirementOr529) {
+                        // It's a 401k/529. It must have a manual price entry, and it must be fresh.
+                        const manualTimestamp = cachedInfo.manualPriceEntryTimestamp || 0;
+                        const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                        
+                        if (manualTimestamp < twentyFourHoursAgo) {
+                            // If timestamp is missing (0) or older than 24h, it's stale.
+                            canIncludeDailyGL = false;
+                        }
+                    }
+
+                    // Now, wrap the original G/L calculation in this check:
+                    if (canIncludeDailyGL && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                         totalDailyGainLoss += (currentValue - ((Number(h.totalShares) || 0) * h.previousClosePrice));
                     }
+                    // --- END MODIFIED G/L LOGIC ---
                     
                     const unrealizedGain = currentValue - (Number(h.totalCost) || 0);
                     if (unrealizedGain > bestPerformer.gain) {
@@ -2085,12 +2103,26 @@
             const totalGroupGainLoss = investedValue - totalGroupInvestedCostBasis; 
             const totalGroupReturnPercentage = totalGroupInvestedCostBasis > 0 ? (totalGroupGainLoss / totalGroupInvestedCostBasis) : 0;
             
+            // --- MODIFIED G/L LOGIC ---
             let totalGroupDailyGainLoss = investedHoldings.reduce((sum, h) => {
-                if (h.previousClosePrice !== null && h.previousClosePrice > 0) {
+                const isRetirementOr529 = h.accountType === '401(k)' || h.accountType === '529 College Saving';
+                const cachedInfo = priceCache[h.symbol] || {};
+                let canIncludeDailyGL = true;
+
+                if (isRetirementOr529) {
+                    const manualTimestamp = cachedInfo.manualPriceEntryTimestamp || 0;
+                    const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                    if (manualTimestamp < twentyFourHoursAgo) {
+                        canIncludeDailyGL = false;
+                    }
+                }
+
+                if (canIncludeDailyGL && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                     return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
                 return sum;
             }, 0);
+            // --- END MODIFIED G/L LOGIC ---
 
             let groupStatsHtml = '';
             if (isWatchlist) {
@@ -2172,9 +2204,26 @@
             }
             let headerHtml = '';
             let detailsHtml = '';
+            
+            // --- MODIFIED G/L LOGIC (for display) ---
+            const isRetirementOr529 = h.accountType === '401(k)' || h.accountType === '529 College Saving';
+            const cachedInfo = priceCache[h.symbol] || {};
+            let canIncludeDailyGL = true;
+            if (isRetirementOr529) {
+                const manualTimestamp = cachedInfo.manualPriceEntryTimestamp || 0;
+                const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                if (manualTimestamp < twentyFourHoursAgo) {
+                    canIncludeDailyGL = false;
+                }
+            }
+            
+            let todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
+            let todayGLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayGainLossAmount) : (isRetirementOr529 ? '(Stale)' : '...');
+            let todayGLPercentDisplay = hasLivePrice && canIncludeDailyGL ? formatPercentage(todayGainLossPercentage) : '...';
 
-            const todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
             if (isWatchlist) {
+                 todayGLAmountDisplay = hasLivePrice ? formatCurrency(todayGainLossAmount) : '...';
+                 todayGLPercentDisplay = hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...';
                 headerHtml = `
                         <div class="investment-header-info">
                             <div class="investment-symbol">${h.symbol}</div>
@@ -2183,7 +2232,7 @@
                         <div class="investment-header-summary">
                             <div class="detail-value">${hasLivePrice ? formatCurrency(h.currentPrice) : '...'}</div>
                             <div class="detail-value ${todayGLLabelClass}">
-                                ${hasLivePrice ? `${formatCurrency(todayGainLossAmount)} (${formatPercentage(todayGainLossPercentage)})` : '...'}
+                                ${hasLivePrice ? `${todayGLAmountDisplay} (${todayGLPercentDisplay})` : '...'}
                             </div>
                         </div>
                 `;
@@ -2206,13 +2255,15 @@
                     <div class="detail-item"><div class="detail-label">Market Value</div><div class="detail-value">${hasLivePrice ? formatCurrency(currentValue) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Unrealized G/L</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatCurrency(totalGainLoss) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatCurrency(todayGainLossAmount) : '...'}</div></div>
-                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${hasLivePrice ? formatPercentage(todayGainLossPercentage) : '...'}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${todayGLAmountDisplay}</div></div>
+                    <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${todayGLPercentDisplay}</div></div>
                     <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
                     <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
                     <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
                 `;
             }
+            // --- END MODIFIED G/L LOGIC ---
+            
             const uniqueKey = `${h.symbol}|||${h.accountType}|||${h.platform}`;
             const isHistoryExpanded = !!uiState.expandedTransactions[uniqueKey];
             const transactionsHtml = `
@@ -2269,16 +2320,33 @@
 
             let todayPL = 0;
             let todayPLPercent = 0;
-            if (hasLivePrice && previousClosePrice > 0) {
+            
+            // --- MODIFIED G/L LOGIC (for display) ---
+            const isRetirementOr529 = accountType === '401(k)' || accountType === '529 College Saving';
+            const cachedInfo = priceCache[symbol] || {};
+            let canIncludeDailyGL = true;
+            if (isRetirementOr529) {
+                const manualTimestamp = cachedInfo.manualPriceEntryTimestamp || 0;
+                const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                if (manualTimestamp < twentyFourHoursAgo) {
+                    canIncludeDailyGL = false;
+                }
+            }
+
+            if (canIncludeDailyGL && hasLivePrice && previousClosePrice > 0) {
                 todayPL = (currentPrice - previousClosePrice) * totalShares;
                 const previousTotalValue = previousClosePrice * totalShares;
                 if (previousTotalValue > 0) {
                    todayPLPercent = todayPL / previousTotalValue;
                 }
             }
+            
+            let todayPLLabelClass = todayPL >= 0 ? 'positive' : 'negative';
+            let todayPLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayPL) : (isRetirementOr529 ? '(Stale)' : '...');
+            let todayPLPercentDisplay = hasLivePrice && canIncludeDailyGL ? formatPercentage(todayPLPercent) : '...';
+            // --- END MODIFIED G/L LOGIC ---
 
             const allTransactions = holdings.flatMap(h => h.transactions);
-            const todayPLLabelClass = todayPL >= 0 ? 'positive' : 'negative';
 
             const purchasesHtml = holdings.map(h => `
                 <div class="purchase-item">
@@ -2348,7 +2416,7 @@
                     </div>
                     <div class="consolidated-footer">
                         <div class="summary-item"><span>Overall P/L:</span> <span class="detail-value ${overallPL >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? `${formatCurrency(overallPL)} (${formatPercentage(overallPLPercent)})` : '...'}</span></div>
-                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${hasLivePrice ? formatCurrency(todayPL) : '...'}</span></div>
+                        <div class="summary-item"><span>P/L Today:</span> <span class="detail-value ${todayPLLabelClass}">${todayPLAmountDisplay}</span></div>
                     </div>
                            ${transactionsHtml}
                 </div>
@@ -2380,7 +2448,7 @@
         }
         // --- End Main Update ---
 
-        // --- MODAL Functions for Editing Data (Unchanged from uploaded file) ---
+        // --- MODAL Functions for Editing Data (MODIFIED for G/L) ---
         function openEditModal(transactionId) {
             const transaction = portfolioData.transactions.find(t => t.id == transactionId);
             if (!transaction) return;
@@ -2465,6 +2533,18 @@
             const manualPCInput = document.getElementById('editHoldingManualPC');
             manualPCInput.value = cachedInfo.manualPreviousClosePrice || '';
 
+            // --- MODIFIED: Show timestamp ---
+            const manualTimestamp = cachedInfo.manualPriceEntryTimestamp;
+            const timestampDisplay = document.getElementById('manualPriceTimestampDisplay');
+            if (manualTimestamp) {
+                const ageInHours = (Date.now() - manualTimestamp) / (1000 * 60 * 60);
+                let status = ageInHours <= 24 ? ' (Fresh)' : ' (Stale)';
+                timestampDisplay.textContent = `Manual prices last set: ${new Date(manualTimestamp).toLocaleString()}${status}`;
+            } else {
+                timestampDisplay.textContent = 'Manual prices not set.';
+            }
+            // --- END MODIFICATION ---
+
             modal.style.display = 'flex';
         }
 
@@ -2488,22 +2568,36 @@
             const newManualPC = parseFloat(document.getElementById('editHoldingManualPC').value);
 
             if (!priceCache[symbol]) priceCache[symbol] = {};
-            
+
+            // --- MODIFIED: Set timestamp ---
+            const manualPriceSet = !isNaN(newManualPrice) && newManualPrice >= 0;
+            const manualPCSet = !isNaN(newManualPC) && newManualPC >= 0;
+
+            if (manualPriceSet || manualPCSet) {
+                priceCache[symbol].manualPriceEntryTimestamp = Date.now();
+            }
+
             // --- Update Manual Current Price ---
-            if (!isNaN(newManualPrice) && newManualPrice >= 0) {
+            if (manualPriceSet) {
                 priceCache[symbol].manualPrice = newManualPrice;
-                priceCache[symbol].currentPrice = newManualPrice; 
+                priceCache[symbol].currentPrice = newManualPrice;
             } else {
                 delete priceCache[symbol].manualPrice;
             }
             
             // --- Update Manual Previous Close Price ---
-            if (!isNaN(newManualPC) && newManualPC >= 0) {
+            if (manualPCSet) {
                 priceCache[symbol].manualPreviousClosePrice = newManualPC;
-                priceCache[symbol].previousClosePrice = newManualPC; 
+                priceCache[symbol].previousClosePrice = newManualPC;
             } else {
                 delete priceCache[symbol].manualPreviousClosePrice;
             }
+
+            // If both are cleared, remove the timestamp
+            if (!manualPriceSet && !manualPCSet) {
+                 delete priceCache[symbol].manualPriceEntryTimestamp;
+            }
+            // --- END MODIFICATION ---
 
 
             if (holding) {
@@ -3092,6 +3186,8 @@
                 <label for="editHoldingManualPC">Manual Previous Close Price / Share (Optional)</label>
                 <input type="number" id="editHoldingManualPC" step="any" min="0">
                 <small>Required to manually calculate **Today's G/L** when using a manual current price.</small>
+                <!-- MODIFIED: Added timestamp display -->
+                <small id="manualPriceTimestampDisplay" style="color: var(--accent-color-1); display: block; margin-top: 4px;"></small>
             </div>
             <div class="modal-buttons">
                 <button class="btn btn-confirm" onclick="saveHoldingEdit()">Save</button>
@@ -3374,4 +3470,3 @@
     <div id="countdown-timer" class="countdown-timer"></div>
 </body>
 </html>
-
