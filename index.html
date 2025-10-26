@@ -467,7 +467,7 @@
         const CORS_PROXY = "https://proxy.invo.zone/"; // FIX: Changed proxy from corsproxy.io to invo.zone due to Cloudflare block.
 
         // --- API & Fetching Configuration ---
-        const API_THROTTLE_DELAY = 350; // ms to wait between API calls
+        const API_THROTTLE_DELAY = 500; // FIX: Increased ms to wait between API calls to prevent freezing/rate limiting
         const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
 
@@ -519,7 +519,12 @@
         window.addEventListener('DOMContentLoaded', startApp);
 
         async function startApp() {
-            document.getElementById('transactionDate').valueAsDate = new Date();
+            // FIX: Added null check to prevent TypeError if the DOM hasn't fully painted
+            const transactionDateEl = document.getElementById('transactionDate');
+            if (transactionDateEl) {
+                transactionDateEl.valueAsDate = new Date();
+            }
+
             loadTheme();
             loadApiKeys();
             loadAutoRefreshInterval();
@@ -1797,12 +1802,15 @@
                     const response = await fetch(url);
 
                     if (!response.ok) {
+                        // Check status for API limit first
                         if (response.status === 429) {
                             statusEl.textContent = '⚠️';
                             statusEl.title = 'Finnhub API limit reached. Please wait a moment and try again, or use a premium key.';
                         } else {
-                            // Check if the response is the Cloudflare block page
+                            // Only attempt to read text if status is non-OK but not rate limited
                             const errorText = await response.text();
+                            
+                            // Check for Cloudflare/Proxy block content
                             if (errorText.includes("Cloudflare Ray ID")) {
                                 statusEl.textContent = '⚠️';
                                 statusEl.title = `Proxy blocked by Cloudflare. Try changing the CORS proxy in settings (it is currently set to ${CORS_PROXY})`;
@@ -1816,6 +1824,7 @@
                         return;
                     }
 
+                    // Proceed only if response.ok
                     const data = await response.json();
                     const match = data.result?.find(item => item.symbol === symbol);
                     if (match) {
