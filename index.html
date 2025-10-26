@@ -464,7 +464,7 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const FMP_API_KEY_STORAGE = 'myPortfolioFmpKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
-        const CORS_PROXY = "https://corsproxy.io/?";
+        const CORS_PROXY = "https://proxy.invo.zone/"; // FIX: Changed proxy from corsproxy.io to invo.zone due to Cloudflare block.
 
         // --- API & Fetching Configuration ---
         const API_THROTTLE_DELAY = 350; // ms to wait between API calls
@@ -1507,7 +1507,7 @@
                     if (r.status === 403) {
                         console.log(`Finnhub fetch for ${symbol} was forbidden. This is expected for most mutual funds on the free plan. Trying next provider.`);
                     } else {
-                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
+                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}. Error: ${await r.text()}`);
                     }
                     return { currentPrice: null, previousClosePrice: null };
                 }
@@ -1801,10 +1801,16 @@
                             statusEl.textContent = '⚠️';
                             statusEl.title = 'Finnhub API limit reached. Please wait a moment and try again, or use a premium key.';
                         } else {
+                            // Check if the response is the Cloudflare block page
                             const errorText = await response.text();
-                            console.error("CORS/Network Error:", errorText);
-                            statusEl.textContent = '⚠️';
-                            statusEl.title = `Network Error: ${response.statusText}. The proxy service may be down.`;
+                            if (errorText.includes("Cloudflare Ray ID")) {
+                                statusEl.textContent = '⚠️';
+                                statusEl.title = `Proxy blocked by Cloudflare. Try changing the CORS proxy in settings (it is currently set to ${CORS_PROXY})`;
+                            } else {
+                                console.error("CORS/Network Error:", errorText);
+                                statusEl.textContent = '⚠️';
+                                statusEl.title = `Network Error: ${response.statusText}. The proxy service may be down.`;
+                            }
                         }
                         isSymbolValidated = false;
                         return;
