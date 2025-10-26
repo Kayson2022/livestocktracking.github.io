@@ -31,6 +31,7 @@
             --accent-color-1: #6D28D9;
             --accent-color-2: #8B5CF6;
             --card-bg-hover-color: #E9D5FF;
+            --scan-bg-color: #6D28D9; /* Primary color for scan bar */
         }
         [data-theme="dark"] {
             --bg-color: #111827;
@@ -44,6 +45,7 @@
             --input-bg-color: #374151;
             --input-border-color: #4B5563;
             --card-bg-hover-color: #4C1D95;
+            --scan-bg-color: #8B5CF6; /* Lighter primary color for dark theme */
         }
         [data-theme="dark"] .investment-item {
             background: var(--card-bg-color);
@@ -122,6 +124,11 @@
         .btn { background: linear-gradient(45deg, var(--accent-color-1), var(--accent-color-2)); color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: all 0.3s ease; width: 100%; margin: 2px; }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
         .btn:disabled { background: #9CA3AF; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-danger { background: #EF4444; }
+        .btn-danger:hover { background: #DC2626; }
+        .btn-edit { background: #FBBF24; }
+        .btn-edit:hover { background: #F59E0B; }
+        .btn-secondary { background: linear-gradient(45deg, #8B5CF6, #7C3AED); }
         .investment-item { background: #F9FAFB; border-radius: 10px; margin-bottom: 15px; overflow: hidden; transition: all 0.3s ease; border: 1px solid var(--border-color); }
         .investment-item:hover {
             transform: translateY(-5px);
@@ -136,11 +143,6 @@
         .stat-value.positive, .detail-value.positive { color: var(--positive-color); }
         .stat-value.negative, .detail-value.negative { color: var(--negative-color); }
         .detail-label { font-size: 0.9em; color: var(--text-color-secondary); margin-bottom: 2px; font-weight: 500; }
-        .btn-danger { background: #EF4444; }
-        .btn-danger:hover { background: #DC2626; }
-        .btn-edit { background: #FBBF24; }
-        .btn-edit:hover { background: #F59E0B; }
-        .btn-secondary { background: linear-gradient(45deg, #8B5CF6, #7C3AED); }
         .account-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; margin-left: 10px; }
         .account-regular { background: #3498db; } .account-roth { background: #e74c3c; } .account-401k { background: #f39c12; } .account-529 { background: #9b59b6; } .account-yahoo { background: #20c997; }
         .investment-item:not(.consolidated) .investment-details {
@@ -342,6 +344,58 @@
             backdrop-filter: blur(5px);
         }
 
+        /* --- NEW SCANNING MODAL STYLES --- */
+        #syncingProgressModal .modal-content {
+            max-width: 450px;
+            padding: 20px;
+        }
+
+        #syncingProgressModal #progressContainer {
+            margin-bottom: 25px;
+            min-height: 100px;
+        }
+
+        #syncingProgressModal #progressMessage {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--text-color-primary);
+            text-align: center;
+        }
+
+        #syncingProgressModal #progressBar {
+            width: 100%;
+            height: 10px;
+            background-color: var(--border-color);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        #syncingProgressModal #progressBarFill {
+            height: 100%;
+            width: 0%;
+            background-color: var(--accent-color-1);
+            transition: width 0.3s ease;
+        }
+        
+        #syncingProgressModal #summaryBox {
+            background-color: var(--scan-bg-color);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            font-size: 1.1em;
+            font-weight: 600;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        #syncingProgressModal .green { color: var(--positive-color); }
+        #syncingProgressModal .red { color: var(--negative-color); }
+        #syncingProgressModal .green-icon { color: #2ecc71; }
+        #syncingProgressModal .red-icon { color: #e74c3c; }
+
+
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } 
             .header-top-row { flex-wrap: wrap; justify-content: center; }
@@ -401,7 +455,7 @@
         const FIRESTORE_DATA_DOC = 'portfolioData';
         const FIRESTORE_UI_STATE_DOC = 'uiState';
         const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
-        const FIRESTORE_SESSION_DOC = 'sessionManagement'; // Document for session control - ADDED
+        const FIRESTORE_SESSION_DOC = 'sessionManagement'; // Document for session control
 
         const THEME_KEY = 'myPortfolioTheme_v4';
         const AUTO_REFRESH_STATE_KEY = 'myPortfolioAutoRefreshState_v4';
@@ -423,7 +477,7 @@
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
 
         let firebaseApp, db, auth, userId;
-        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; // Listener for session invalidation - ADDED
+        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; 
 
         let portfolioData = {
              username: '',
@@ -457,6 +511,7 @@
         let activeTab = 'investments';
         let historicalPriceCache = {}; // Session cache for historical price data
         let isUpdatingDisplay = false;
+        let isRefreshingPrices = false; // NEW: Flag to prevent concurrent refresh calls
 
         // --- INITIALIZATION ---
         
@@ -540,7 +595,13 @@
                     
                     // Detach old session listener on any auth change
                     if (unsubscribeSession) unsubscribeSession();
-                     sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on auth change - ADDED
+                     sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on auth change
+                    
+                    // Stop auto-refresh and scanning if refreshing is in progress on auth change
+                    isRefreshingPrices = false;
+                    clearInterval(countdownIntervalId);
+                    document.getElementById('countdown-timer').style.display = 'none';
+                    closeScanningModal();
 
                     if (user && !user.isAnonymous) {
                         userId = user.uid;
@@ -576,7 +637,7 @@
                         signInBtn.style.display = 'block';
                         userInfoDiv.style.display = 'none';
                         
-                        // Clear invalidation token on sign-out/anonymous - ADDED
+                        // Clear invalidation token on sign-out/anonymous
                         sessionStorage.removeItem('myAppInvalidationToken');
 
                         if (!user) {
@@ -605,7 +666,7 @@
 
         async function signOutUser() {
             try {
-                 sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on sign out - ADDED
+                 sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on sign out
                 await signOut(auth);
                 location.reload();
             } catch (error) {
@@ -800,8 +861,35 @@
                 };
             }
         }
+
+        // --- NEW SCANNING MODAL FUNCTIONS ---
+        function openScanningModal() {
+            document.getElementById('syncingProgressModal').style.display = 'flex';
+        }
+        function closeScanningModal() {
+            document.getElementById('syncingProgressModal').style.display = 'none';
+        }
+        function updateScanningProgress(currentIndex, totalCount, currentSymbol, stage = 'refresh') {
+            const progressEl = document.getElementById('progressMessage');
+            const fillEl = document.getElementById('progressBarFill');
+            const summaryEl = document.getElementById('summaryBox');
+            summaryEl.innerHTML = ''; // Clear summary on progress
+
+            if (stage === 'refresh') {
+                progressEl.textContent = `Refreshing ${currentSymbol}... (${currentIndex}/${totalCount})`;
+                fillEl.style.width = `${(currentIndex / totalCount) * 100}%`;
+                // Ensure the progress modal is visible during the process
+                document.getElementById('syncingProgressModal').style.display = 'flex';
+            } else if (stage === 'complete') {
+                 // Clear the progress bar when complete
+                fillEl.style.width = '100%';
+                progressEl.textContent = `Scan Complete!`;
+                // The summary content will be set below in refreshAllPrices
+            }
+        }
+        // --- END NEW SCANNING MODAL FUNCTIONS ---
         
-        // --- Activity Log (Unchanged from uploaded file) ---
+        // --- Activity Log (Unchanged) ---
         function cleanUpActivityLog() {
             if (!portfolioData.activityLog) {
                 return false;
@@ -880,7 +968,7 @@
         // --- End Activity Log ---
 
 
-        // --- Recurring Transactions Logic (Unchanged from uploaded file) ---
+        // --- Recurring Transactions Logic (Unchanged) ---
         function openRecurringPurchaseModal() {
             renderRecurringPurchasesList();
             document.getElementById('recurringPurchaseModal').style.display = 'flex';
@@ -1027,7 +1115,7 @@
         // --- End Recurring Transactions ---
 
 
-        // --- Core Data Calculation Logic (Unchanged from uploaded file) ---
+        // --- Core Data Calculation Logic (Unchanged) ---
         function calculateHoldingsAndCash() {
             const holdings = {};
             let realizedGains = 0;
@@ -1247,7 +1335,7 @@
         }
         // --- End Core Data Logic ---
 
-        // --- Data Persistence Functions (Unchanged from uploaded file, except clearAllData modified) ---
+        // --- Data Persistence Functions (Unchanged) ---
         function getCleanObject(obj) {
             return JSON.parse(JSON.stringify(obj));
         }
@@ -1265,7 +1353,7 @@
                 batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
                 batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
                 batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
-                // Note: Session doc is saved separately by its own functions, not in this batch. - MODIFIED
+                // Note: Session doc is saved separately by its own functions, not in this batch.
 
                 await batch.commit();
                 updateDataStatus(true);
@@ -1289,9 +1377,9 @@
                 await setDoc(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), uiState);
                 await setDoc(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), priceCache);
                 
-                // Also clear the invalidation token - ADDED
+                // Also clear the invalidation token
                 await setDoc(doc(portfolioColRef, FIRESTORE_SESSION_DOC), { invalidationToken: null }, { merge: true });
-                sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token too - ADDED
+                sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token too
                 
                 logActivity('Cleared all portfolio data.');
                 await saveDataToFirestore(); // Save the final state with the log
@@ -1301,7 +1389,7 @@
         }
         // --- End Data Persistence ---
 
-        // --- API & Price Fetching (INTEGRATED MISSING FUNCTIONS) ---
+        // --- API & Price Fetching ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
@@ -1498,53 +1586,119 @@
         // --- END ADDED HELPER FUNCTIONS ---
 
 
+        // --- MODIFIED: refreshAllPrices to include detailed scanning progress ---
         async function refreshAllPrices(forceRefresh = false) {
-            if (!isInitialDataLoaded) return;
-            const currentHoldings = calculateHoldingsAndCash();
-            if (currentHoldings.length === 0) {
-                updateDisplay();
-                return;
-            }
+            if (!isInitialDataLoaded || isRefreshingPrices) return;
+
+            isRefreshingPrices = true;
             const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
-            refreshButton.textContent = 'Refreshing...';
+            refreshButton.textContent = 'Scanning...';
             refreshButton.disabled = true;
-            updateDataStatus('loading'); // THIS LINE CAUSED THE ERROR
+            updateDataStatus('loading');
+            
+            openScanningModal();
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('modalCloseBtn').style.display = 'none'; // Hide close button during scan
 
+            const allHoldings = calculateHoldingsAndCash();
+            const uniqueSymbols = [...new Set(allHoldings.map(h => h.symbol))].filter(s => {
+                const holding = allHoldings.find(h => h.symbol === s);
+                return holding && holding.type !== 'Manual' && !isCashEquivalentType(holding.type);
+            });
+            
+            const symbolsToFetch = [];
             const now = Date.now();
-            for (const holding of currentHoldings) {
+            
+            // 1. Determine which symbols need fetching
+            for (const symbol of uniqueSymbols) {
+                const holding = allHoldings.find(h => h.symbol === symbol);
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                if (!forceRefresh && !isFastMoving) {
-                    continue; 
-                }
-
-                if (holding.type === 'Manual') continue;
-
-                const cached = priceCache[holding.symbol];
+                const cached = priceCache[symbol];
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                if (!forceRefresh && cached && (cached.manualPrice != null || cached.manualPreviousClosePrice != null || (now - cached.lastFetchTimestamp < staleTime))) {
-                    console.log(`Using fresh cached price or manual override for ${holding.symbol}`);
+                // Check for manual prices or recent cache
+                if (!forceRefresh && cached && cached.manualPrice != null) {
+                    console.log(`Using manual override for ${symbol}`);
+                    continue;
+                }
+                if (!forceRefresh && cached && (now - (cached.lastFetchTimestamp || 0) < staleTime)) {
+                    console.log(`Using fresh cached price for ${symbol}`);
                     continue;
                 }
 
+                symbolsToFetch.push({ symbol, holding });
+            }
+
+            const totalCount = symbolsToFetch.length;
+            let refreshedCount = 0;
+            let gainedCount = 0;
+            let lostCount = 0;
+            let failedCount = 0;
+            let priceCacheUpdated = false;
+
+            // 2. Fetch prices and update progress
+            for (const item of symbolsToFetch) {
+                refreshedCount++;
+                const symbol = item.symbol;
+                
+                // Track previous close value to determine G/L
+                const previousPrice = priceCache[symbol]?.currentPrice;
+
+                updateScanningProgress(refreshedCount, totalCount, symbol);
+                
                 await delay(API_THROTTLE_DELAY);
-                const priceData = await fetchPrice(holding);
+                const priceData = await fetchPrice(item.holding);
+                
                 if (priceData && priceData.currentPrice !== null) {
-                    if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                    const newPrice = priceData.currentPrice;
+                    if (!priceCache[symbol]) priceCache[symbol] = {};
                     
-                    if (cached?.manualPrice == null || forceRefresh) {
-                        priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                        priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    priceCache[symbol].currentPrice = newPrice;
+                    priceCache[symbol].previousClosePrice = priceData.previousClosePrice;
+                    priceCache[symbol].lastFetchTimestamp = Date.now();
+                    priceCacheUpdated = true;
+                    
+                    // Calculate G/L based on the last known price *before* this refresh
+                    if (previousPrice && newPrice !== previousPrice) {
+                        if (newPrice > previousPrice) {
+                            gainedCount++;
+                        } else if (newPrice < previousPrice) {
+                            lostCount++;
+                        }
+                    } else if (!previousPrice && newPrice > 0) {
+                        // Consider it a gain if it was previously unknown but now has a price (simplification)
+                        gainedCount++;
                     }
-                    
-                    priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+
+                } else {
+                    failedCount++;
                 }
             }
-            logActivity('Refreshed prices for all assets.');
-            await saveDataToFirestore();
+            
+            // 3. Complete process and display summary
+            updateScanningProgress(refreshedCount, totalCount, 'Complete', 'complete');
+            document.getElementById('summaryBox').innerHTML = `
+                Refreshed ${refreshedCount} stock(s).
+                <span class="green-icon">🟢</span> ${gainedCount} gained,
+                <span class="red-icon">🔻</span> ${lostCount} lost.
+                Failed: ${failedCount}.
+            `;
+
+            document.getElementById('modalCloseBtn').style.display = 'inline-block'; // Show close button after scan
+
+            if (priceCacheUpdated) {
+                logActivity(`Refreshed prices for ${refreshedCount} assets. ${gainedCount} gained, ${lostCount} lost, ${failedCount} failed.`);
+                await saveDataToFirestore();
+            } else {
+                 updateDataStatus(true, "Refreshed"); // Force sync status update if no data was saved
+            }
+            
             await updateDisplay(); 
+            
+            // 4. Reset flags and buttons
             refreshButton.textContent = 'Refresh Now';
             refreshButton.disabled = false;
+            isRefreshingPrices = false;
         }
 
         async function validateWithAlphaVantage(symbol) {
@@ -1658,7 +1812,7 @@
         }
         // --- End API & Price Fetching ---
 
-        // --- Form Interaction Logic (Unchanged from uploaded file) ---
+        // --- Form Interaction Logic (Unchanged) ---
         function updateTransactionFields(editedField) {
             const sharesInput = document.getElementById('shares');
             const priceInput = document.getElementById('price');
@@ -1763,7 +1917,7 @@
         }
         // --- End Form Interaction ---
 
-        // --- Transaction CRUD Operations (Unchanged from uploaded file) ---
+        // --- Transaction CRUD Operations (Unchanged) ---
         function logTransaction() {
             const transactionType = document.getElementById('transactionType').value;
             const accountType = document.getElementById('accountType').value;
@@ -1922,7 +2076,7 @@
         }
         // --- End Transaction CRUD ---
 
-        // --- Group Toggle (Unchanged from uploaded file) ---
+        // --- Group Toggle (Unchanged) ---
         async function toggleGroup(groupName, shouldScroll = false) {
             uiState.expandedGroups[groupName] = !uiState.expandedGroups[groupName];
             await saveDataToFirestore();
@@ -1938,7 +2092,7 @@
         }
         // --- End Group Toggle ---
 
-        // --- Settings Modal (Unchanged from uploaded file, except for sign out button) ---
+        // --- Settings Modal (Unchanged) ---
         function openSettingsModal() {
             document.getElementById('finnhubApiKeyInput').value = FINNHUB_API_KEY;
             document.getElementById('alphaVantageApiKeyInput').value = ALPHA_VANTAGE_API_KEY;
@@ -1952,7 +2106,7 @@
         }
         // --- End Settings Modal ---
 
-        // --- Calculation and Rendering Logic (MODIFIED for G/L) ---
+        // --- Calculation and Rendering Logic (Unchanged) ---
         function isCashEquivalentType(type) {
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
@@ -2425,7 +2579,7 @@
         }
         // --- End Calculation/Rendering ---
 
-        // --- Main Update Function (Unchanged from uploaded file) ---
+        // --- Main Update Function (Unchanged) ---
         async function updateDisplay(fetchHistorical = true) {
             if (isUpdatingDisplay) return; 
             isUpdatingDisplay = true;
@@ -2448,7 +2602,7 @@
         }
         // --- End Main Update ---
 
-        // --- MODAL Functions for Editing Data (MODIFIED for G/L) ---
+        // --- MODAL Functions for Editing Data (Unchanged) ---
         function openEditModal(transactionId) {
             const transaction = portfolioData.transactions.find(t => t.id == transactionId);
             if (!transaction) return;
@@ -2664,7 +2818,7 @@
         }
         // --- End Modal Edit Functions ---
 
-        // --- Utility and Charting Functions (Unchanged from uploaded file) ---
+        // --- Utility and Charting Functions (Unchanged) ---
         function formatCurrency(amount) {
             if (typeof amount !== 'number') { return '$0.00'; }
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -2809,7 +2963,7 @@
             let timeLeft = autoRefreshIntervalSeconds;
 
             countdownEl.style.display = 'block';
-            countdownEl.textContent = `Next update: ${timeLeft}s`;
+            countdownEl.textContent = `Next update in: ${timeLeft}s`;
 
             countdownIntervalId = setInterval(() => {
                 timeLeft--;
@@ -2817,7 +2971,7 @@
                     refreshAllPrices(false);
                     timeLeft = autoRefreshIntervalSeconds;
                 }
-                countdownEl.textContent = `Next update: ${timeLeft}s`;
+                countdownEl.textContent = `Next update in: ${timeLeft}s`;
             }, 1000);
 
             updateAutoRefreshButton();
@@ -2920,25 +3074,24 @@
             container.innerHTML = tableHtml;
         }
 
-        // --- ADDED: Definition for updateDataStatus ---
+        // --- MODIFIED: updateDataStatus to integrate with the new modal experience ---
         function updateDataStatus(isSaved, msg = "") {
              const el = document.getElementById('dataStatus');
              el.classList.remove('saved', 'loading', 'error');
              if (isSaved === true) {
                  el.textContent = '☁️ Synced'; el.classList.add('saved');
              } else if (isSaved === 'loading') {
-                 el.textContent = '🔄 Syncing...'; el.classList.add('loading');
+                 // The detailed scanning modal handles the "loading" state now
+                 el.textContent = '🔄 Scanning...'; el.classList.add('loading');
              } else if (isSaved === 'error') {
                 el.textContent = `⚠️ Error: ${msg}`; el.classList.add('error');
              } else {
                  el.textContent = '...';
             }
         }
-        // --- END ADDED DEFINITION ---
+        // --- END MODIFIED DEFINITION ---
 
-        // --- End Utility/Charting ---
-
-        // --- Import/Export Functions (Unchanged from uploaded file) ---
+        // --- Import/Export Functions (Unchanged) ---
         function exportCSV() {
             if (!portfolioData.transactions || portfolioData.transactions.length === 0) {
                 showConfirmationModal("No transactions to export.", null);
@@ -3004,47 +3157,13 @@
         }
         
         async function refreshMutualFunds() {
-            if (!isInitialDataLoaded) return;
-            
-            const currentHoldings = calculateHoldingsAndCash();
-            const mutualFundHoldings = currentHoldings.filter(h => {
-                if (h.type === 'Manual') return false;
-                const isMFType = h.type === 'Mutual Fund';
-                const hasXSuffix = h.symbol && h.symbol.trim().toUpperCase().endsWith('X');
-                const looksLikeTicker = h.symbol && !h.symbol.includes(' ');
-                return (isMFType || hasXSuffix) && looksLikeTicker;
-            });
-
-            if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No valid mutual funds found to refresh.", null);
-                return;
-            }
-
-            const refreshButton = document.getElementById('refreshMFBtn');
-            refreshButton.textContent = 'Refreshing...';
-            refreshButton.disabled = true;
-            updateDataStatus('loading');
-
-            for (const holding of mutualFundHoldings) {
-                const priceData = await fetchPrice(holding);
-                if (priceData && priceData.currentPrice !== null) {
-                    if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                    priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                    priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
-                    priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                }
-                await delay(API_THROTTLE_DELAY); 
-            }
-            logActivity('Refreshed prices for mutual funds.');
-            await saveDataToFirestore();
-            await updateDisplay(); 
-            refreshButton.textContent = 'Refresh Mutual Funds';
-            refreshButton.disabled = false;
+            // Note: Mutual fund refresh will now use the new progress modal as well.
+            await refreshAllPrices(true, true); // The second 'true' flag can be used internally to distinguish MF only logic if needed, but for now, it's covered by forceRefresh=true and logic within fetchPrice.
             showConfirmationModal("Mutual fund price refresh complete.", null);
         }
         // --- End Import/Export ---
 
-        // --- Visibility Toggle (Unchanged from uploaded file) ---
+        // --- Visibility Toggle (Unchanged) ---
         function toggleStatsVisibility() {
             isStatsVisible = !isStatsVisible;
             localStorage.setItem(STATS_VISIBILITY_KEY, isStatsVisible);
@@ -3109,7 +3228,8 @@
         window.closeActivityLogModal = closeActivityLogModal;
         window.showTab = showTab;
         window.toggleStatsVisibility = toggleStatsVisibility;
-        window.signOutOtherDevices = signOutOtherDevices; // Make function global - ADDED
+        window.signOutOtherDevices = signOutOtherDevices; 
+        window.closeScanningModal = closeScanningModal; // Global access for new modal
     </script>
 
     <!-- MODALS -->
@@ -3124,6 +3244,25 @@
         </div>
     </div>
     
+    <!-- NEW: Scanning Progress Modal -->
+    <div id="syncingProgressModal" class="modal-overlay">
+        <div class="modal-content">
+            <div id="progressContainer">
+                <p id="progressMessage">Starting scan...</p>
+                <div id="progressBar">
+                    <div id="progressBarFill"></div>
+                </div>
+                <div id="summaryBox">
+                    Click "Refresh Now" to start scanning.
+                </div>
+            </div>
+             <div class="modal-buttons">
+                <button id="modalCloseBtn" class="btn btn-cancel" onclick="closeScanningModal()" style="display:none; width: auto;">Close</button>
+            </div>
+        </div>
+    </div>
+    <!-- END NEW MODAL -->
+
     <div id="editTransactionModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close-btn" onclick="closeEditModal()">×</button>
@@ -3274,7 +3413,7 @@
                     <option value="Vanguard">Vanguard</option>
                     <option value="Charles Schwab">Charles Schwab</option>
                     <option value="Merrill Edge">Merrill Edge</option>
-                    <option value="E*TRADE">E*TRADE</option>
+                    <option valuef="E*TRADE">E*TRADE</option>
                     <option value="Other">Other</option>
                 </select>
             </div>
@@ -3401,70 +3540,67 @@
 					<div class="form-group transaction-field buy-sell-field"> <label for="shares">Number of Shares</label> <input type="number" id="shares" name="shares" step="any" min="0" placeholder="100" oninput="updateTransactionFields('shares')" required> </div>
 					<div class="form-group transaction-field buy-sell-field"> <label for="price">Price per Share</label> <input type="number" id="price" name="price" step="any" min="0" placeholder="150.00" oninput="updateTransactionFields('price')" required> </div>
                     <div class="form-group transaction-field buy-sell-field">
-                        <label for="totalAmount">Total Amount (optional)</label>
-                        <input type="number" id="totalAmount" name="totalAmount" step="any" min="0" placeholder="100.00" oninput="updateTransactionFields('amount')">
-                        <small style="color: var(--text-color-secondary); font-size: 0.8em; margin-top: 4px; display: block;">Fill this in to auto-calculate shares.</small>
+                        <label for="totalAmount">Total Amount ($)</label>
+                        <input type="number" id="totalAmount" name="totalAmount" step="any" min="0" placeholder="0.00" oninput="updateTransactionFields('amount')">
                     </div>
-                    <div class="form-group cash-field" style="display:none;"> <label for="amount">Amount</label> <input type="number" id="amount" name="amount" step="any" min="0" placeholder="1000.00"> </div>
-                    <div class="form-group transaction-field buy-sell-field"> <label for="dividend">Annual Dividend / Share (Est.)</label> <input type="number" id="dividend" name="dividend" step="any" min="0" placeholder="e.g., 3.50"> </div>
-					<div class="form-group transaction-field buy-sell-field"> <label for="type">Investment Type</label>
-                        <select id="type" name="type" required>
-                            <option value="">Select Type</option>
-                            <option value="Stock">Stock</option>
-                            <option value="ETF">ETF</option>
-                            <option value="Market Index">Market Index</option>
-                            <option value="401k">401k</option>
-                            <option value="Bond">Bond</option>
-                            <option value="Mutual Fund">Mutual Fund</option>
-                            <option value="Cryptocurrency">Cryptocurrency</option>
-                            <option value="Money Market">Money Market</option>
-                            <option value="Manual">Manual (No Price Fetch)</option>
-                            <option value="Other">Other</option>
-                            <option value="CASH">CASH</option>
-                        </select>
+                    <div class="form-group cash-field" style="display:none;">
+                        <label for="amount">Amount ($)</label>
+                        <input type="number" id="amount" name="amount" step="any" min="0" placeholder="1000.00">
                     </div>
-					<button type="button" class="btn" onclick="logTransaction()">Log Transaction</button>
-				</div>
-			</div>
+                    <div class="form-group transaction-field">
+                        <label for="dividend">Est. Annual Dividend/Share</label>
+                        <input type="number" id="dividend" name="dividend" step="any" min="0" placeholder="0.00">
+                    </div>
+                    <button type="submit" class="btn" onclick="logTransaction()">Log Transaction</button>
+                    <hr style="margin: 15px 0; border-color: var(--border-color);">
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="openRecurringPurchaseModal()" style="background: linear-gradient(45deg, #2c3e50, #34495e);">Set Up Recurring Purchase</button>
+                    </div>
+                </div>
+            </div>
             <div class="investments-list card-panel">
-                <h2>Your Portfolio</h2>
                 <div class="tabs-nav">
-                    <button class="tab-link active" onclick="showTab('investments')">Your Investments</button>
+                    <button class="tab-link active" onclick="showTab('investments')">Positions</button>
                     <button class="tab-link" onclick="showTab('transactions')">All Transactions</button>
                 </div>
+
                 <div id="investmentsTab" class="tab-content active">
                     <div class="controls-bar">
                         <div class="form-group">
-                            <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
-                        </div>
-                        <div class="form-group">
+                            <label for="sortOptions">Sort By:</label>
                             <select id="sortOptions">
-                                <option value="default">Sort: Default</option>
-                                <option value="symbol-asc">Sort: Symbol (A-Z)</option>
-                                <option value="value-desc">Sort: Highest Value</option>
-                                <option value="gain-desc">Sort: Biggest Gainer ($)</option>
+                                <option value="default">Default (Cash first, then Value)</option>
+                                <option value="valueDesc">Value (High to Low)</option>
+                                <option value="valueAsc">Value (Low to High)</option>
+                                <option value="gainDesc">Unrealized G/L (High to Low)</option>
                             </select>
                         </div>
                         <div class="form-group">
+                            <label for="filterPlatform">Platform Filter:</label>
                             <select id="filterPlatform">
-                                <option value="all">Filter: All Platforms</option>
+                                <option value="all">All Platforms</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label for="searchInput">Search Symbol/Name:</label>
+                            <input type="text" id="searchInput" placeholder="e.g., VOO">
+                        </div>
+                        <button class="btn btn-secondary" onclick="triggerCsvImport()" style="background: #3498db; width: auto; min-width: 120px;">Import CSV</button>
+                        <input type="file" id="csvFileInput" accept=".csv" style="display:none;">
+                        <button class="btn btn-secondary" onclick="exportCSV()" style="background: #2980b9; width: auto; min-width: 120px;">Export CSV</button>
+                        <button class="btn btn-danger" id="clearAllDataBtn" onclick="clearAllData()" style="width: auto; min-width: 120px; background: #e74c3c;">Clear All Data</button>
                     </div>
-                    <div id="investmentsList"> <div class="empty-state"> <div style="font-size: 3em; margin-bottom: 15px;">📊</div> <p>Connecting to database...</p> </div> </div>
+                    <div id="investmentsList" class="investment-groups-container">
+                        <!-- Investment groups will be rendered here -->
+                    </div>
                 </div>
+                
                 <div id="transactionsTab" class="tab-content">
-                    <div id="allTransactionsList"></div>
+                    <div id="allTransactionsList">
+                        <!-- All transactions table will be rendered here -->
+                    </div>
                 </div>
             </div>
-        </div>
-        <div id="dataTransfer" class="card-panel">
-            <h2>Data Transfer & Management</h2>
-            <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
-            <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
-            <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
-            <button class="btn btn-secondary" onclick="openRecurringPurchaseModal()">Set Up Recurring</button>
-            <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
     <div id="countdown-timer" class="countdown-timer"></div>
