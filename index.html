@@ -512,6 +512,7 @@
         let historicalPriceCache = {}; // Session cache for historical price data
         let isUpdatingDisplay = false;
         let isRefreshingPrices = false; // NEW: Flag to prevent concurrent refresh calls
+        let scanCompleteTimeout = null; // NEW: Timer for auto-closing scan modal
 
         // --- INITIALIZATION ---
         
@@ -868,6 +869,11 @@
         }
         function closeScanningModal() {
             document.getElementById('syncingProgressModal').style.display = 'none';
+            // Clear the auto-close timeout if it exists (user closed manually)
+            if (scanCompleteTimeout) {
+                clearTimeout(scanCompleteTimeout);
+                scanCompleteTimeout = null;
+            }
         }
         function updateScanningProgress(currentIndex, totalCount, currentSymbol, stage = 'refresh') {
             const progressEl = document.getElementById('progressMessage');
@@ -1685,6 +1691,11 @@
             `;
 
             document.getElementById('modalCloseBtn').style.display = 'inline-block'; // Show close button after scan
+
+            // NEW: Automatically close the modal after 5 seconds
+            scanCompleteTimeout = setTimeout(() => {
+                closeScanningModal();
+            }, 5000); // 5000 milliseconds = 5 seconds
 
             if (priceCacheUpdated) {
                 logActivity(`Refreshed prices for ${refreshedCount} assets. ${gainedCount} gained, ${lostCount} lost, ${failedCount} failed.`);
