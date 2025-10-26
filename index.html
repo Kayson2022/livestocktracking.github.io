@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -464,10 +465,10 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const FMP_API_KEY_STORAGE = 'myPortfolioFmpKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
-        const CORS_PROXY = "https://proxy.invo.zone/"; // FIX: Changed proxy from corsproxy.io to invo.zone due to Cloudflare block.
+        const CORS_PROXY = "https://corsproxy.io/?";
 
         // --- API & Fetching Configuration ---
-        const API_THROTTLE_DELAY = 500; // FIX: Increased ms to wait between API calls to prevent freezing/rate limiting
+        const API_THROTTLE_DELAY = 350; // ms to wait between API calls
         const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
 
@@ -519,12 +520,7 @@
         window.addEventListener('DOMContentLoaded', startApp);
 
         async function startApp() {
-            // FIX: Added null check to prevent TypeError if the DOM hasn't fully painted
-            const transactionDateEl = document.getElementById('transactionDate');
-            if (transactionDateEl) {
-                transactionDateEl.valueAsDate = new Date();
-            }
-
+            document.getElementById('transactionDate').valueAsDate = new Date();
             loadTheme();
             loadApiKeys();
             loadAutoRefreshInterval();
@@ -1512,7 +1508,7 @@
                     if (r.status === 403) {
                         console.log(`Finnhub fetch for ${symbol} was forbidden. This is expected for most mutual funds on the free plan. Trying next provider.`);
                     } else {
-                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}. Error: ${await r.text()}`);
+                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
                     }
                     return { currentPrice: null, previousClosePrice: null };
                 }
@@ -1725,10 +1721,6 @@
                 isSymbolValidated = false;
                 return;
             }
-            // Set a default value before API call
-            const typeInput = document.getElementById('type');
-            if (typeInput) typeInput.value = 'Stock'; 
-            
             try {
                 const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                 const response = await fetch(url);
@@ -1748,8 +1740,6 @@
                     document.getElementById('name').value = match['2. name'];
                     if (match['3. type'] === 'Mutual Fund') {
                         document.getElementById('type').value = 'Mutual Fund';
-                    } else if (match['3. type'] === 'ETF') {
-                        document.getElementById('type').value = 'ETF';
                     }
                     isSymbolValidated = true;
                 } else {
@@ -1770,11 +1760,7 @@
             validationTimeout = setTimeout(async () => {
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
                 const statusEl = document.getElementById('symbolValidationStatus');
-                const typeInput = document.getElementById('type');
                 isSymbolValidated = false;
-                
-                // Always default the hidden field
-                if (typeInput) typeInput.value = 'Stock';
 
                 if (!symbol) {
                     statusEl.textContent = '';
@@ -1787,7 +1773,7 @@
                 const mmRegex = /^[A-Z]{3,5}XX$/;
                 if (mmRegex.test(symbol)) {
                     statusEl.textContent = '✅';
-                    if (typeInput) typeInput.value = 'Money Market';
+                    document.getElementById('type').value = 'Money Market';
                     isSymbolValidated = true;
                     return;
                 }
@@ -1802,29 +1788,19 @@
                     const response = await fetch(url);
 
                     if (!response.ok) {
-                        // Check status for API limit first
                         if (response.status === 429) {
                             statusEl.textContent = '⚠️';
                             statusEl.title = 'Finnhub API limit reached. Please wait a moment and try again, or use a premium key.';
                         } else {
-                            // Only attempt to read text if status is non-OK but not rate limited
                             const errorText = await response.text();
-                            
-                            // Check for Cloudflare/Proxy block content
-                            if (errorText.includes("Cloudflare Ray ID")) {
-                                statusEl.textContent = '⚠️';
-                                statusEl.title = `Proxy blocked by Cloudflare. Try changing the CORS proxy in settings (it is currently set to ${CORS_PROXY})`;
-                            } else {
-                                console.error("CORS/Network Error:", errorText);
-                                statusEl.textContent = '⚠️';
-                                statusEl.title = `Network Error: ${response.statusText}. The proxy service may be down.`;
-                            }
+                            console.error("CORS/Network Error:", errorText);
+                            statusEl.textContent = '⚠️';
+                            statusEl.title = `Network Error: ${response.statusText}. The proxy service may be down.`;
                         }
                         isSymbolValidated = false;
                         return;
                     }
 
-                    // Proceed only if response.ok
                     const data = await response.json();
                     const match = data.result?.find(item => item.symbol === symbol);
                     if (match) {
@@ -1832,9 +1808,7 @@
                         statusEl.title = `Validated: ${match.description}`;
                         document.getElementById('name').value = match.description.split(' ').slice(0, 3).join(' ');
                        if (match.description.toUpperCase().includes('MONEY MARKET')) {
-                            if (typeInput) typeInput.value = 'Money Market';
-                        } else if (match.type === 'ETF') {
-                             if (typeInput) typeInput.value = 'ETF';
+                            document.getElementById('type').value = 'Money Market';
                         }
                         isSymbolValidated = true;
                     } else {
@@ -1889,7 +1863,6 @@
             document.getElementById('amount').value = '';
             document.getElementById('totalAmount').value = '';
             document.getElementById('symbolValidationStatus').textContent = '';
-            document.getElementById('type').value = 'Stock'; // Reset hidden type field
         }
 
         async function toggleAddForm() {
@@ -1961,7 +1934,7 @@
             const transactionType = document.getElementById('transactionType').value;
             const accountType = document.getElementById('accountType').value;
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-            const type = document.getElementById('type').value; // Now this reads the hidden field
+            const type = document.getElementById('type').value;
 
             if (!accountType || !document.getElementById('platform').value) {
                 showConfirmationModal("Account Type and Platform are required for all transactions.", null);
@@ -3284,7 +3257,7 @@
     </div>
     
     <!-- NEW: Scanning Progress Modal -->
-    <div id="syncingProgressModal" class="modal-overlay" style="display: none;">
+    <div id="syncingProgressModal" class="modal-overlay">
         <div class="modal-content">
             <div id="progressContainer">
                 <p id="progressMessage">Starting scan...</p>
@@ -3558,9 +3531,6 @@
                     <div class="form-group"> <label for="transactionDate">Transaction Date</label> <input type="date" id="transactionDate" name="transactionDate" required> </div>
 					<div class="form-group transaction-field"> <label for="symbol">Symbol</label> <input type="text" id="symbol" name="symbol" placeholder="e.g., AAPL, TSLA" oninput="validateSymbol()" required> <span id="symbolValidationStatus"></span> </div>
 					<div class="form-group transaction-field"> <label for="name">Company Name</label> <input type="text" id="name" name="name" placeholder="e.g., Apple Inc." > </div>
-                    <!-- FIX: ADDED HIDDEN INPUT FOR INVESTMENT TYPE -->
-                    <input type="hidden" id="type" value="Stock">
-                    <!-- END FIX -->
 					<div class="form-group"> <label for="accountType">Account Type</label> <select id="accountType" name="accountType" onchange="handleAccountTypeChange()" required> <option value="">Select Account</option> <option value="Regular Brokerage">Regular Brokerage</option> <option value="Roth IRA">Roth IRA</option> <option value="401(k)">401(k)</option> <option value="529 College Saving">529 College Saving</option> <option value="Yahoo Finance">Yahoo Finance</option> </select> </div>
 					<div class="form-group" id="fundingSourceGroup" style="display:none;">
                         <label for="fundingSource">Fund Purchase From</label>
