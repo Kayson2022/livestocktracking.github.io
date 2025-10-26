@@ -1617,7 +1617,7 @@
             
             // 1. Determine which symbols need fetching
             for (const symbol of uniqueSymbols) {
-                const holding = allHoldings.find(h => h.symbol === symbol);
+                const holding = allHoldings.find(h => h.symbol === s);
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                 const cached = priceCache[symbol];
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
@@ -1720,6 +1720,10 @@
                 isSymbolValidated = false;
                 return;
             }
+            // Set a default value before API call
+            const typeInput = document.getElementById('type');
+            if (typeInput) typeInput.value = 'Stock'; 
+            
             try {
                 const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                 const response = await fetch(url);
@@ -1739,6 +1743,8 @@
                     document.getElementById('name').value = match['2. name'];
                     if (match['3. type'] === 'Mutual Fund') {
                         document.getElementById('type').value = 'Mutual Fund';
+                    } else if (match['3. type'] === 'ETF') {
+                        document.getElementById('type').value = 'ETF';
                     }
                     isSymbolValidated = true;
                 } else {
@@ -1759,7 +1765,11 @@
             validationTimeout = setTimeout(async () => {
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
                 const statusEl = document.getElementById('symbolValidationStatus');
+                const typeInput = document.getElementById('type');
                 isSymbolValidated = false;
+                
+                // Always default the hidden field
+                if (typeInput) typeInput.value = 'Stock';
 
                 if (!symbol) {
                     statusEl.textContent = '';
@@ -1772,7 +1782,7 @@
                 const mmRegex = /^[A-Z]{3,5}XX$/;
                 if (mmRegex.test(symbol)) {
                     statusEl.textContent = '✅';
-                    document.getElementById('type').value = 'Money Market';
+                    if (typeInput) typeInput.value = 'Money Market';
                     isSymbolValidated = true;
                     return;
                 }
@@ -1807,7 +1817,9 @@
                         statusEl.title = `Validated: ${match.description}`;
                         document.getElementById('name').value = match.description.split(' ').slice(0, 3).join(' ');
                        if (match.description.toUpperCase().includes('MONEY MARKET')) {
-                            document.getElementById('type').value = 'Money Market';
+                            if (typeInput) typeInput.value = 'Money Market';
+                        } else if (match.type === 'ETF') {
+                             if (typeInput) typeInput.value = 'ETF';
                         }
                         isSymbolValidated = true;
                     } else {
@@ -1862,6 +1874,7 @@
             document.getElementById('amount').value = '';
             document.getElementById('totalAmount').value = '';
             document.getElementById('symbolValidationStatus').textContent = '';
+            document.getElementById('type').value = 'Stock'; // Reset hidden type field
         }
 
         async function toggleAddForm() {
@@ -1933,7 +1946,7 @@
             const transactionType = document.getElementById('transactionType').value;
             const accountType = document.getElementById('accountType').value;
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-            const type = document.getElementById('type').value;
+            const type = document.getElementById('type').value; // Now this reads the hidden field
 
             if (!accountType || !document.getElementById('platform').value) {
                 showConfirmationModal("Account Type and Platform are required for all transactions.", null);
@@ -3530,6 +3543,9 @@
                     <div class="form-group"> <label for="transactionDate">Transaction Date</label> <input type="date" id="transactionDate" name="transactionDate" required> </div>
 					<div class="form-group transaction-field"> <label for="symbol">Symbol</label> <input type="text" id="symbol" name="symbol" placeholder="e.g., AAPL, TSLA" oninput="validateSymbol()" required> <span id="symbolValidationStatus"></span> </div>
 					<div class="form-group transaction-field"> <label for="name">Company Name</label> <input type="text" id="name" name="name" placeholder="e.g., Apple Inc." > </div>
+                    <!-- FIX: ADDED HIDDEN INPUT FOR INVESTMENT TYPE -->
+                    <input type="hidden" id="type" value="Stock">
+                    <!-- END FIX -->
 					<div class="form-group"> <label for="accountType">Account Type</label> <select id="accountType" name="accountType" onchange="handleAccountTypeChange()" required> <option value="">Select Account</option> <option value="Regular Brokerage">Regular Brokerage</option> <option value="Roth IRA">Roth IRA</option> <option value="401(k)">401(k)</option> <option value="529 College Saving">529 College Saving</option> <option value="Yahoo Finance">Yahoo Finance</option> </select> </div>
 					<div class="form-group" id="fundingSourceGroup" style="display:none;">
                         <label for="fundingSource">Fund Purchase From</label>
