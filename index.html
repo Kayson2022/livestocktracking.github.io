@@ -385,13 +385,21 @@
                 display: block;
                 margin-bottom: 10px;
             }
+            /* FIX 3: Ensure centering works by setting width to auto and relying on fixed position */
+            .refresh-status-box {
+                left: 50%;
+                transform: translateX(-50%);
+                width: auto; /* Allow content to dictate size, up to max-width */
+                max-width: 95vw; /* Safety margin */
+            }
             /* FIX 2: Responsive wrapper for sync status message */
             .refresh-message-card {
                 font-size: 0.9em; /* Smaller font on mobile */
                 padding: 10px 15px; /* Smaller padding */
                 display: block; /* Allow text to wrap */
-                width: 90vw; /* Use relative width */
-                max-width: 350px; /* Cap width */
+                width: auto; /* Allow wrapping */
+                white-space: normal; /* Override nowrap for mobile */
+                max-width: 90vw; /* Cap width */
             }
             .refresh-message-card span {
                 display: block;
