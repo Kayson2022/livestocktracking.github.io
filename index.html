@@ -350,6 +350,8 @@
             align-items: center;
             justify-content: center;
             white-space: nowrap;
+            /* FIX 2: Added flex-wrap for horizontal space issues */
+            flex-wrap: wrap; 
         }
         .refresh-message-card.progress {
             background: var(--card-bg-color); /* White background for progress */
@@ -362,9 +364,14 @@
         .refresh-message-card .negative-sync { color: #ff5555; margin-left: 10px; }
         
         .next-update-timer {
-            font-size: 0.9em;
-            color: var(--text-color-secondary);
-            font-weight: 500;
+            font-size: 1.1em; /* Increased font size for visibility */
+            font-weight: 700; /* Increased font weight */
+            color: var(--text-color-primary); /* Changed to primary text color */
+            background: var(--card-bg-color); /* Added background for contrast */
+            padding: 5px 15px; /* Added padding */
+            border-radius: 10px; /* Added rounding */
+            box-shadow: 0 2px 5px var(--shadow-color); /* Added shadow */
+            display: inline-block;
         }
         /* END NEW/MODIFIED SYNC STATUS BOX STYLES */
 
@@ -401,7 +408,7 @@
                 white-space: normal; /* Override nowrap for mobile */
                 max-width: 90vw; /* Cap width */
             }
-            .refresh-message-card span {
+            .refresh-message-card > span { /* Target the inner wrapping span */
                 display: block;
                 margin-top: 5px;
             }
