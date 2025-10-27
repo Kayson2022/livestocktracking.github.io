@@ -385,6 +385,23 @@
                 display: block;
                 margin-bottom: 10px;
             }
+            /* FIX 2: Responsive wrapper for sync status message */
+            .refresh-message-card {
+                font-size: 0.9em; /* Smaller font on mobile */
+                padding: 10px 15px; /* Smaller padding */
+                display: block; /* Allow text to wrap */
+                width: 90vw; /* Use relative width */
+                max-width: 350px; /* Cap width */
+            }
+            .refresh-message-card span {
+                display: block;
+                margin-top: 5px;
+            }
+            .refresh-message-card .positive-sync, .refresh-message-card .negative-sync {
+                margin-left: 0; /* Remove left margin for block display */
+                display: inline-block; /* Keep icons/counts inline */
+                margin-right: 10px;
+            }
         }
         @media (max-width: 480px) {
             .stats-grid { grid-template-columns: 1fr; } #dataTransfer button { width: 100%; margin: 5px 0; } .controls-bar .form-group { width: 100%; }
@@ -487,6 +504,7 @@
         // --- NEW STATE FOR REFRESH LOGIC ---
         let isRefreshing = false; 
         let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
+        let hideBannerTimeoutId = null; // **FIX 1: New timeout ID for hiding the banner**
         // --- END NEW STATE ---
 
         // --- INITIALIZATION ---
@@ -1621,12 +1639,16 @@
             
             // Re-enable countdown timer if auto-refresh is active
             if (isAutoRefreshEnabled) {
-                 setTimeout(() => {
+                 // **FIX 1: Auto-hide the completion message after 4s, showing timer only**
+                 clearTimeout(hideBannerTimeoutId);
+                 hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none'; 
                     document.getElementById('nextUpdateTimer').style.display = 'block'; 
                  }, 4000);
             } else {
-                 setTimeout(() => {
+                 // **FIX 1: Auto-hide the status box completely after 5s**
+                 clearTimeout(hideBannerTimeoutId);
+                 hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshStatusBox').style.display = 'none'; 
                  }, 5000);
             }
@@ -1638,6 +1660,9 @@
             const card = document.getElementById('refreshMessageCard');
             const box = document.getElementById('refreshStatusBox');
             const timer = document.getElementById('nextUpdateTimer');
+            
+            // Clear any pending hide operation when a new refresh starts or progresses
+            clearTimeout(hideBannerTimeoutId); 
 
             box.style.display = 'block';
             card.style.display = 'flex'; 
@@ -1656,11 +1681,16 @@
                 // Calculate total successfully refreshed (total - failed)
                 const totalRefreshed = total - failed;
                 
+                // **FIX 2: Modified completion message structure for mobile wrapping**
+                // The main line remains as it's not the primary source of wrapping issues.
+                // The icons/stats are placed into a secondary block to ensure proper wrapping.
                 const message = `
                     Refreshed ${totalRefreshed} stock(s).
-                    <span class="positive-sync">✔</span> ${gained} gained, 
-                    <span class="negative-sync">▼</span> ${lost} lost. 
-                    Failed: ${failed}.
+                    <span style="display: block;">
+                        <span class="positive-sync">✔ ${gained} gained,</span>
+                        <span class="negative-sync">▼ ${lost} lost.</span> 
+                        Failed: ${failed}.
+                    </span>
                 `;
                 card.innerHTML = message;
             }
@@ -3193,12 +3223,16 @@
             isRefreshing = false; 
             
             if (isAutoRefreshEnabled) {
-                 setTimeout(() => {
+                 // **FIX 1: Auto-hide the completion message after 4s, showing timer only**
+                 clearTimeout(hideBannerTimeoutId);
+                 hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none';
                     document.getElementById('nextUpdateTimer').style.display = 'block';
                  }, 4000);
             } else {
-                 setTimeout(() => {
+                 // **FIX 1: Auto-hide the status box completely after 5s**
+                 clearTimeout(hideBannerTimeoutId);
+                 hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshStatusBox').style.display = 'none';
                  }, 5000);
             }
