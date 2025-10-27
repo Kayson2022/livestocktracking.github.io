@@ -519,7 +519,7 @@
         // --- NEW STATE FOR REFRESH LOGIC ---
         let isRefreshing = false; 
         let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
-        let hideBannerTimeoutId = null; // **FIX 1: New timeout ID for hiding the banner**
+        let hideBannerTimeoutId = null; 
         // --- END NEW STATE ---
 
         // --- INITIALIZATION ---
@@ -1654,14 +1654,14 @@
             
             // Re-enable countdown timer if auto-refresh is active
             if (isAutoRefreshEnabled) {
-                 // **FIX 1: Auto-hide the completion message after 4s, showing timer only**
+                 // Auto-hide the completion message after 4s, showing timer only
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none'; 
                     document.getElementById('nextUpdateTimer').style.display = 'block'; 
                  }, 4000);
             } else {
-                 // **FIX 1: Auto-hide the status box completely after 5s**
+                 // Auto-hide the status box completely after 5s
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshStatusBox').style.display = 'none'; 
@@ -1696,9 +1696,7 @@
                 // Calculate total successfully refreshed (total - failed)
                 const totalRefreshed = total - failed;
                 
-                // **FIX 2: Modified completion message structure for mobile wrapping**
-                // The main line remains as it's not the primary source of wrapping issues.
-                // The icons/stats are placed into a secondary block to ensure proper wrapping.
+                // Modified completion message structure for mobile wrapping
                 const message = `
                     Refreshed ${totalRefreshed} stock(s).
                     <span style="display: block;">
@@ -1749,7 +1747,7 @@
             } catch (error) {
                 console.error("Alpha Vantage validation error:", error);
                 statusEl.textContent = '⚠️';
-                statusEl.title = 'API Error during Alpha Vantage validation.';
+                statusEl.title = 'API Error during validation. Check the browser console for details.';
                 isSymbolValidated = false;
             }
         }
@@ -3238,14 +3236,14 @@
             isRefreshing = false; 
             
             if (isAutoRefreshEnabled) {
-                 // **FIX 1: Auto-hide the completion message after 4s, showing timer only**
+                 // Auto-hide the completion message after 4s, showing timer only
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none';
                     document.getElementById('nextUpdateTimer').style.display = 'block';
                  }, 4000);
             } else {
-                 // **FIX 1: Auto-hide the status box completely after 5s**
+                 // Auto-hide the status box completely after 5s
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshStatusBox').style.display = 'none';
