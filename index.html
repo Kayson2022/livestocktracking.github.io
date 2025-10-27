@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -326,22 +325,48 @@
         }
 
 
-        .countdown-timer {
+        /* NEW/MODIFIED SYNC STATUS BOX STYLES */
+        .refresh-status-box {
             position: fixed;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: 500;
             z-index: 1001;
             display: none;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            backdrop-filter: blur(5px);
+            text-align: center;
         }
+
+        .refresh-message-card {
+            background: var(--accent-color-1); /* Purple background for completion */
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            font-size: 1.1em;
+            font-weight: 600;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.25);
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+        }
+        .refresh-message-card.progress {
+            background: var(--card-bg-color); /* White background for progress */
+            color: var(--text-color-primary);
+            box-shadow: 0 4px 10px var(--shadow-color);
+            border: 1px solid var(--border-color);
+        }
+        /* Specific colors for status symbols in the completion message */
+        .refresh-message-card .positive-sync { color: #50fa7b; margin-left: 10px; }
+        .refresh-message-card .negative-sync { color: #ff5555; margin-left: 10px; }
+        
+        .next-update-timer {
+            font-size: 0.9em;
+            color: var(--text-color-secondary);
+            font-weight: 500;
+        }
+        /* END NEW/MODIFIED SYNC STATUS BOX STYLES */
 
         @media (max-width: 768px) {
             .container { padding: 15px; } .main-content { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .investment-header { flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; } 
@@ -424,7 +449,7 @@
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
 
         let firebaseApp, db, auth, userId;
-        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; // Listener for session invalidation - ADDED
+        let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; 
 
         let portfolioData = {
              username: '',
@@ -458,6 +483,11 @@
         let activeTab = 'investments';
         let historicalPriceCache = {}; // Session cache for historical price data
         let isUpdatingDisplay = false;
+        
+        // --- NEW STATE FOR REFRESH LOGIC ---
+        let isRefreshing = false; 
+        let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
+        // --- END NEW STATE ---
 
         // --- INITIALIZATION ---
         
@@ -697,7 +727,11 @@
                     await updateDisplay(false); // Subsequent updates won't re-fetch historical data
                 }
 
-                if (isAutoRefreshEnabled) startAutoRefresh(); else updateAutoRefreshButton();
+                if (isAutoRefreshEnabled && !isRefreshing) { // Check if not already refreshing
+                     startAutoRefresh(); 
+                } else {
+                    updateAutoRefreshButton();
+                }
             }, (error) => console.error("Error listening to portfolio:", error));
 
             const uiStateDocRef = doc(portfolioColRef, FIRESTORE_UI_STATE_DOC);
@@ -1500,54 +1534,139 @@
 
 
         async function refreshAllPrices(forceRefresh = false) {
-            if (!isInitialDataLoaded) return;
+            if (!isInitialDataLoaded || isRefreshing) return;
+            
+            isRefreshing = true;
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
+            
             const currentHoldings = calculateHoldingsAndCash();
-            if (currentHoldings.length === 0) {
-                updateDisplay();
-                return;
-            }
-            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
-            refreshButton.textContent = 'Refreshing...';
-            refreshButton.disabled = true;
-            updateDataStatus('loading'); // THIS LINE CAUSED THE ERROR
+            
+            const holdingsToFetch = currentHoldings.filter(holding => {
+                if (holding.type === 'Manual' || isCashEquivalentType(holding.type)) return false;
 
-            const now = Date.now();
-            for (const holding of currentHoldings) {
                 const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                if (!forceRefresh && !isFastMoving) {
-                    continue; 
-                }
-
-                if (holding.type === 'Manual') continue;
+                if (!forceRefresh && !isFastMoving) return false; 
 
                 const cached = priceCache[holding.symbol];
                 const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
-                if (!forceRefresh && cached && (cached.manualPrice != null || cached.manualPreviousClosePrice != null || (now - cached.lastFetchTimestamp < staleTime))) {
-                    console.log(`Using fresh cached price or manual override for ${holding.symbol}`);
-                    continue;
-                }
+                const isManualOverride = cached && cached.manualPrice != null;
+                const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
+                
+                return forceRefresh || (!isManualOverride && isStale);
+            });
+            
+            refreshStats.total = holdingsToFetch.length;
+
+            if (holdingsToFetch.length === 0) {
+                updateRefreshProgress('completed', 0, 0, null, 0, 0, 0); 
+                isRefreshing = false;
+                updateDisplay(); 
+                return;
+            }
+            
+            // UI setup
+            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
+            refreshButton.textContent = 'Refreshing...';
+            refreshButton.disabled = true;
+            updateDataStatus('loading'); 
+            
+            document.getElementById('refreshStatusBox').style.display = 'block'; 
+            document.getElementById('nextUpdateTimer').style.display = 'none'; 
+
+            for (let i = 0; i < holdingsToFetch.length; i++) {
+                const holding = holdingsToFetch[i];
+
+                // 1. Show progress bar update
+                updateRefreshProgress('progress', i + 1, holdingsToFetch.length, holding.symbol);
 
                 await delay(API_THROTTLE_DELAY);
                 const priceData = await fetchPrice(holding);
+                const cached = priceCache[holding.symbol];
+                let priceDelta = 0;
+                
                 if (priceData && priceData.currentPrice !== null) {
+                    
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                     
                     if (cached?.manualPrice == null || forceRefresh) {
+                        // Calculate price delta to track gain/loss during the refresh
+                        priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
+                        
                         priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                         priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     }
                     
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+                    
+                    // Update stats based on price change relative to last known price
+                    if (priceDelta > 0.0001) refreshStats.gained++;
+                    else if (priceDelta < -0.0001) refreshStats.lost++;
+                } else {
+                    refreshStats.failed++;
                 }
             }
-            logActivity('Refreshed prices for all assets.');
+            
+            // 2. Show completion message
+            const totalFetched = refreshStats.total - refreshStats.failed;
+            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
+            logActivity('Refreshed prices for assets.');
             await saveDataToFirestore();
             await updateDisplay(); 
+            
             refreshButton.textContent = 'Refresh Now';
             refreshButton.disabled = false;
+            
+            isRefreshing = false; 
+            
+            // Re-enable countdown timer if auto-refresh is active
+            if (isAutoRefreshEnabled) {
+                 setTimeout(() => {
+                    document.getElementById('refreshMessageCard').style.display = 'none'; 
+                    document.getElementById('nextUpdateTimer').style.display = 'block'; 
+                 }, 4000);
+            } else {
+                 setTimeout(() => {
+                    document.getElementById('refreshStatusBox').style.display = 'none'; 
+                 }, 5000);
+            }
         }
 
+
+        // --- NEW FUNCTION: Update Refresh Progress ---
+        function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0) {
+            const card = document.getElementById('refreshMessageCard');
+            const box = document.getElementById('refreshStatusBox');
+            const timer = document.getElementById('nextUpdateTimer');
+
+            box.style.display = 'block';
+            card.style.display = 'flex'; 
+
+            if (status === 'progress') {
+                card.classList.remove('purple-bg');
+                card.classList.add('progress');
+                timer.style.display = 'none';
+                
+                const currentSymbol = symbol || 'Fetching';
+                const message = `Refreshing ${currentSymbol}... (${current}/${total})`;
+                card.innerHTML = message;
+            } else if (status === 'completed') {
+                card.classList.remove('progress');
+                
+                // Calculate total successfully refreshed (total - failed)
+                const totalRefreshed = total - failed;
+                
+                const message = `
+                    Refreshed ${totalRefreshed} stock(s).
+                    <span class="positive-sync">✔</span> ${gained} gained, 
+                    <span class="negative-sync">▼</span> ${lost} lost. 
+                    Failed: ${failed}.
+                `;
+                card.innerHTML = message;
+            }
+        }
+        // --- END NEW FUNCTION ---
+        
         async function validateWithAlphaVantage(symbol) {
             const statusEl = document.getElementById('symbolValidationStatus');
             if (!ALPHA_VANTAGE_API_KEY) {
@@ -2806,11 +2925,15 @@
             if (countdownIntervalId !== null) clearInterval(countdownIntervalId); 
             isAutoRefreshEnabled = true;
 
-            const countdownEl = document.getElementById('countdown-timer');
+            const nextUpdateEl = document.getElementById('nextUpdateTimer'); 
+            const refreshStatusBoxEl = document.getElementById('refreshStatusBox'); 
+
             let timeLeft = autoRefreshIntervalSeconds;
 
-            countdownEl.style.display = 'block';
-            countdownEl.textContent = `Next update: ${timeLeft}s`;
+            refreshStatusBoxEl.style.display = 'block';
+            nextUpdateEl.style.display = 'block';
+            nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+            document.getElementById('refreshMessageCard').style.display = 'none';
 
             countdownIntervalId = setInterval(() => {
                 timeLeft--;
@@ -2818,7 +2941,7 @@
                     refreshAllPrices(false);
                     timeLeft = autoRefreshIntervalSeconds;
                 }
-                countdownEl.textContent = `Next update: ${timeLeft}s`;
+                nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
             }, 1000);
 
             updateAutoRefreshButton();
@@ -2830,7 +2953,7 @@
                 clearInterval(countdownIntervalId); 
                 countdownIntervalId = null; 
             } 
-            document.getElementById('countdown-timer').style.display = 'none';
+            document.getElementById('refreshStatusBox').style.display = 'none'; 
             isAutoRefreshEnabled = false; 
             updateAutoRefreshButton(); 
             saveAutoRefreshState(); 
@@ -3025,22 +3148,60 @@
             refreshButton.textContent = 'Refreshing...';
             refreshButton.disabled = true;
             updateDataStatus('loading');
+            
+            // Reusing the progress bar logic for MF refresh
+            isRefreshing = true;
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: mutualFundHoldings.length }; 
+            document.getElementById('refreshStatusBox').style.display = 'block'; 
+            document.getElementById('nextUpdateTimer').style.display = 'none'; 
 
-            for (const holding of mutualFundHoldings) {
+            for (let i = 0; i < mutualFundHoldings.length; i++) {
+                const holding = mutualFundHoldings[i];
+                
+                updateRefreshProgress('progress', i + 1, mutualFundHoldings.length, holding.symbol);
+
                 const priceData = await fetchPrice(holding);
+                const cached = priceCache[holding.symbol];
+                let priceDelta = 0;
+
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                    
+                    priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
+                    
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+                    
+                    if (priceDelta > 0.0001) refreshStats.gained++;
+                    else if (priceDelta < -0.0001) refreshStats.lost++;
+                } else {
+                    refreshStats.failed++;
                 }
                 await delay(API_THROTTLE_DELAY); 
             }
+            
+            const totalFetched = refreshStats.total - refreshStats.failed;
+            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
             logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
+            
             refreshButton.textContent = 'Refresh Mutual Funds';
             refreshButton.disabled = false;
+            
+            isRefreshing = false; 
+            
+            if (isAutoRefreshEnabled) {
+                 setTimeout(() => {
+                    document.getElementById('refreshMessageCard').style.display = 'none';
+                    document.getElementById('nextUpdateTimer').style.display = 'block';
+                 }, 4000);
+            } else {
+                 setTimeout(() => {
+                    document.getElementById('refreshStatusBox').style.display = 'none';
+                 }, 5000);
+            }
             showConfirmationModal("Mutual fund price refresh complete.", null);
         }
         // --- End Import/Export ---
@@ -3110,7 +3271,7 @@
         window.closeActivityLogModal = closeActivityLogModal;
         window.showTab = showTab;
         window.toggleStatsVisibility = toggleStatsVisibility;
-        window.signOutOtherDevices = signOutOtherDevices; // Make function global - ADDED
+        window.signOutOtherDevices = signOutOtherDevices; 
     </script>
 
     <!-- MODALS -->
@@ -3468,6 +3629,11 @@
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
-    <div id="countdown-timer" class="countdown-timer"></div>
+    
+    <!-- MODIFIED SYNC STATUS BOX -->
+    <div id="refreshStatusBox" class="refresh-status-box">
+        <div id="refreshMessageCard" class="refresh-message-card"></div>
+        <div id="nextUpdateTimer" class="next-update-timer"></div>
+    </div>
 </body>
 </html>
