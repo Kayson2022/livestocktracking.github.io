@@ -1567,106 +1567,156 @@
 
 
         async function refreshAllPrices(forceRefresh = false) {
-            if (!isInitialDataLoaded || isRefreshing) return;
-            
-            isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
-            
-            const currentHoldings = calculateHoldingsAndCash();
-            
-            const holdingsToFetch = currentHoldings.filter(holding => {
-                if (holding.type === 'Manual' || isCashEquivalentType(holding.type)) return false;
-
-                const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                if (!forceRefresh && !isFastMoving) return false; 
-
-                const cached = priceCache[holding.symbol];
-                const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
-
-                const isManualOverride = cached && cached.manualPrice != null;
-                const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
-                
-                return forceRefresh || (!isManualOverride && isStale);
-            });
-            
-            refreshStats.total = holdingsToFetch.length;
-
-            if (holdingsToFetch.length === 0) {
-                updateRefreshProgress('completed', 0, 0, null, 0, 0, 0); 
-                isRefreshing = false;
-                updateDisplay(); 
+            // Guard: Prevent concurrent refreshes or running before data is loaded.
+            if (!isInitialDataLoaded || isRefreshing) {
+                console.log(`Refresh skipped. Initial Load: ${isInitialDataLoaded}, Is Refreshing: ${isRefreshing}`);
                 return;
             }
             
-            // UI setup
-            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child');
-            refreshButton.textContent = 'Refreshing...';
-            refreshButton.disabled = true;
-            updateDataStatus('loading'); 
+            // --- Start Refresh Process ---
+            isRefreshing = true; // Set flag immediately
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
             
+            // UI setup for Refreshing state
+            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child'); // Target 'Refresh Now' button specifically
+            if (refreshButton) { // Add null check for safety
+                refreshButton.textContent = 'Refreshing...';
+                refreshButton.disabled = true;
+            }
+            updateDataStatus('loading'); 
             document.getElementById('refreshStatusBox').style.display = 'block'; 
             document.getElementById('nextUpdateTimer').style.display = 'none'; 
+            // Clear any previous hide timeout just in case
+            clearTimeout(hideBannerTimeoutId); 
+            // Show the message card initially (will be updated by updateRefreshProgress)
+            document.getElementById('refreshMessageCard').style.display = 'flex'; 
 
-            for (let i = 0; i < holdingsToFetch.length; i++) {
-                const holding = holdingsToFetch[i];
-
-                // 1. Show progress bar update
-                updateRefreshProgress('progress', i + 1, holdingsToFetch.length, holding.symbol);
-
-                await delay(API_THROTTLE_DELAY);
-                const priceData = await fetchPrice(holding);
-                const cached = priceCache[holding.symbol];
-                let priceDelta = 0;
+            // --- Wrap core logic in try...finally ---
+            try {
+                const currentHoldings = calculateHoldingsAndCash();
                 
-                if (priceData && priceData.currentPrice !== null) {
+                const holdingsToFetch = currentHoldings.filter(holding => {
+                    // Skip manual types and cash equivalents
+                    if (holding.type === 'Manual' || isCashEquivalentType(holding.type)) return false;
+
+                    // Determine if it's a fast-moving asset (Stock/ETF)
+                    const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
+                    // If not forcing refresh AND it's not a fast-moving asset, skip (don't refresh MFs unless forced)
+                    if (!forceRefresh && !isFastMoving) return false; 
+
+                    const cached = priceCache[holding.symbol];
+                    const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
+
+                    const isManualOverride = cached && cached.manualPrice != null;
+                    // Check if cache is stale (no cache entry OR timestamp is too old)
+                    const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
                     
-                    if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                    
-                    if (cached?.manualPrice == null || forceRefresh) {
-                        // Calculate price delta to track gain/loss during the refresh
-                        priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
-                        
-                        priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                        priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
-                    }
-                    
-                    priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                    
-                    // Update stats based on price change relative to last known price
-                    if (priceDelta > 0.0001) refreshStats.gained++;
-                    else if (priceDelta < -0.0001) refreshStats.lost++;
-                } else {
-                    refreshStats.failed++;
+                    // Fetch if: forceRefresh is true, OR if it's not a manual override AND the cache is stale.
+                    return forceRefresh || (!isManualOverride && isStale);
+                });
+                
+                refreshStats.total = holdingsToFetch.length;
+
+                // --- Early Exit if nothing to fetch ---
+                if (holdingsToFetch.length === 0) {
+                    console.log("No holdings need refreshing.");
+                    updateRefreshProgress('completed', 0, 0, null, 0, 0, 0); 
+                    // No need to save or update display if nothing changed
+                    // The 'finally' block will reset state and handle the banner timeout
+                    return; // Exit the 'try' block, proceed to 'finally'
                 }
-            }
+                
+                // --- Fetch Loop ---
+                for (let i = 0; i < holdingsToFetch.length; i++) {
+                    const holding = holdingsToFetch[i];
+
+                    // Show progress message
+                    updateRefreshProgress('progress', i + 1, holdingsToFetch.length, holding.symbol);
+
+                    // Delay before fetching
+                    await delay(API_THROTTLE_DELAY);
+                    
+                    // Fetch price data
+                    const priceData = await fetchPrice(holding);
+                    const cached = priceCache[holding.symbol];
+                    let priceDelta = 0;
+                    
+                    if (priceData && priceData.currentPrice !== null) {
+                        // Ensure cache entry exists
+                        if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                        
+                        // Update cache only if not manually overridden OR if forceRefresh is true
+                        if (cached?.manualPrice == null || forceRefresh) {
+                            // Calculate change since last known price for stats
+                            priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice); 
+                            
+                            priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                            priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                        }
+                        
+                        // Always update the timestamp
+                        priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+                        
+                        // Update refresh statistics
+                        if (priceDelta > 0.0001) refreshStats.gained++;
+                        else if (priceDelta < -0.0001) refreshStats.lost++;
+                    } else {
+                        // Fetch failed
+                        refreshStats.failed++;
+                        console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
+                    }
+                } // --- End Fetch Loop ---
+                
+                // --- Post-Loop Actions ---
+                const totalFetched = refreshStats.total - refreshStats.failed;
+                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
+                logActivity(`Refreshed prices for ${totalFetched} assets.`);
+                await saveDataToFirestore(); // Save updated price cache
+                await updateDisplay(false); // Update UI with new prices (don't refetch history)
             
-            // 2. Show completion message
-            const totalFetched = refreshStats.total - refreshStats.failed;
-            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-            logActivity('Refreshed prices for assets.');
-            await saveDataToFirestore();
-            await updateDisplay(); 
-            
-            refreshButton.textContent = 'Refresh Now';
-            refreshButton.disabled = false;
-            
-            isRefreshing = false; 
-            
-            // Re-enable countdown timer if auto-refresh is active
-            if (isAutoRefreshEnabled) {
-                 // Auto-hide the completion message after 5s (CHANGED), showing timer only
-                 clearTimeout(hideBannerTimeoutId);
-                 hideBannerTimeoutId = setTimeout(() => {
-                    document.getElementById('refreshMessageCard').style.display = 'none'; 
-                    document.getElementById('nextUpdateTimer').style.display = 'block'; 
-                 }, 5000); // <-- OPTIMIZATION: Changed from 4000 to 5000
-            } else {
-                 // Auto-hide the status box completely after 5s
-                 clearTimeout(hideBannerTimeoutId);
-                 hideBannerTimeoutId = setTimeout(() => {
-                    document.getElementById('refreshStatusBox').style.display = 'none'; 
-                 }, 5000); // This is 5 seconds
-            }
+            } catch (error) {
+                 // --- Catch block for errors during the refresh loop or subsequent saves ---
+                console.error("Error during refreshAllPrices:", error);
+                updateDataStatus('error', "Refresh Failed");
+                // Update progress to show failure, though stats might be incomplete
+                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
+                // Optionally show a user-facing error message here
+                showConfirmationModal(`An error occurred during price refresh: ${error.message}`, null);
+
+            } finally {
+                // --- Finally block: ALWAYS runs, whether try succeeded or failed ---
+                console.log("Refresh finally block executing.");
+                isRefreshing = false; // CRITICAL: Ensure flag is always reset
+
+                // Reset button state
+                 if (refreshButton) { // Add null check
+                    refreshButton.textContent = 'Refresh Now';
+                    refreshButton.disabled = false;
+                 }
+                 updateDataStatus(true); // Reset status to 'Synced' unless an error occurred (handled in catch)
+
+                // --- Handle Banner Timeout ---
+                // Set timeout to hide the banner after 5 seconds
+                clearTimeout(hideBannerTimeoutId); // Clear any existing timeout first
+
+                if (isAutoRefreshEnabled) {
+                    // If auto-refresh is on, hide the message card, show the timer
+                    hideBannerTimeoutId = setTimeout(() => {
+                        console.log("Auto-refresh ON: Hiding message, showing timer.");
+                        const msgCard = document.getElementById('refreshMessageCard');
+                        const timerEl = document.getElementById('nextUpdateTimer');
+                        if (msgCard) msgCard.style.display = 'none'; 
+                        if (timerEl) timerEl.style.display = 'block'; 
+                    }, 5000); 
+                } else {
+                    // If auto-refresh is off, hide the entire status box
+                    hideBannerTimeoutId = setTimeout(() => {
+                        console.log("Auto-refresh OFF: Hiding status box.");
+                        const statusBox = document.getElementById('refreshStatusBox');
+                        if (statusBox) statusBox.style.display = 'none'; 
+                    }, 5000);
+                }
+            } // --- End Finally ---
         }
 
 
@@ -3684,5 +3734,6 @@
     </div>
 </body>
 </html>
+
 
 
