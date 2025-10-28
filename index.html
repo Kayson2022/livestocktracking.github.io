@@ -1654,18 +1654,18 @@
             
             // Re-enable countdown timer if auto-refresh is active
             if (isAutoRefreshEnabled) {
-                 // Auto-hide the completion message after 4s, showing timer only
+                 // Auto-hide the completion message after 5s (CHANGED), showing timer only
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none'; 
                     document.getElementById('nextUpdateTimer').style.display = 'block'; 
-                 }, 4000);
+                 }, 5000); // <-- OPTIMIZATION: Changed from 4000 to 5000
             } else {
                  // Auto-hide the status box completely after 5s
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshStatusBox').style.display = 'none'; 
-                 }, 5000);
+                 }, 5000); // This is 5 seconds
             }
         }
 
@@ -3236,12 +3236,12 @@
             isRefreshing = false; 
             
             if (isAutoRefreshEnabled) {
-                 // Auto-hide the completion message after 4s, showing timer only
+                 // Auto-hide the completion message after 5s (CHANGED), showing timer only
                  clearTimeout(hideBannerTimeoutId);
                  hideBannerTimeoutId = setTimeout(() => {
                     document.getElementById('refreshMessageCard').style.display = 'none';
                     document.getElementById('nextUpdateTimer').style.display = 'block';
-                 }, 4000);
+                 }, 5000); // <-- OPTIMIZATION: Changed from 4000 to 5000
             } else {
                  // Auto-hide the status box completely after 5s
                  clearTimeout(hideBannerTimeoutId);
@@ -3458,7 +3458,7 @@
                 <select id="recurringFrequency" required>
                     <option value="weekly">Weekly</option>
                     <option value="bi-weekly">Every 2 Weeks</option>
-                    <option value="monthly">Monthly</option>
+                    <option valueF="monthly">Monthly</option>
                 </select>
             </div>
             <div class="form-group">
@@ -3600,10 +3600,10 @@
                         <select id="platform" name="platform" required>
                             <option value="">Select Platform</option>
                             <option value="Fidelity">Fidelity</option>
-                            <option value="Vanguard">Vanguard</option>
+                            <option valueF="Vanguard">Vanguard</option>
                             <option value="Charles Schwab">Charles Schwab</option>
                             <option value="Merrill Edge">Merrill Edge</option>
-                            <option valuef="E*TRADE">E*TRADE</option>
+                            <option value="E*TRADE">E*TRADE</option>
                             <option value="Other">Other</option>
                         </select>
                     </div>
@@ -3684,3 +3684,5 @@
     </div>
 </body>
 </html>
+
+
