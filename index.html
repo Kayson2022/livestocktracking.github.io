@@ -94,6 +94,7 @@
         .visibility-toggle { font-size: 1.5em; }
         .settings-toggle { font-size: 1.4em; }
 
+        /* MODIFIED stats-grid to accommodate new card (3 rows of 4 instead of 2 rows of 5) */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: var(--card-bg-color); padding: 25px 15px; border-radius: 15px; text-align: center; box-shadow: 0 4px 10px var(--shadow-color); border: 1px solid var(--border-color); transition: transform 0.3s ease, box-shadow 0.3s ease; }
         .stat-card:hover { transform: translateY(-8px); box-shadow: 0 8px 20px var(--shadow-color); }
@@ -521,6 +522,11 @@
         let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
         let hideBannerTimeoutId = null; 
         // --- END NEW STATE ---
+        
+        // --- NEW STATE FOR VOLATILITY ---
+        let portfolioVolatility = 0; 
+        // --- END NEW STATE ---
+
 
         // --- INITIALIZATION ---
         
@@ -1095,7 +1101,7 @@
         // --- End Recurring Transactions ---
 
 
-        // --- Core Data Calculation Logic (Unchanged from uploaded file) ---
+        // --- Core Data Calculation Logic (MODIFIED for Volatility) ---
         function calculateHoldingsAndCash() {
             const holdings = {};
             let realizedGains = 0;
@@ -1189,6 +1195,47 @@
             });
             return calculatedHoldings;
         }
+        
+        // --- NEW FUNCTION: Calculate Portfolio Volatility (Annualized Standard Deviation) ---
+        function calculatePortfolioVolatility(history) {
+            if (!history || history.length < 2) {
+                return 0; // Not enough data points
+            }
+
+            const returns = [];
+            
+            // Calculate daily returns (current value / previous value - 1)
+            for (let i = 1; i < history.length; i++) {
+                const currentValue = history[i].value;
+                const previousValue = history[i - 1].value;
+                
+                if (previousValue > 0) {
+                    returns.push((currentValue / previousValue) - 1);
+                }
+            }
+
+            if (returns.length < 2) {
+                return 0;
+            }
+
+            // Calculate the Mean (Average) Daily Return
+            const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+
+            // Calculate the Variance (Average of the squared differences from the Mean)
+            const squaredDifferences = returns.map(r => (r - mean) ** 2);
+            const variance = squaredDifferences.reduce((sum, sd) => sum + sd, 0) / (returns.length - 1); // Use n-1 for sample variance
+
+            // Calculate the Standard Deviation (Square root of Variance)
+            const dailyStandardDeviation = Math.sqrt(variance);
+
+            // Annualize the Standard Deviation (Multiply by sqrt(252 - approx trading days))
+            // We'll use 252 for financial market standard practice
+            const ANNUALIZATION_FACTOR = Math.sqrt(252); 
+            const annualizedVolatility = dailyStandardDeviation * ANNUALIZATION_FACTOR;
+            
+            return annualizedVolatility;
+        }
+        // --- END NEW FUNCTION ---
 
         async function buildPortfolioHistoryFromTransactions() {
             const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
@@ -2165,7 +2212,7 @@
         }
         // --- End Settings Modal ---
 
-        // --- Calculation and Rendering Logic (MODIFIED for G/L) ---
+        // --- Calculation and Rendering Logic (MODIFIED for G/L and Volatility) ---
         function isCashEquivalentType(type) {
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
@@ -2174,7 +2221,7 @@
             return isCash;
         }
 
-        function calculateOverallStats(portfolioHoldings) {
+        function calculateOverallStats(portfolioHoldings, history) { // Added history parameter
             let totalCostBasis = 0;
             let totalValue = 0;
             let totalCashValue = 0;
@@ -2237,8 +2284,23 @@
                 }, 0);
 
             const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
+            
+            // --- NEW VOLATILITY CALCULATION ---
+            portfolioVolatility = calculatePortfolioVolatility(history);
+            // --- END NEW VOLATILITY CALCULATION ---
 
-            return { totalCostBasis, totalValue, totalCashValue, totalUnrealizedGainLoss, totalDailyGainLoss, estimatedAnnualIncome, portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, bestPerformer, worstPerformer };
+            return { 
+                totalCostBasis, 
+                totalValue, 
+                totalCashValue, 
+                totalUnrealizedGainLoss, 
+                totalDailyGainLoss, 
+                estimatedAnnualIncome, 
+                portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, 
+                bestPerformer, 
+                worstPerformer,
+                portfolioVolatility // Pass new metric
+            };
         }
 
         function updateStats(stats) {
@@ -2256,6 +2318,14 @@
             todayEl.className = 'stat-value ' + (stats.totalDailyGainLoss >= 0 ? 'positive' : 'negative');
             document.getElementById('estimatedAnnualIncome').textContent = formatCurrency(stats.estimatedAnnualIncome);
             document.getElementById('portfolioYieldOnCost').textContent = formatPercentage(stats.portfolioYieldOnCost);
+            
+            // --- NEW: Volatility Stat ---
+            const volatilityEl = document.getElementById('portfolioVolatility');
+            volatilityEl.textContent = formatPercentage(stats.portfolioVolatility);
+            // Higher volatility is typically negative, so let's use a mild color to indicate this is a risk metric
+            volatilityEl.className = 'stat-value ' + (stats.portfolioVolatility > 0.15 ? 'negative' : 'positive'); 
+            // --- END NEW: Volatility Stat ---
+
             document.getElementById('bestPerformerValue').textContent = formatCurrency(stats.bestPerformer.gain);
             document.getElementById('bestPerformerSymbol').textContent = stats.bestPerformer.symbol;
             document.getElementById('bestPerformerValue').className = 'stat-value ' + (stats.bestPerformer.gain >= 0 ? 'positive' : 'negative');
@@ -2638,7 +2708,7 @@
         }
         // --- End Calculation/Rendering ---
 
-        // --- Main Update Function (Unchanged from uploaded file) ---
+        // --- Main Update Function (MODIFIED to include volatility calculation) ---
         async function updateDisplay(fetchHistorical = true) {
             if (isUpdatingDisplay) return; 
             isUpdatingDisplay = true;
@@ -2646,12 +2716,24 @@
             try {
                 if (!isInitialDataLoaded) return;
                 const currentHoldings = calculateHoldingsAndCash();
-                const stats = calculateOverallStats(currentHoldings);
+                let history = [];
+                if (fetchHistorical) {
+                    history = await buildPortfolioHistoryFromTransactions();
+                } else {
+                    // We need history for volatility calculation even if we skip re-fetching.
+                    // If we skip fetching, we use the cached history from the chart display logic.
+                    // This relies on the global 'historicalPriceCache' being populated from a previous run.
+                    // To keep it simple, if we skip fetch, we use the most recent historical data generated.
+                    // If filterChart was run recently, it has the data. For a full calculation, we re-run buildPortfolioHistory...
+                    history = await buildPortfolioHistoryFromTransactions(); // Rerunning this is safe if symbolsToFetch is empty.
+                }
+
+                const stats = calculateOverallStats(currentHoldings, history);
                 updateUserNameDisplay();
                 updateStats(stats);
-                if (fetchHistorical) {
-                    await filterChart(activeChartFilter);
-                }
+                
+                await filterChart(activeChartFilter, history); // Pass history to filterChart
+                
                 populatePlatformFilter();
                 renderInvestments(currentHoldings);
                 renderAllTransactions();
@@ -2877,7 +2959,7 @@
         }
         // --- End Modal Edit Functions ---
 
-        // --- Utility and Charting Functions (Unchanged from uploaded file) ---
+        // --- Utility and Charting Functions (MODIFIED for filterChart) ---
         function formatCurrency(amount) {
             if (typeof amount !== 'number') { return '$0.00'; }
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -3054,9 +3136,11 @@
 
         function toggleAutoRefresh() { if (isAutoRefreshEnabled) stopAutoRefresh(); else { startAutoRefresh(); refreshAllPrices(true); } }
         
-        async function filterChart(period) {
+        async function filterChart(period, history) {
             const holdings = calculateHoldingsAndCash();
-            const history = await buildPortfolioHistoryFromTransactions();
+            
+            // Use provided history if available, otherwise build/use cached history
+            const dataToFilter = history || await buildPortfolioHistoryFromTransactions();
             
             activeChartFilter = period;
             document.querySelectorAll('.chart-filter-btn').forEach(btn => btn.classList.remove('active'));
@@ -3073,9 +3157,9 @@
                 case '1Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 1)); break;
                 case '3Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 3)); break;
                 case '5Y': startDate = new Date(new Date().setFullYear(now.getFullYear() - 5)); break;
-                default: updateCharts(history, holdings); return;
+                default: updateCharts(dataToFilter, holdings); return;
             }
-            const filteredData = history.filter(dp => new Date(dp.date) >= startDate);
+            const filteredData = dataToFilter.filter(dp => new Date(dp.date) >= startDate);
             updateCharts(filteredData, holdings);
         }
 
@@ -3583,9 +3667,24 @@
                 <input type="text" id="userNameInput" placeholder="Enter your name" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
             </div>
         </div>
+        <!-- MODIFIED stats-grid to add Volatility -->
         <div class="stats-grid">
-            <div class="stat-card"> <div class="stat-value" id="totalValue">$0.00</div> <div class="stat-label">Total Portfolio Value</div> </div> <div class="stat-card"> <div class="stat-value" id="totalInvested">$0.00</div> <div class="stat-label">Total Cost Basis</div> </div> <div class="stat-card"> <div class="stat-value" id="totalCashValue">$0.00</div> <div class="stat-label">Cash & Money Market</div> </div> <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> </div> <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
+            <div class="stat-card"> <div class="stat-value" id="totalValue">$0.00</div> <div class="stat-label">Total Portfolio Value</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="totalInvested">$0.00</div> <div class="stat-label">Total Cost Basis</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="totalCashValue">$0.00</div> <div class="stat-label">Cash & Money Market</div> </div> 
+            
+            <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> </div> 
+            
+            <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="portfolioVolatility">0.00%</div> <div class="stat-label">Annual Volatility</div> </div> <!-- NEW CARD -->
+            
+            <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> 
+            <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
         </div>
+        <!-- END MODIFIED stats-grid -->
         <div class="refresh-button-container">
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
@@ -3734,7 +3833,3 @@
     </div>
 </body>
 </html>
-
-
-
-
