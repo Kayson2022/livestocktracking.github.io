@@ -628,7 +628,7 @@
                             const docSnap = await getDoc(sessionDocRef);
                             if (docSnap.exists() && docSnap.data().invalidationToken) {
                                 sessionStorage.setItem('myAppInvalidationToken', docSnap.data().invalidationToken);
-                                console.log('Stored existing invalidation token locally:', tokenFromFirestore);
+                                console.log('Stored existing invalidation token locally:', docSnap.data().invalidationToken);
                             } else {
                                 console.log('No invalidation token found in Firestore for this user.');
                                 // Optionally create one here if needed for initial setup,
@@ -1244,7 +1244,7 @@
 
         async function buildPortfolioHistoryFromTransactions() {
             // --- MODIFICATION START: Filter transactions for VOLATILITY CALCULATION ---
-            // Include Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
+            // Requirement: Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
             const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
             const accountsToExclude = ['401(k)', '529 College Saving'];
             
@@ -1281,7 +1281,24 @@
                         const outputSize = 'compact'; 
                         const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=${outputSize}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                         const response = await fetch(url);
-                        const data = await response.json();
+                        
+                        // Ensure response is OK before parsing.
+                        if (!response.ok) {
+                             console.warn(`Alpha Vantage failed historical fetch for ${symbol}: ${response.status}`);
+                             historicalPriceCache[symbol] = {}; 
+                             continue;
+                        }
+                        
+                        // Handle potential non-JSON response from Alpha Vantage when key is invalid
+                        const text = await response.text();
+                        let data;
+                        try {
+                            data = JSON.parse(text);
+                        } catch (e) {
+                            console.error(`Alpha Vantage historical fetch error for ${symbol}: Non-JSON response received.`, e);
+                            historicalPriceCache[symbol] = {}; 
+                            continue;
+                        }
                         
                         if (data.Information || data.Note) {
                             console.warn(`Alpha Vantage API limit likely reached for historical fetch of ${symbol}.`);
@@ -1293,7 +1310,7 @@
                             historicalPriceCache[symbol] = {}; 
                         }
                     } catch (e) {
-                        console.error(`Network error fetching historical data for ${symbol}:`, e);
+                        console.error(`Network or JSON parse error fetching historical data for ${symbol}:`, e);
                         historicalPriceCache[symbol] = {}; 
                     }
                 }
@@ -1432,7 +1449,7 @@
         }
         // --- End Data Persistence ---
 
-        // --- API & Price Fetching (INTEGRATED MISSING FUNCTIONS) ---
+        // --- API & Price Fetching (MODIFIED FETCH LOGIC) ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
@@ -1476,6 +1493,14 @@
             if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
             }
+            
+            // --- EXPLICITLY SKIP 401k/529 ACCOUNTS ---
+            const accountsToExclude = ['401(k)', '529 College Saving'];
+            if (accountsToExclude.includes(holding.accountType)) {
+                console.log(`Skipping price fetch for ${holding.symbol}: 401(k)/529 account.`);
+                return { currentPrice: null, previousClosePrice: null };
+            }
+            // --- END EXCLUSION ---
 
             const symbol = holding.symbol;
             const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
@@ -1505,7 +1530,7 @@
             } else {
                 // --- Stock/ETF Priority: Finnhub -> FMP -> Alpha Vantage ---
                 console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromFinnhub(symbol); // THIS WAS CAUSING THE ERROR
+                priceData = await fetchPriceFromFinnhub(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via Finnhub.`);
                     return priceData;
@@ -1596,8 +1621,25 @@
             try {
                 const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                 const r = await fetch(url);
-                const d = await r.json();
+                
+                // --- MODIFICATION START: Check for non-OK status ---
+                if (!r.ok || r.status === 403) {
+                    console.warn(`Alpha Vantage request failed with status: ${r.status}`);
+                    return { currentPrice: null, previousClosePrice: null };
+                }
 
+                // Check content type or read as text first to handle non-JSON body (like HTML error pages)
+                const text = await r.text();
+                let d;
+                try {
+                    d = JSON.parse(text);
+                } catch (e) {
+                    console.error(`Alpha Vantage fetch error for ${symbol}: Non-JSON response received.`, e);
+                    // Return null prices if it's not valid JSON
+                    return { currentPrice: null, previousClosePrice: null }; 
+                }
+                // --- MODIFICATION END ---
+                
                 if (d.Information || d.Note) {
                    console.warn(`Alpha Vantage API limit reached for ${symbol}. Price not updated.`);
                    return { currentPrice: null, previousClosePrice: null };
@@ -1622,7 +1664,7 @@
                 console.warn(`Alpha Vantage did not return sufficient data for ${symbol}.`);
                 return { currentPrice: null, previousClosePrice: null };
             } catch (e) {
-                console.error(`Alpha Vantage fetch error for ${symbol}:`, e);
+                console.error(`Alpha Vantage fatal fetch error for ${symbol}:`, e);
                 return { currentPrice: null, previousClosePrice: null };
             }
         }
@@ -1658,12 +1700,13 @@
             try {
                 const currentHoldings = calculateHoldingsAndCash();
                 
-                const holdingsToFetch = currentHoldings.filter(holding => {
-                    // Skip manual types and cash equivalents
-                    if (holding.type === 'Manual' || isCashEquivalentType(holding.type)) return false;
-
-                    // Determine if it's a fast-moving asset (Stock/ETF)
-                    // We rely on the fetchPrice logic to handle mutual funds only on manual refresh.
+                // --- MODIFICATION: Filter for STOCKS/ETFs only for Auto-Refresh ---
+                const fastAssetsToFetch = currentHoldings.filter(holding => {
+                    // Skip manual types, cash, MF, 401k/529. Only include Stocks/ETFs for fast polling.
+                    if (holding.type === 'Manual' || isCashEquivalentType(holding.type) || holding.type === 'Mutual Fund') return false;
+                    const accountsToExclude = ['401(k)', '529 College Saving'];
+                    if (accountsToExclude.includes(holding.accountType)) return false; 
+                    
                     const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
                     
                     if (!forceRefresh && !isFastMoving) return false; 
@@ -1672,35 +1715,31 @@
                     const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
 
                     const isManualOverride = cached && cached.manualPrice != null;
-                    // Check if cache is stale (no cache entry OR timestamp is too old)
                     const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
                     
-                    // Fetch if: forceRefresh is true, OR if it's not a manual override AND the cache is stale.
                     return forceRefresh || (!isManualOverride && isStale);
                 });
                 
-                refreshStats.total = holdingsToFetch.length;
+                refreshStats.total = fastAssetsToFetch.length;
 
                 // --- Early Exit if nothing to fetch ---
-                if (holdingsToFetch.length === 0) {
-                    console.log("No holdings need refreshing.");
+                if (fastAssetsToFetch.length === 0) {
+                    console.log("No fast assets need refreshing.");
                     updateRefreshProgress('completed', 0, 0, null, 0, 0, 0); 
-                    // No need to save or update display if nothing changed
-                    // The 'finally' block will reset state and handle the banner timeout
-                    return; // Exit the 'try' block, proceed to 'finally'
+                    return; 
                 }
                 
                 // --- Fetch Loop ---
-                for (let i = 0; i < holdingsToFetch.length; i++) {
-                    const holding = holdingsToFetch[i];
+                for (let i = 0; i < fastAssetsToFetch.length; i++) {
+                    const holding = fastAssetsToFetch[i];
 
                     // Show progress message
-                    updateRefreshProgress('progress', i + 1, holdingsToFetch.length, holding.symbol);
+                    updateRefreshProgress('progress', i + 1, fastAssetsToFetch.length, holding.symbol);
 
                     // Delay before fetching
                     await delay(API_THROTTLE_DELAY);
                     
-                    // Fetch price data
+                    // Fetch price data (uses priority: Finnhub -> FMP -> AV for non-MF)
                     const priceData = await fetchPrice(holding);
                     const cached = priceCache[holding.symbol];
                     let priceDelta = 0;
@@ -1734,7 +1773,7 @@
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
                 updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-                logActivity(`Refreshed prices for ${totalFetched} assets.`);
+                logActivity(`Refreshed prices for ${totalFetched} fast assets (Stocks/ETFs).`);
                 await saveDataToFirestore(); // Save updated price cache
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
             
@@ -1812,7 +1851,7 @@
                 
                 // Modified completion message structure for mobile wrapping
                 const message = `
-                    Refreshed ${totalRefreshed} stock(s).
+                    Refreshed ${totalRefreshed} asset(s).
                     <span style="display: block;">
                         <span class="positive-sync">✔ ${gained} gained,</span>
                         <span class="negative-sync">▼ ${lost} lost.</span> 
@@ -1835,7 +1874,28 @@
             try {
                 const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                 const response = await fetch(url);
-                const data = await response.json();
+                
+                // Check for non-OK status
+                if (!response.ok || response.status === 403) {
+                     statusEl.textContent = '⚠️';
+                     statusEl.title = `Alpha Vantage failed validation: ${response.statusText}.`;
+                     isSymbolValidated = false;
+                     return;
+                }
+                
+                // Check content type or read as text first to handle non-JSON body
+                const text = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    console.error("Alpha Vantage validation error: Non-JSON response received.", e);
+                    statusEl.textContent = '⚠️';
+                    statusEl.title = 'API Error during validation (non-JSON response).';
+                    isSymbolValidated = false;
+                    return;
+                }
+                
 
                 if (data.Information || data.Note) {
                     statusEl.textContent = '⚠️';
@@ -1854,7 +1914,10 @@
                     }
                     isSymbolValidated = true;
                 } else {
-                    await validateWithAlphaVantage(symbol);
+                    // No match found in Alpha Vantage search either
+                    statusEl.textContent = '❌';
+                    statusEl.title = 'Symbol not found on Finnhub or Alpha Vantage.';
+                    isSymbolValidated = false;
                 }
             } catch (error) {
                 console.error("Alpha Vantage validation error:", error);
@@ -1921,6 +1984,7 @@
                         }
                         isSymbolValidated = true;
                     } else {
+                        // If Finnhub fails to find it, try Alpha Vantage (especially for Mutual Funds)
                         await validateWithAlphaVantage(symbol);
                     }
                 } catch (error) {
@@ -2238,10 +2302,6 @@
 
         function calculateOverallStats(portfolioHoldings, history) { 
             // --- MODIFICATION START: Filter portfolioHoldings to only include ALL holdings (original requirement) ---
-            // However, we exclude Watchlist from G/L math.
-            
-            // Note: portfolioHoldings from calculateHoldingsAndCash() already contains ALL holdings.
-            // We'll rename the variable for clarity here.
             const allHoldings = portfolioHoldings;
             // --- MODIFICATION END ---
             
@@ -3210,7 +3270,7 @@
                 t.accountType !== '401(k)' && 
                 t.accountType !== '529 College Saving'
             );
-            // --- MODIFICATION END ---
+            // --- END MODIFICATION ---
             
             if (transactions.length === 0) {
                 container.innerHTML = `<div class="empty-state">📊<p>No transactions found.</p></div>`;
@@ -3274,7 +3334,7 @@
 
         // --- End Utility/Charting ---
 
-        // --- Import/Export Functions (Unchanged from uploaded file) ---
+        // --- Import/Export Functions (MODIFIED refreshMutualFunds logic) ---
         function exportCSV() {
             if (!portfolioData.transactions || portfolioData.transactions.length === 0) {
                 showConfirmationModal("No transactions to export.", null);
@@ -3343,11 +3403,11 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            // --- MODIFICATION START: Filter holdings to include Stock, ETF, and Mutual Fund types for refresh (old logic) ---
-            const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Stock' || h.type === 'ETF' || h.type === 'Mutual Fund');
+            // --- MODIFICATION START: Filter holdings to include Mutual Fund types only for manual refresh ---
+            const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Mutual Fund');
 
             if (holdingsToRefresh.length === 0) {
-                showConfirmationModal("No stocks, ETFs, or Mutual Funds found to refresh.", null);
+                showConfirmationModal("No Mutual Funds found to refresh. Only Stocks/ETFs are handled by the Auto-Refresh or Refresh Now buttons.", null);
                 return;
             }
 
@@ -3367,6 +3427,7 @@
                 
                 updateRefreshProgress('progress', i + 1, holdingsToRefresh.length, holding.symbol);
 
+                // Note: fetchPrice will use FMP -> AV for MFs.
                 const priceData = await fetchPrice(holding);
                 const cached = priceCache[holding.symbol];
                 let priceDelta = 0;
@@ -3390,7 +3451,7 @@
             
             const totalFetched = refreshStats.total - refreshStats.failed;
             updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-            logActivity('Refreshed prices for mutual funds and stocks/ETFs.');
+            logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
             
@@ -3854,7 +3915,7 @@
             <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
-            <button class="btn btn-secondary" onclick="openRecurringPurchaseModal()">Set Up Recurring</button>
+            <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
