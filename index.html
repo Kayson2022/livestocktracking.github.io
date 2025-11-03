@@ -1064,6 +1064,7 @@
                 
                 if (nextDate <= today) {
                     console.log(`Processing recurring purchase for ${rule.symbol}`);
+                    // Note: fetchPrice is called without a specific type, so it defaults to the priority logic (Finnhub for Stock/ETF, FMP/AV for MF)
                     const priceData = await fetchPrice({ symbol: rule.symbol, type: 'ETF' }); 
                     if (priceData && priceData.currentPrice > 0) {
                         const shares = rule.amount / priceData.currentPrice;
@@ -1449,7 +1450,7 @@
         }
         // --- End Data Persistence ---
 
-        // --- API & Price Fetching (MODIFIED FETCH LOGIC) ---
+        // --- API & Price Fetching (MODIFIED FETCH LOGIC FOR ISOLATION) ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
@@ -1504,13 +1505,14 @@
 
             const symbol = holding.symbol;
             const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
+            const isStockOrETF = holding.type === 'Stock' || holding.type === 'ETF';
             
             console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`);
 
             let priceData;
 
             if (isMutualFund) {
-                // --- Mutual Fund Priority: FMP -> Alpha Vantage ---
+                // --- Mutual Fund Priority: FMP -> Alpha Vantage (STRICT ISOLATION) ---
                 console.log(`Trying FMP for Mutual Fund ${symbol}`);
                 priceData = await fetchPriceFromFMP(symbol);
                 if (priceData && priceData.currentPrice > 0) {
@@ -1527,32 +1529,19 @@
                 }
                 await delay(API_THROTTLE_DELAY);
 
-            } else {
-                // --- Stock/ETF Priority: Finnhub -> FMP -> Alpha Vantage ---
+            } else if (isStockOrETF) {
+                // --- Stock/ETF Priority: Finnhub ONLY (STRICT ISOLATION) ---
                 console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
                 priceData = await fetchPriceFromFinnhub(symbol);
                 if (priceData && priceData.currentPrice > 0) {
                     console.log(`Price for ${symbol} found via Finnhub.`);
                     return priceData;
                 }
+                console.warn(`Finnhub failed for ${symbol}. No fallback used.`);
                 await delay(API_THROTTLE_DELAY);
-
-                console.log(`Finnhub failed, trying FMP for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromFMP(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via FMP.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-
-                console.log(`FMP failed, trying Alpha Vantage for Stock/ETF ${symbol}`);
-                priceData = await fetchPriceFromAlphaVantage(symbol);
-                if (priceData && priceData.currentPrice > 0) {
-                    console.log(`Price for ${symbol} found via Alpha Vantage (last fallback).`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-            }
+                
+            } 
+            // If it is 'Manual' or 'Other', we return null price by default
 
             console.warn(`All price providers failed for symbol: ${symbol}`);
             return { currentPrice: null, previousClosePrice: null };
@@ -1567,7 +1556,7 @@
 
                 if (!r.ok) {
                     if (r.status === 403) {
-                        console.log(`Finnhub fetch for ${symbol} was forbidden. This is expected for most mutual funds on the free plan. Trying next provider.`);
+                        console.log(`Finnhub fetch for ${symbol} was forbidden.`);
                     } else {
                         console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
                     }
@@ -1622,7 +1611,7 @@
                 const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                 const r = await fetch(url);
                 
-                // --- MODIFICATION START: Check for non-OK status ---
+                // --- Check for non-OK status ---
                 if (!r.ok || r.status === 403) {
                     console.warn(`Alpha Vantage request failed with status: ${r.status}`);
                     return { currentPrice: null, previousClosePrice: null };
@@ -1638,7 +1627,6 @@
                     // Return null prices if it's not valid JSON
                     return { currentPrice: null, previousClosePrice: null }; 
                 }
-                // --- MODIFICATION END ---
                 
                 if (d.Information || d.Note) {
                    console.warn(`Alpha Vantage API limit reached for ${symbol}. Price not updated.`);
@@ -1700,19 +1688,17 @@
             try {
                 const currentHoldings = calculateHoldingsAndCash();
                 
-                // --- MODIFICATION: Filter for STOCKS/ETFs only for Auto-Refresh ---
+                // --- MODIFICATION: Filter for STOCKS/ETFs only for Auto-Refresh (FAST Assets) ---
                 const fastAssetsToFetch = currentHoldings.filter(holding => {
-                    // Skip manual types, cash, MF, 401k/529. Only include Stocks/ETFs for fast polling.
-                    if (holding.type === 'Manual' || isCashEquivalentType(holding.type) || holding.type === 'Mutual Fund') return false;
+                    // Only include Stocks/ETFs for fast polling.
+                    if (!(holding.type === 'Stock' || holding.type === 'ETF')) return false;
+                    
+                    // Exclude any account types that should not be auto-refreshed (like 401k/529)
                     const accountsToExclude = ['401(k)', '529 College Saving'];
                     if (accountsToExclude.includes(holding.accountType)) return false; 
                     
-                    const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                    
-                    if (!forceRefresh && !isFastMoving) return false; 
-
                     const cached = priceCache[holding.symbol];
-                    const staleTime = isFastMoving ? CACHE_STALE_TIME_FAST : CACHE_STALE_TIME_SLOW;
+                    const staleTime = CACHE_STALE_TIME_FAST;
 
                     const isManualOverride = cached && cached.manualPrice != null;
                     const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
@@ -1724,7 +1710,7 @@
 
                 // --- Early Exit if nothing to fetch ---
                 if (fastAssetsToFetch.length === 0) {
-                    console.log("No fast assets need refreshing.");
+                    console.log("No Stocks or ETFs need refreshing.");
                     updateRefreshProgress('completed', 0, 0, null, 0, 0, 0); 
                     return; 
                 }
@@ -1739,7 +1725,7 @@
                     // Delay before fetching
                     await delay(API_THROTTLE_DELAY);
                     
-                    // Fetch price data (uses priority: Finnhub -> FMP -> AV for non-MF)
+                    // Fetch price data (uses priority: Finnhub ONLY)
                     const priceData = await fetchPrice(holding);
                     const cached = priceCache[holding.symbol];
                     let priceDelta = 0;
@@ -1773,7 +1759,7 @@
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
                 updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-                logActivity(`Refreshed prices for ${totalFetched} fast assets (Stocks/ETFs).`);
+                logActivity(`Refreshed prices for ${totalFetched} Stocks/ETFs.`);
                 await saveDataToFirestore(); // Save updated price cache
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
             
@@ -3403,7 +3389,7 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            // --- MODIFICATION START: Filter holdings to include Mutual Fund types only for manual refresh ---
+            // --- Filter holdings to include Mutual Fund types only for manual refresh ---
             const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Mutual Fund');
 
             if (holdingsToRefresh.length === 0) {
@@ -3423,7 +3409,6 @@
 
             for (let i = 0; i < holdingsToRefresh.length; i++) {
                 const holding = holdingsToRefresh[i];
-            // --- END MODIFICATION ---
                 
                 updateRefreshProgress('progress', i + 1, holdingsToRefresh.length, holding.symbol);
 
@@ -3455,9 +3440,8 @@
             await saveDataToFirestore();
             await updateDisplay(); 
             
-            // --- MODIFICATION START: Revert button text to original ---
+            // --- Revert button text to original ---
             refreshButton.textContent = 'Refresh Mutual Funds';
-            // --- END MODIFICATION ---
             refreshButton.disabled = false;
             
             isRefreshing = false; 
