@@ -628,7 +628,7 @@
                             const docSnap = await getDoc(sessionDocRef);
                             if (docSnap.exists() && docSnap.data().invalidationToken) {
                                 sessionStorage.setItem('myAppInvalidationToken', docSnap.data().invalidationToken);
-                                console.log('Stored existing invalidation token locally.');
+                                console.log('Stored existing invalidation token locally:', tokenFromFirestore);
                             } else {
                                 console.log('No invalidation token found in Firestore for this user.');
                                 // Optionally create one here if needed for initial setup,
@@ -1101,10 +1101,11 @@
         // --- End Recurring Transactions ---
 
 
-        // --- Core Data Calculation Logic (MODIFIED for Volatility) ---
+        // --- Core Data Calculation Logic (REVERTED to all holdings, then filtered for Volatility) ---
         function calculateHoldingsAndCash() {
             const holdings = {};
             let realizedGains = 0;
+            // Get ALL transactions
             const sortedTransactions = [...(portfolioData.transactions || [])].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
             const taxLots = {};
 
@@ -1153,6 +1154,9 @@
                     if (totalShares > 0.00001) {
                         const firstTransaction = lots[0].transaction;
                         const [symbol, accountType, platform] = positionKey.split('|||');
+                        
+                        // NO FILTERING HERE: create all holdings
+                        
                         holdings[positionKey] = {
                             symbol: symbol,
                             name: firstTransaction.name,
@@ -1193,6 +1197,7 @@
                                 
                 return h;
             });
+            // NO FILTERING HERE: return all holdings for display/overall stats
             return calculatedHoldings;
         }
         
@@ -1238,7 +1243,18 @@
         // --- END NEW FUNCTION ---
 
         async function buildPortfolioHistoryFromTransactions() {
-            const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            // --- MODIFICATION START: Filter transactions for VOLATILITY CALCULATION ---
+            // Include Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
+            const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
+            const accountsToExclude = ['401(k)', '529 College Saving'];
+            
+            const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => 
+                t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
+                !accountsToExclude.includes(t.accountType) &&
+                (typesToInclude.includes(t.type) || isCashEquivalentType(t.type))
+            );
+            // --- MODIFICATION END ---
+            
             if (nonWatchlistTransactions.length === 0) return [];
 
             const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
@@ -1647,8 +1663,9 @@
                     if (holding.type === 'Manual' || isCashEquivalentType(holding.type)) return false;
 
                     // Determine if it's a fast-moving asset (Stock/ETF)
+                    // We rely on the fetchPrice logic to handle mutual funds only on manual refresh.
                     const isFastMoving = holding.type === 'Stock' || holding.type === 'ETF';
-                    // If not forcing refresh AND it's not a fast-moving asset, skip (don't refresh MFs unless forced)
+                    
                     if (!forceRefresh && !isFastMoving) return false; 
 
                     const cached = priceCache[holding.symbol];
@@ -1837,9 +1854,7 @@
                     }
                     isSymbolValidated = true;
                 } else {
-                    statusEl.textContent = '❌';
-                    statusEl.title = 'Symbol not found on Finnhub or Alpha Vantage.';
-                    isSymbolValidated = false;
+                    await validateWithAlphaVantage(symbol);
                 }
             } catch (error) {
                 console.error("Alpha Vantage validation error:", error);
@@ -2212,7 +2227,7 @@
         }
         // --- End Settings Modal ---
 
-        // --- Calculation and Rendering Logic (MODIFIED for G/L and Volatility) ---
+        // --- Calculation and Rendering Logic (REVERTED and MODIFIED for filtering) ---
         function isCashEquivalentType(type) {
             if (!type) return false;
             const t = String(type).trim().toLowerCase();
@@ -2221,7 +2236,15 @@
             return isCash;
         }
 
-        function calculateOverallStats(portfolioHoldings, history) { // Added history parameter
+        function calculateOverallStats(portfolioHoldings, history) { 
+            // --- MODIFICATION START: Filter portfolioHoldings to only include ALL holdings (original requirement) ---
+            // However, we exclude Watchlist from G/L math.
+            
+            // Note: portfolioHoldings from calculateHoldingsAndCash() already contains ALL holdings.
+            // We'll rename the variable for clarity here.
+            const allHoldings = portfolioHoldings;
+            // --- MODIFICATION END ---
+            
             let totalCostBasis = 0;
             let totalValue = 0;
             let totalCashValue = 0;
@@ -2230,8 +2253,9 @@
             let bestPerformer = { symbol: 'N/A', gain: -Infinity };
             let worstPerformer = { symbol: 'N/A', gain: Infinity };
 
-            const filteredHoldings = portfolioHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
-            const validPricedHoldings = filteredHoldings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
+            // We filter non-watchlist for stats calculation (same as original, but on ALL holdings)
+            const nonWatchlistHoldings = allHoldings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            const validPricedHoldings = nonWatchlistHoldings.filter(h => h.currentPrice !== null && h.currentPrice > 0);
 
             validPricedHoldings.forEach(h => {
                 const isCashEquivalent = isCashEquivalentType(h.type);
@@ -2245,27 +2269,23 @@
                     totalCostBasis += Number(h.totalCost) || 0;
                     estimatedAnnualIncome += (Number(h.dividend) || 0) * (Number(h.totalShares) || 0);
 
-                    // --- MODIFIED G/L LOGIC ---
+                    // Daily G/L logic (reverted to original, applying to ALL holdings for dashboard totals)
                     const isRetirementOr529 = h.accountType === '401(k)' || h.accountType === '529 College Saving';
                     const cachedInfo = priceCache[h.symbol] || {};
-                    let canIncludeDailyGL = true; // Default to true
+                    let canIncludeDailyGL = true;
 
                     if (isRetirementOr529) {
-                        // It's a 401k/529. It must have a manual price entry, and it must be fresh.
                         const manualTimestamp = cachedInfo.manualPriceEntryTimestamp || 0;
                         const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
                         
                         if (manualTimestamp < twentyFourHoursAgo) {
-                            // If timestamp is missing (0) or older than 24h, it's stale.
                             canIncludeDailyGL = false;
                         }
                     }
 
-                    // Now, wrap the original G/L calculation in this check:
                     if (canIncludeDailyGL && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                         totalDailyGainLoss += (currentValue - ((Number(h.totalShares) || 0) * h.previousClosePrice));
                     }
-                    // --- END MODIFIED G/L LOGIC ---
                     
                     const unrealizedGain = currentValue - (Number(h.totalCost) || 0);
                     if (unrealizedGain > bestPerformer.gain) {
@@ -2285,9 +2305,8 @@
 
             const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
             
-            // --- NEW VOLATILITY CALCULATION ---
+            // Portfolio Volatility uses the *filtered* history from buildPortfolioHistoryFromTransactions
             portfolioVolatility = calculatePortfolioVolatility(history);
-            // --- END NEW VOLATILITY CALCULATION ---
 
             return { 
                 totalCostBasis, 
@@ -2339,6 +2358,7 @@
             const container = document.getElementById('investmentsList');
             container.innerHTML = '';
 
+            // Holdings are ALL holdings for display
             let holdingsToRender = [...holdings];
             const searchTerm = currentSearchTerm.toLowerCase();
 
@@ -2357,7 +2377,8 @@
                 groupedByAccount[h.accountType].push(h);
             });
 
-            const accountOrder = ['Regular Brokerage', 'Roth IRA', '401(k)', '529 College Saving', 'Yahoo Finance'];
+            // ALL Account types are allowed for display in the investment list
+            const accountOrder = ['Regular Brokerage', 'Roth IRA', '401(k)', '529 College Saving', 'Yahoo Finance']; 
             const sortedAccountTypes = Object.keys(groupedByAccount).sort((a,b) => {
                 const indexA = accountOrder.indexOf(a);
                 const indexB = accountOrder.indexOf(b);
@@ -2367,7 +2388,7 @@
             });
 
             if (sortedAccountTypes.length === 0) {
-                container.innerHTML = `<div class="empty-state">📊<p>No holdings found. Log a transaction or clear your filters.</p></div>`;
+                 container.innerHTML = `<div class="empty-state">📊<p>No holdings found. Log a transaction or clear your filters.</p></div>`;
                 return;
             }
 
@@ -2715,27 +2736,24 @@
 
             try {
                 if (!isInitialDataLoaded) return;
-                const currentHoldings = calculateHoldingsAndCash();
+                const currentHoldings = calculateHoldingsAndCash(); // Gets ALL holdings
                 let history = [];
                 if (fetchHistorical) {
-                    history = await buildPortfolioHistoryFromTransactions();
+                    history = await buildPortfolioHistoryFromTransactions(); // Gets FILTERED history (Stocks, ETFs, MF, excl. 401k/529)
                 } else {
-                    // We need history for volatility calculation even if we skip re-fetching.
-                    // If we skip fetching, we use the cached history from the chart display logic.
-                    // This relies on the global 'historicalPriceCache' being populated from a previous run.
-                    // To keep it simple, if we skip fetch, we use the most recent historical data generated.
-                    // If filterChart was run recently, it has the data. For a full calculation, we re-run buildPortfolioHistory...
-                    history = await buildPortfolioHistoryFromTransactions(); // Rerunning this is safe if symbolsToFetch is empty.
+                    // If not fetching new prices, we still need the filtered history for volatility
+                    history = await buildPortfolioHistoryFromTransactions(); 
                 }
 
+                // Pass ALL holdings and FILTERED history to calculate stats
                 const stats = calculateOverallStats(currentHoldings, history);
                 updateUserNameDisplay();
                 updateStats(stats);
                 
-                await filterChart(activeChartFilter, history); // Pass history to filterChart
+                await filterChart(activeChartFilter, history); // Pass FILTERED history for chart
                 
                 populatePlatformFilter();
-                renderInvestments(currentHoldings);
+                renderInvestments(currentHoldings); // Use ALL holdings for list
                 renderAllTransactions();
             } finally {
                 isUpdatingDisplay = false;
@@ -3006,7 +3024,11 @@
         function populatePlatformFilter() {
             const select = document.getElementById('filterPlatform');
             if(!portfolioData.transactions) return;
+            
+            // --- MODIFICATION: Show all platforms associated with ALL holdings (reverted to include MF, 401k/529 platforms) ---
             const platforms = new Set(portfolioData.transactions.map(t => t.platform).filter(Boolean));
+            // --- END MODIFICATION ---
+
             while (select.options.length > 1) select.remove(1);
             platforms.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; select.appendChild(o); });
             select.value = currentFilter;
@@ -3019,14 +3041,21 @@
             const labelColor = currentTheme === 'dark' ? '#f5f5f5' : '#333';
             if(accountChart) accountChart.destroy(); if(investmentChart) investmentChart.destroy(); if(historicalChart) historicalChart.destroy(); if(dividendChart) dividendChart.destroy();
 
+            // Holdings are ALL holdings for charts (original requirement)
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
+            
             const accountData = portfolioHoldings.reduce((acc, h) => {
                 const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); 
-                if(h.currentPrice !== null && h.currentPrice > 0 && h.accountType) acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                // All accounts included in dashboard pie chart
+                if(h.currentPrice !== null && h.currentPrice > 0 && h.accountType) {
+                    acc[h.accountType] = (acc[h.accountType] || 0) + val;
+                }
                 return acc;
             }, {});
+            
             const investmentData = portfolioHoldings.reduce((acc, h) => {
                  const val = (Number(h.totalShares) || 0) * (h.currentPrice || 0); 
+                // All investment types included in dashboard pie chart
                 if(h.currentPrice !== null && h.currentPrice > 0 && h.type) acc[h.type] = (acc[h.type] || 0) + val; return acc;
              }, {});
             
@@ -3175,7 +3204,13 @@
 
         function renderAllTransactions() {
             const container = document.getElementById('allTransactionsList');
-            const transactions = portfolioData.transactions || [];
+            
+            // --- MODIFICATION START: Filter transactions for All Transactions tab (excluding 401k/529) ---
+            const transactions = (portfolioData.transactions || []).filter(t => 
+                t.accountType !== '401(k)' && 
+                t.accountType !== '529 College Saving'
+            );
+            // --- MODIFICATION END ---
             
             if (transactions.length === 0) {
                 container.innerHTML = `<div class="empty-state">📊<p>No transactions found.</p></div>`;
@@ -3308,16 +3343,11 @@
             if (!isInitialDataLoaded) return;
             
             const currentHoldings = calculateHoldingsAndCash();
-            const mutualFundHoldings = currentHoldings.filter(h => {
-                if (h.type === 'Manual') return false;
-                const isMFType = h.type === 'Mutual Fund';
-                const hasXSuffix = h.symbol && h.symbol.trim().toUpperCase().endsWith('X');
-                const looksLikeTicker = h.symbol && !h.symbol.includes(' ');
-                return (isMFType || hasXSuffix) && looksLikeTicker;
-            });
+            // --- MODIFICATION START: Filter holdings to include Stock, ETF, and Mutual Fund types for refresh (old logic) ---
+            const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Stock' || h.type === 'ETF' || h.type === 'Mutual Fund');
 
-            if (mutualFundHoldings.length === 0) {
-                showConfirmationModal("No valid mutual funds found to refresh.", null);
+            if (holdingsToRefresh.length === 0) {
+                showConfirmationModal("No stocks, ETFs, or Mutual Funds found to refresh.", null);
                 return;
             }
 
@@ -3326,16 +3356,16 @@
             refreshButton.disabled = true;
             updateDataStatus('loading');
             
-            // Reusing the progress bar logic for MF refresh
             isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: mutualFundHoldings.length }; 
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: holdingsToRefresh.length }; 
             document.getElementById('refreshStatusBox').style.display = 'block'; 
             document.getElementById('nextUpdateTimer').style.display = 'none'; 
 
-            for (let i = 0; i < mutualFundHoldings.length; i++) {
-                const holding = mutualFundHoldings[i];
+            for (let i = 0; i < holdingsToRefresh.length; i++) {
+                const holding = holdingsToRefresh[i];
+            // --- END MODIFICATION ---
                 
-                updateRefreshProgress('progress', i + 1, mutualFundHoldings.length, holding.symbol);
+                updateRefreshProgress('progress', i + 1, holdingsToRefresh.length, holding.symbol);
 
                 const priceData = await fetchPrice(holding);
                 const cached = priceCache[holding.symbol];
@@ -3360,11 +3390,13 @@
             
             const totalFetched = refreshStats.total - refreshStats.failed;
             updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-            logActivity('Refreshed prices for mutual funds.');
+            logActivity('Refreshed prices for mutual funds and stocks/ETFs.');
             await saveDataToFirestore();
             await updateDisplay(); 
             
+            // --- MODIFICATION START: Revert button text to original ---
             refreshButton.textContent = 'Refresh Mutual Funds';
+            // --- END MODIFICATION ---
             refreshButton.disabled = false;
             
             isRefreshing = false; 
@@ -3383,7 +3415,7 @@
                     document.getElementById('refreshStatusBox').style.display = 'none';
                  }, 5000);
             }
-            showConfirmationModal("Mutual fund price refresh complete.", null);
+            showConfirmationModal("Price refresh complete.", null);
         }
         // --- End Import/Export ---
 
@@ -3687,6 +3719,7 @@
         <!-- END MODIFIED stats-grid -->
         <div class="refresh-button-container">
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
+            <!-- MODIFICATION: Renamed button back to original -->
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
         </div>
@@ -3749,7 +3782,7 @@
                         <select id="platform" name="platform" required>
                             <option value="">Select Platform</option>
                             <option value="Fidelity">Fidelity</option>
-                            <option valueF="Vanguard">Vanguard</option>
+                            <option value="Vanguard">Vanguard</option>
                             <option value="Charles Schwab">Charles Schwab</option>
                             <option value="Merrill Edge">Merrill Edge</option>
                             <option value="E*TRADE">E*TRADE</option>
