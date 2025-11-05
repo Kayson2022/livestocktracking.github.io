@@ -2744,8 +2744,11 @@
         }
 
         function renderConsolidatedHolding(symbol, accountType, holdings) {
-            const totalShares = holdings.reduce((sum, h => sum + (Number(h.totalShares) || 0)), 0);
+            // FIX: Corrected reduction function syntax to properly pass the accumulator (sum)
+            const totalShares = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
             const totalCost = holdings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
+            // END FIX
+
             const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
             const currentPrice = holdings[0]?.currentPrice || 0;
             const previousClosePrice = holdings[0]?.previousClosePrice || 0;
