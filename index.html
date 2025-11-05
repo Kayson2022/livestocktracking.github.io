@@ -1242,28 +1242,24 @@
             return annualizedVolatility;
         }
         // --- END NEW FUNCTION ---
-
+        
+        // --- MODIFIED FUNCTION: Builds Unfiltered History for Main Chart ---
         async function buildPortfolioHistoryFromTransactions() {
-            // --- MODIFICATION START: Filter transactions for VOLATILITY CALCULATION ---
-            // Requirement: Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
-            const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
-            const accountsToExclude = ['401(k)', '529 College Saving'];
+            // This function now builds history for ALL holdings (used for the main historical chart).
             
-            const nonWatchlistTransactions = (portfolioData.transactions || []).filter(t => 
-                t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
-                !accountsToExclude.includes(t.accountType) &&
-                (typesToInclude.includes(t.type) || isCashEquivalentType(t.type))
-            );
-            // --- MODIFICATION END ---
+            const transactions = (portfolioData.transactions || []).filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE);
             
-            if (nonWatchlistTransactions.length === 0) return [];
+            if (transactions.length === 0) return [];
 
-            const sorted = [...nonWatchlistTransactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+            const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
             if (sorted.length === 0) return [];
             
+            // Filter relevant transactions for price fetching (all non-cash, non-manual)
             const relevantTransactions = sorted.filter(t => t.symbol && !isCashEquivalentType(t.type) && t.type !== 'Manual');
             const allSymbols = [...new Set(relevantTransactions.map(t => t.symbol))];
 
+            // NOTE: Historical Price Fetching uses ALPHA VANTAGE and is not optimized for daily limits.
+            // We only fetch if prices are completely missing from session cache.
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
             
             if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
@@ -1283,14 +1279,12 @@
                         const url = `${CORS_PROXY}https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=${outputSize}&apikey=${ALPHA_VANTAGE_API_KEY}`;
                         const response = await fetch(url);
                         
-                        // Ensure response is OK before parsing.
+                        // Error handling is complex here, keeping robust checks
                         if (!response.ok) {
                              console.warn(`Alpha Vantage failed historical fetch for ${symbol}: ${response.status}`);
                              historicalPriceCache[symbol] = {}; 
                              continue;
                         }
-                        
-                        // Handle potential non-JSON response from Alpha Vantage when key is invalid
                         const text = await response.text();
                         let data;
                         try {
@@ -1394,7 +1388,99 @@
 
             return Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
         }
-        // --- End Core Data Logic ---
+        // --- END MODIFIED FUNCTION ---
+
+        // --- NEW FUNCTION: Builds Filtered History for Volatility Stat ONLY ---
+        async function buildVolatilityHistoryFromTransactions() {
+             // Requirement: Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
+            const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
+            const accountsToExclude = ['401(k)', '529 College Saving'];
+            
+            const transactions = (portfolioData.transactions || []).filter(t => 
+                t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
+                !accountsToExclude.includes(t.accountType) &&
+                (typesToInclude.includes(t.type) || isCashEquivalentType(t.type))
+            );
+            
+            if (transactions.length === 0) return [];
+
+            const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
+            if (sorted.length === 0) return [];
+            
+            // Re-use all cached historical data (no need to refetch if not in main history)
+            const dailySnapshots = {};
+            const firstDate = new Date(sorted[0].date);
+            const today = new Date();
+            const lastKnownPrices = {};
+
+            for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateString = d.toISOString().split('T')[0];
+                const transactionsUpToDate = sorted.filter(t => new Date(t.date) <= d);
+
+                let dailyTotalValue = 0;
+                const tempHoldings = {};
+
+                transactionsUpToDate.forEach(t => {
+                    const shares = parseFloat(t.shares) || 0;
+                    const price = parseFloat(t.price) || 0;
+                    const type = t.transactionType.toUpperCase();
+                    if (!t.symbol) return;
+                    const symbol = t.symbol.toUpperCase();
+
+                    if (!tempHoldings[symbol]) tempHoldings[symbol] = { totalShares: 0, totalCost: 0, type: t.type };
+
+                    if (type === 'BUY') {
+                        tempHoldings[symbol].totalShares += shares;
+                        tempHoldings[symbol].totalCost += shares * price;
+                    } else if (type === 'SELL') {
+                        if (tempHoldings[symbol].totalShares > 0) {
+                            const avgCost = tempHoldings[symbol].totalCost / tempHoldings[symbol].totalShares;
+                            tempHoldings[symbol].totalCost -= shares * avgCost;
+                        }
+                        tempHoldings[symbol].totalShares -= shares;
+                    }
+                });
+
+                Object.entries(tempHoldings).forEach(([symbol, holding]) => {
+                    if (holding.totalShares <= 0) return;
+
+                    if (isCashEquivalentType(holding.type)) {
+                        dailyTotalValue += holding.totalShares;
+                        return;
+                    }
+                    
+                    let priceForDate = lastKnownPrices[symbol]; 
+
+                    // Use price from historical price cache (which was populated by main history builder)
+                    const symbolHistory = historicalPriceCache[symbol];
+                    if (symbolHistory && symbolHistory[dateString]) {
+                        priceForDate = parseFloat(symbolHistory[dateString]['4. close']);
+                    }
+                    
+                    if (priceForDate === undefined || priceForDate === null || priceForDate <= 0) {
+                        if (dateString === today.toISOString().split('T')[0] && priceCache[symbol]?.currentPrice) {
+                            priceForDate = priceCache[symbol].currentPrice;
+                        } 
+                        else if (priceCache[symbol]?.currentPrice) {
+                            priceForDate = priceCache[symbol].currentPrice;
+                        }
+                        else if (holding.totalShares > 0) { 
+                            priceForDate = (holding.totalCost / holding.totalShares) || 0;
+                        } else {
+                            priceForDate = 0;
+                        }
+                    }
+                    
+                    dailyTotalValue += holding.totalShares * priceForDate;
+                    lastKnownPrices[symbol] = priceForDate; 
+                });
+
+                dailySnapshots[dateString] = dailyTotalValue;
+            }
+
+            return Object.entries(dailySnapshots).map(([date, value]) => ({ date, value }));
+        }
+        // --- END NEW FUNCTION ---
 
         // --- Data Persistence Functions (Unchanged from uploaded file, except clearAllData modified) ---
         function getCleanObject(obj) {
@@ -2351,7 +2437,7 @@
 
             const totalUnrealizedGainLoss = investedAssetsValue - totalCostBasis;
             
-            // Portfolio Volatility uses the *filtered* history from buildPortfolioHistoryFromTransactions
+            // Portfolio Volatility uses the *filtered* history from buildVolatilityHistoryFromTransactions
             portfolioVolatility = calculatePortfolioVolatility(history);
 
             return { 
@@ -2658,7 +2744,7 @@
         }
 
         function renderConsolidatedHolding(symbol, accountType, holdings) {
-            const totalShares = holdings.reduce((sum, h) => sum + (Number(h.totalShares) || 0), 0);
+            const totalShares = holdings.reduce((sum, h => sum + (Number(h.totalShares) || 0)), 0);
             const totalCost = holdings.reduce((sum, h) => sum + (Number(h.totalCost) || 0), 0);
             const hasLivePrice = holdings[0]?.currentPrice !== null && holdings[0]?.currentPrice > 0;
             const currentPrice = holdings[0]?.currentPrice || 0;
@@ -2783,20 +2869,26 @@
             try {
                 if (!isInitialDataLoaded) return;
                 const currentHoldings = calculateHoldingsAndCash(); // Gets ALL holdings
-                let history = [];
+
+                let mainHistory = [];
+                let volatilityHistory = [];
+                
                 if (fetchHistorical) {
-                    history = await buildPortfolioHistoryFromTransactions(); // Gets FILTERED history (Stocks, ETFs, MF, excl. 401k/529)
+                    mainHistory = await buildPortfolioHistoryFromTransactions(); // Unfiltered history for main chart
+                    volatilityHistory = await buildVolatilityHistoryFromTransactions(); // Filtered history for volatility stat
                 } else {
-                    // If not fetching new prices, we still need the filtered history for volatility
-                    history = await buildPortfolioHistoryFromTransactions(); 
+                    // If not fetching new prices, re-use/recalculate based on existing data
+                    mainHistory = await buildPortfolioHistoryFromTransactions(); 
+                    volatilityHistory = await buildVolatilityHistoryFromTransactions(); 
                 }
 
-                // Pass ALL holdings and FILTERED history to calculate stats
-                const stats = calculateOverallStats(currentHoldings, history);
+                // Pass ALL holdings and FILTERED history for volatility stat
+                const stats = calculateOverallStats(currentHoldings, volatilityHistory);
                 updateUserNameDisplay();
                 updateStats(stats);
                 
-                await filterChart(activeChartFilter, history); // Pass FILTERED history for chart
+                // Use UNFILTERED history for the main chart visualization
+                await filterChart(activeChartFilter, mainHistory); 
                 
                 populatePlatformFilter();
                 renderInvestments(currentHoldings); // Use ALL holdings for list
@@ -3214,7 +3306,7 @@
         async function filterChart(period, history) {
             const holdings = calculateHoldingsAndCash();
             
-            // Use provided history if available, otherwise build/use cached history
+            // Use provided history for the main chart
             const dataToFilter = history || await buildPortfolioHistoryFromTransactions();
             
             activeChartFilter = period;
