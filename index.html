@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1065,8 +1066,7 @@
                 if (nextDate <= today) {
                     console.log(`Processing recurring purchase for ${rule.symbol}`);
                     // Note: fetchPrice is called without a specific type, so it defaults to the priority logic (Finnhub for Stock/ETF, FMP/AV for MF)
-                    // We must pass an object with the structure expected by fetchPrice
-                    const priceData = await fetchPrice({ symbol: rule.symbol, type: 'ETF', accountType: rule.accountType, platform: rule.platform }); 
+                    const priceData = await fetchPrice({ symbol: rule.symbol, type: 'ETF' }); 
                     if (priceData && priceData.currentPrice > 0) {
                         const shares = rule.amount / priceData.currentPrice;
 
@@ -1577,20 +1577,11 @@
             startAutoRefresh();
         }
 
-        /**
-         * Fetches the current price for a holding, prioritizing type and using fallbacks.
-         * FIX: Removed the symbol heuristic (endsWith('X')) and implemented better fallback chains.
-         * * @param {object} holding - The holding object containing symbol, type, etc.
-         * @returns {Promise<{currentPrice: number|null, previousClosePrice: number|null}>} Price data.
-         */
         async function fetchPrice(holding) {
-            if (isCashEquivalentType(holding.type) || holding.type === 'CASH') {
+            if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
             }
-            if (holding.type === 'Manual' || holding.type === 'Other' || !holding.symbol) {
-                return { currentPrice: null, previousClosePrice: null };
-            }
-
+            
             // --- EXPLICITLY SKIP 401k/529 ACCOUNTS ---
             const accountsToExclude = ['401(k)', '529 College Saving'];
             if (accountsToExclude.includes(holding.accountType)) {
@@ -1600,65 +1591,46 @@
             // --- END EXCLUSION ---
 
             const symbol = holding.symbol;
-            const type = holding.type;
+            const isMutualFund = holding.type === 'Mutual Fund' || (symbol && symbol.toUpperCase().endsWith('X'));
+            const isStockOrETF = holding.type === 'Stock' || holding.type === 'ETF';
+            
+            console.log(`Fetching price for: ${symbol}, Type: ${holding.type}, IsMutualFund: ${isMutualFund}`);
+
             let priceData;
 
-            console.log(`Fetching price for: ${symbol}, Explicit Type: ${type}`);
-            
-            // --- Provider Chain for STOCKS / ETFs (High Priority, Fast refresh) ---
-            if (type === 'Stock' || type === 'ETF' || type === 'Market Index') {
-                // 1. Finnhub (Preferred for real-time stock quotes)
-                console.log(`[${symbol}] Trying Finnhub for Stock/ETF.`);
-                priceData = await fetchPriceFromFinnhub(symbol);
-                if (priceData?.currentPrice > 0) {
-                    console.log(`[${symbol}] Price found via Finnhub.`);
+            if (isMutualFund) {
+                // --- Mutual Fund Priority: FMP -> Alpha Vantage (STRICT ISOLATION) ---
+                console.log(`Trying FMP for Mutual Fund ${symbol}`);
+                priceData = await fetchPriceFromFMP(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via FMP.`);
                     return priceData;
                 }
                 await delay(API_THROTTLE_DELAY);
 
-                // 2. FMP (Fallback for Stock/ETF historical close)
-                console.log(`[${symbol}] Finnhub failed, trying FMP historical data.`);
-                priceData = await fetchPriceFromFMP(symbol);
-                if (priceData?.currentPrice > 0) {
-                    console.log(`[${symbol}] Price found via FMP fallback.`);
+                console.log(`FMP failed, trying Alpha Vantage for Mutual Fund ${symbol}`);
+                priceData = await fetchPriceFromAlphaVantage(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Alpha Vantage (fallback).`);
                     return priceData;
                 }
                 await delay(API_THROTTLE_DELAY);
-                
-                // 3. Alpha Vantage (Last resort for Stock/ETF historical close)
-                console.log(`[${symbol}] FMP failed, trying Alpha Vantage historical data.`);
-                priceData = await fetchPriceFromAlphaVantage(symbol);
-                if (priceData?.currentPrice > 0) {
-                    console.log(`[${symbol}] Price found via Alpha Vantage fallback.`);
+
+            } else if (isStockOrETF) {
+                // --- Stock/ETF Priority: Finnhub ONLY (STRICT ISOLATION) ---
+                console.log(`Trying Finnhub for Stock/ETF ${symbol}`);
+                priceData = await fetchPriceFromFinnhub(symbol);
+                if (priceData && priceData.currentPrice > 0) {
+                    console.log(`Price for ${symbol} found via Finnhub.`);
                     return priceData;
                 }
+                console.warn(`Finnhub failed for ${symbol}. No fallback used.`);
                 await delay(API_THROTTLE_DELAY);
                 
             } 
-            
-            // --- Provider Chain for MUTUAL FUNDS / 401k (Lower Priority) ---
-            if (type === 'Mutual Fund' || type === '401k') {
-                // 1. FMP (Preferred for Mutual Fund historical NAV)
-                console.log(`[${symbol}] Trying FMP for Mutual Fund/401k NAV.`);
-                priceData = await fetchPriceFromFMP(symbol);
-                if (priceData?.currentPrice > 0) {
-                    console.log(`[${symbol}] Price found via FMP.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
+            // If it is 'Manual' or 'Other', we return null price by default
 
-                // 2. Alpha Vantage (Fallback for Mutual Fund historical NAV)
-                console.log(`[${symbol}] FMP failed, trying Alpha Vantage historical data.`);
-                priceData = await fetchPriceFromAlphaVantage(symbol);
-                if (priceData?.currentPrice > 0) {
-                    console.log(`[${symbol}] Price found via Alpha Vantage fallback.`);
-                    return priceData;
-                }
-                await delay(API_THROTTLE_DELAY);
-            }
-            
-            // --- Final Fallback ---
-            console.warn(`[${symbol}] All price providers failed for explicit type: ${type}.`);
+            console.warn(`All price providers failed for symbol: ${symbol}`);
             return { currentPrice: null, previousClosePrice: null };
         }
         
@@ -1671,7 +1643,7 @@
 
                 if (!r.ok) {
                     if (r.status === 403) {
-                        console.log(`Finnhub fetch for ${symbol} was forbidden (403).`);
+                        console.log(`Finnhub fetch for ${symbol} was forbidden.`);
                     } else {
                         console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
                     }
@@ -1693,12 +1665,11 @@
         async function fetchPriceFromFMP(symbol) {
              if (!FMP_API_KEY) return { currentPrice: null, previousClosePrice: null };
              try {
-                 // FMP endpoint for historical prices is typically used for both stocks and mutual funds
                  const historyUrl = `${CORS_PROXY}https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?timeseries=2&apikey=${FMP_API_KEY}`;
                  const historyRes = await fetch(historyUrl);
                  
                  if (!historyRes.ok) {
-                     console.warn(`FMP historical fetch failed for ${symbol}: ${historyRes.status} (${historyRes.statusText})`);
+                     console.warn(`FMP historical fetch failed for ${symbol}: ${historyRes.status}`);
                      return { currentPrice: null, previousClosePrice: null }; 
                  }
 
@@ -1806,8 +1777,8 @@
                 
                 // --- MODIFICATION: Filter for STOCKS/ETFs only for Auto-Refresh (FAST Assets) ---
                 const fastAssetsToFetch = currentHoldings.filter(holding => {
-                    // Only include Stock, ETF, Market Index for fast polling.
-                    if (!(holding.type === 'Stock' || holding.type === 'ETF' || holding.type === 'Market Index')) return false;
+                    // Only include Stocks/ETFs for fast polling.
+                    if (!(holding.type === 'Stock' || holding.type === 'ETF')) return false;
                     
                     // Exclude any account types that should not be auto-refreshed (like 401k/529)
                     const accountsToExclude = ['401(k)', '529 College Saving'];
@@ -1841,7 +1812,7 @@
                     // Delay before fetching
                     await delay(API_THROTTLE_DELAY);
                     
-                    // Fetch price data (uses priority: Finnhub -> FMP -> Alpha Vantage)
+                    // Fetch price data (uses priority: Finnhub ONLY)
                     const priceData = await fetchPrice(holding);
                     const cached = priceCache[holding.symbol];
                     let priceDelta = 0;
@@ -1985,7 +1956,7 @@
                      return;
                 }
                 
-                // Check content type or read as text first to handle non-JSON body (like HTML error pages)
+                // Check content type or read as text first to handle non-JSON body
                 const text = await response.text();
                 let data;
                 try {
@@ -3515,10 +3486,10 @@
             
             const currentHoldings = calculateHoldingsAndCash();
             // --- Filter holdings to include Mutual Fund types only for manual refresh ---
-            const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Mutual Fund' || h.type === '401k');
+            const holdingsToRefresh = currentHoldings.filter(h => h.type === 'Mutual Fund');
 
             if (holdingsToRefresh.length === 0) {
-                showConfirmationModal("No Mutual Funds or 401(k) assets found to refresh.", null);
+                showConfirmationModal("No Mutual Funds found to refresh. Only Stocks/ETFs are handled by the Auto-Refresh or Refresh Now buttons.", null);
                 return;
             }
 
@@ -3561,7 +3532,7 @@
             
             const totalFetched = refreshStats.total - refreshStats.failed;
             updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-            logActivity('Refreshed prices for mutual funds and 401(k) assets.');
+            logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
             
@@ -3715,7 +3686,7 @@
             <div class="form-group">
                 <label for="editHoldingTotalShares">Total Shares</label>
                 <input type="number" id="editHoldingTotalShares" step="any" min="0">
-                <small>Adjusting this will replace transactions for this specific position with a single summary transaction.</small>
+                <small>Adjusting this will replace transactions for this specific position with a single summary record.</small>
             </div>
             <div class="form-group">
                 <label for="editHoldingAvgPrice">Average Cost / Share</label>
