@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -172,6 +171,12 @@
         .controls-bar .form-group { margin-bottom: 0; flex-grow: 1; } .controls-bar label { margin-right: 10px; font-weight: 600; } .controls-bar select, .controls-bar input { width: auto; min-width: 180px; }
         /* MODAL STYLES */
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(5px); }
+        
+        /* FIX: Increased z-index for the confirmation modal to ensure it pops up above all others (like the edit modal, which is also 1000) */
+        #confirmationModal {
+            z-index: 2000;
+        }
+
         .modal-content { background: var(--card-bg-color); padding: 30px; border-radius: 15px; width: 90%; max-width: 500px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.2); border: 1px solid var(--border-color); position: relative;}
         .modal-message { font-size: 1.1em; margin-bottom: 25px; color: var(--text-color-primary); line-height: 1.6; }
         .modal-buttons { display: flex; gap: 15px; justify-content: center; }
@@ -541,7 +546,7 @@
             loadAutoRefreshState();
             loadStatsVisibility();
 
-             // --- FIXED: Added null checks before adding listeners ---
+            // --- EVENT LISTENERS (Moved button functions outside startApp) ---
             const sortOptionsEl = document.getElementById('sortOptions');
             if (sortOptionsEl) sortOptionsEl.addEventListener('change', e => { currentSort = e.target.value; updateDisplay(); });
             else console.error("Element with ID 'sortOptions' not found!");
@@ -563,16 +568,39 @@
              else console.error("Element with ID 'userNameInput' not found!");
 
             const signInBtnEl = document.getElementById('signInBtn');
-            if (signInBtnEl) signInBtnEl.addEventListener('click', signInWithGoogle);
+            if (signInBtnEl) signInBtnEl.addEventListener('click', signInWithGoogle); // Use globally defined function
              else console.error("Element with ID 'signInBtn' not found!");
 
             const signOutBtnEl = document.getElementById('signOutBtn');
-            if (signOutBtnEl) signOutBtnEl.addEventListener('click', signOutUser);
+            if (signOutBtnEl) signOutBtnEl.addEventListener('click', signOutUser); // Use globally defined function
              else console.error("Element with ID 'signOutBtn' not found!");
-             // --- END FIX ---
+            // --- END EVENT LISTENERS ---
 
             await initializeFirebase();
         }
+
+        // --- GLOBALIZED AUTH FUNCTIONS ---
+        async function signInWithGoogle() {
+            const provider = new GoogleAuthProvider();
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (error) {
+                console.error("Google Sign-In Error:", error);
+                showConfirmationModal(`Could not sign in with Google. Error: ${error.message}`, null);
+            }
+        }
+
+        async function signOutUser() {
+            try {
+                 sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on sign out - ADDED
+                await signOut(auth);
+                location.reload();
+            } catch (error) {
+                console.error("Sign Out Error:", error);
+                showConfirmationModal(`Could not sign out. Error: ${error.message}`, null);
+            }
+        }
+        // --- END GLOBALIZED AUTH FUNCTIONS ---
 
         async function initializeFirebase() {
             // --- IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE ---
@@ -664,26 +692,6 @@
             }
         }
 
-        async function signInWithGoogle() {
-            const provider = new GoogleAuthProvider();
-            try {
-                await signInWithPopup(auth, provider);
-            } catch (error) {
-                console.error("Google Sign-In Error:", error);
-                showConfirmationModal(`Could not sign in with Google. Error: ${error.message}`, null);
-            }
-        }
-
-        async function signOutUser() {
-            try {
-                 sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on sign out - ADDED
-                await signOut(auth);
-                location.reload();
-            } catch (error) {
-                console.error("Sign Out Error:", error);
-                showConfirmationModal(`Could not sign out. Error: ${error.message}`, null);
-            }
-        }
 
         // --- INTEGRATED: Sign out other devices using Invalidation Token ---
         async function signOutOtherDevices() {
@@ -1987,10 +1995,8 @@
                     }
                     isSymbolValidated = true;
                 } else {
-                    // No match found in Alpha Vantage search either
-                    statusEl.textContent = '❌';
-                    statusEl.title = 'Symbol not found on Finnhub or Alpha Vantage.';
-                    isSymbolValidated = false;
+                    // If Finnhub fails to find it, try Alpha Vantage (especially for Mutual Funds)
+                    await validateWithAlphaVantage(symbol);
                 }
             } catch (error) {
                 console.error("Alpha Vantage validation error:", error);
