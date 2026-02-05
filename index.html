@@ -475,7 +475,10 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const FMP_API_KEY_STORAGE = 'myPortfolioFmpKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
-        const CORS_PROXY = "https://corsproxy.io/?";
+        const FINNHUB_PROXY = "https://finnhub-proxy.giolamchieu1975.workers.dev";
+		const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+
+
 
         // --- API & Fetching Configuration ---
         const API_THROTTLE_DELAY = 250; // ms to wait between API calls
@@ -1646,7 +1649,7 @@
         async function fetchPriceFromFinnhub(symbol) {
             if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null };
             try {
-                const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
+                const url = `https://finnhub-proxy.giolamchieu1975.workers.dev/quote?symbol=${encodeURIComponent(symbol)}`;
                 const r = await fetch(url);
 
                 if (!r.ok) {
@@ -1798,7 +1801,7 @@
                     const isManualOverride = cached && cached.manualPrice != null;
                     const isStale = !cached || (Date.now() - (cached.lastFetchTimestamp || 0)) > staleTime;
                     
-                    return forceRefresh || (!isManualOverride);
+                    return forceRefresh || (!isManualOverride && isStale);
                 });
                 
                 refreshStats.total = fastAssetsToFetch.length;
@@ -2880,26 +2883,17 @@
                 if (!isInitialDataLoaded) return;
                 const currentHoldings = calculateHoldingsAndCash(); // Gets ALL holdings
 
-                // Detect whether transactions changed; if so, rebuild history even during auto-refresh.
-        const _txSig = JSON.stringify((portfolioData && portfolioData.transactions) ? portfolioData.transactions : []);
-        const _txChanged = (window.__lastTxSig !== _txSig);
-        window.__lastTxSig = _txSig;
-
-        let mainHistory = [];
-        let volatilityHistory = [];
-
-        const _haveCached = Array.isArray(window.__cachedMainHistory) && Array.isArray(window.__cachedVolatilityHistory);
-        const _shouldRebuildHistory = fetchHistorical || _txChanged || !_haveCached;
-
-        if (_shouldRebuildHistory) {
-            mainHistory = await buildPortfolioHistoryFromTransactions();
-            volatilityHistory = await buildVolatilityHistoryFromTransactions();
-            window.__cachedMainHistory = mainHistory;
-            window.__cachedVolatilityHistory = volatilityHistory;
-        } else {
-            mainHistory = window.__cachedMainHistory;
-            volatilityHistory = window.__cachedVolatilityHistory;
-        }
+                let mainHistory = [];
+                let volatilityHistory = [];
+                
+                if (fetchHistorical) {
+                    mainHistory = await buildPortfolioHistoryFromTransactions(); // Unfiltered history for main chart
+                    volatilityHistory = await buildVolatilityHistoryFromTransactions(); // Filtered history for volatility stat
+                } else {
+                    // If not fetching new prices, re-use/recalculate based on existing data
+                    mainHistory = await buildPortfolioHistoryFromTransactions(); 
+                    volatilityHistory = await buildVolatilityHistoryFromTransactions(); 
+                }
 
                 // Pass ALL holdings and FILTERED history for volatility stat
                 const stats = calculateOverallStats(currentHoldings, volatilityHistory);
@@ -4024,3 +4018,5 @@
     </div>
 </body>
 </html>
+
+
