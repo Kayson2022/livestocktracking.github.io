@@ -475,7 +475,8 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const FMP_API_KEY_STORAGE = 'myPortfolioFmpKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
-        const CORS_PROXY = "https://corsproxy.io/?";
+        const FINNHUB_PROXY = "https://finnhub-proxy.giolamchieu1975.workers.dev";
+
 
         // --- API & Fetching Configuration ---
         const API_THROTTLE_DELAY = 250; // ms to wait between API calls
@@ -1646,7 +1647,7 @@
         async function fetchPriceFromFinnhub(symbol) {
             if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null };
             try {
-                const url = `${CORS_PROXY}https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
+                const url = `https://finnhub-proxy.giolamchieu1975.workers.dev/quote?symbol=${encodeURIComponent(symbol)}`;
                 const r = await fetch(url);
 
                 if (!r.ok) {
@@ -4015,4 +4016,5 @@
     </div>
 </body>
 </html>
+
 
