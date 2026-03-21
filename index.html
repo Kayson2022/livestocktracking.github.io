@@ -1969,46 +1969,50 @@
                     return; 
                 }
                 
-                // --- Fetch Loop ---
-                for (let i = 0; i < fastAssetsToFetch.length; i++) {
-                    const holding = fastAssetsToFetch[i];
+                // --- Parallel Batch Fetch Loop ---
+                // Fetch in batches of 10 simultaneously — ~10x faster than sequential
+                // Finnhub free = 60 calls/min, Yahoo = unlimited → batches of 10 are safe
+                const BATCH_SIZE = priceMode === 'realtime' ? 8 : 12; // smaller batches for Finnhub, larger for Yahoo
+                const totalSymbols = fastAssetsToFetch.length;
 
-                    // Show progress message
-                    updateRefreshProgress('progress', i + 1, fastAssetsToFetch.length, holding.symbol);
+                for (let batchStart = 0; batchStart < totalSymbols; batchStart += BATCH_SIZE) {
+                    const batch = fastAssetsToFetch.slice(batchStart, batchStart + BATCH_SIZE);
+                    const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+                    const totalBatches = Math.ceil(totalSymbols / BATCH_SIZE);
+                    const symbols = batch.map(h => h.symbol).join(', ');
 
-                    // Delay before fetching
-                    await delay(API_THROTTLE_DELAY);
-                    
-                    // Fetch price data (uses priority: Finnhub ONLY)
-                    const priceData = await fetchPrice(holding);
-                    const cached = priceCache[holding.symbol];
-                    let priceDelta = 0;
-                    
-                    if (priceData && priceData.currentPrice !== null) {
-                        // Ensure cache entry exists
-                        if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                        
-                        // Update cache only if not manually overridden OR if forceRefresh is true
-                        if (cached?.manualPrice == null || forceRefresh) {
-                            // Calculate change since last known price for stats
-                            priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice); 
-                            
-                            priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                            priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    updateRefreshProgress('progress', batchStart + batch.length, totalSymbols, `Batch ${batchNum}/${totalBatches}: ${symbols}`);
+
+                    // Fire all requests in the batch simultaneously
+                    const results = await Promise.all(batch.map(holding => fetchPrice(holding)));
+
+                    // Process results
+                    results.forEach((priceData, idx) => {
+                        const holding = batch[idx];
+                        const cached = priceCache[holding.symbol];
+                        let priceDelta = 0;
+
+                        if (priceData && priceData.currentPrice !== null) {
+                            if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                            if (cached?.manualPrice == null || forceRefresh) {
+                                priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
+                                priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                                priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                            }
+                            priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+                            if (priceDelta > 0.0001) refreshStats.gained++;
+                            else if (priceDelta < -0.0001) refreshStats.lost++;
+                        } else {
+                            refreshStats.failed++;
+                            console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
                         }
-                        
-                        // Always update the timestamp
-                        priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                        
-                        // Update refresh statistics
-                        if (priceDelta > 0.0001) refreshStats.gained++;
-                        else if (priceDelta < -0.0001) refreshStats.lost++;
-                    } else {
-                        // Fetch failed
-                        refreshStats.failed++;
-                        console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
+                    });
+
+                    // Small pause between batches to avoid hammering the proxy
+                    if (batchStart + BATCH_SIZE < totalSymbols) {
+                        await delay(priceMode === 'realtime' ? 500 : 200);
                     }
-                } // --- End Fetch Loop ---
+                } // --- End Batch Loop ---
                 
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
