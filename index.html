@@ -1911,7 +1911,7 @@
             refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
             
             // UI setup for Refreshing state
-            const refreshButton = document.querySelector('.refresh-button-container .btn:last-child'); // Target 'Refresh Now' button specifically
+            const refreshButton = document.getElementById('refreshNowBtn'); // Target 'Refresh Now' by ID
             if (refreshButton) { // Add null check for safety
                 refreshButton.textContent = 'Refreshing...';
                 refreshButton.disabled = true;
@@ -3956,6 +3956,19 @@
             const tbody = document.getElementById('snapshotTableBody');
             if (!tbody) return;
 
+            // Check if we have any prices loaded yet
+            const hasPrices = holdings.some(h => h.currentPrice != null && h.currentPrice > 0);
+            const snapshotNote = document.getElementById('snapshotNote');
+            if (snapshotNote) {
+                if (!hasPrices) {
+                    snapshotNote.innerHTML = '⚠️ Prices not loaded yet — click <strong>Refresh Now</strong> first, then re-open this snapshot.';
+                    snapshotNote.style.color = 'var(--color-negative, #e74c3c)';
+                } else {
+                    snapshotNote.textContent = 'Prices shown are from the last refresh. Click Refresh Now to get latest prices first.';
+                    snapshotNote.style.color = '';
+                }
+            }
+
             // Sort
             const sorted = [...holdings].sort((a, b) => {
                 if (sortBy === 'accountType') return (a.accountType || '').localeCompare(b.accountType || '');
@@ -4277,7 +4290,7 @@
         <div class="refresh-button-container">
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
-            <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
+            <button type="button" class="btn" id="refreshNowBtn" onclick="refreshAllPrices(true)">Refresh Now</button>
             <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
@@ -4479,7 +4492,7 @@
         </tfoot>
       </table>
     </div>
-    <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:12px;">Prices shown are from the last refresh. Click Refresh Now to get latest prices first.</p>
+    <p id="snapshotNote" style="font-size:0.75rem;color:var(--text-secondary);margin-top:12px;">Prices shown are from the last refresh. Click Refresh Now to get latest prices first.</p>
   </div>
 </div>
 
