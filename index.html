@@ -454,6 +454,17 @@
         .collapse-group-btn:hover { background: #e5e7eb; }
         [data-theme="dark"] .collapse-group-btn:hover { background: #374151; }
     
+
+        /* Auto Backup styles */
+        .backup-status {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.78rem; font-weight: 600; padding: 4px 10px;
+            border-radius: 999px; margin-left: 8px;
+        }
+        .backup-status.ok   { background: rgba(0,184,148,0.12); color: #00b894; border: 1px solid rgba(0,184,148,0.25); }
+        .backup-status.fail { background: rgba(231,76,60,0.12);  color: #e74c3c; border: 1px solid rgba(231,76,60,0.25); }
+        .backup-status.busy { background: rgba(108,92,231,0.12); color: #6c5ce7; border: 1px solid rgba(108,92,231,0.25); }
+
         /* Price Mode Toggle */
         .price-mode-toggle {
             display: inline-flex;
@@ -511,6 +522,8 @@
             border: 1px solid rgba(108,92,231,0.25);
         }
 </style>
+  <!-- EmailJS for auto backup -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body>
 
@@ -831,7 +844,7 @@
                 if (isAutoRefreshEnabled && !isRefreshing) { // Check if not already refreshing
                      startAutoRefresh(); 
                 } else {
-                    updateAutoRefreshButton(); updatePriceModeUI();
+                    updateAutoRefreshButton(); updatePriceModeUI(); startAutoBackup();
                 }
             }, (error) => console.error("Error listening to portfolio:", error));
 
@@ -1664,55 +1677,28 @@
             startAutoRefresh();
         }
 
-        // --- Yahoo Finance fetch helpers (ported from stocks-etfs app) ---
+        // --- Yahoo Finance fetch helpers ---
+        // Uses corsproxy.io/v8/finance/chart directly — allorigins.win is blocked on GitHub Pages
         async function fetchPriceFromYahooQuote(symbol) {
-            // Try quote endpoint first, fall back to chart-meta (more reliable for mutual funds)
             const sym = symbol.toUpperCase().trim();
             try {
-                const url = `https://api.allorigins.win/raw?url=${encodeURIComponent('https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + sym)}`;
+                const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
                 const res = await fetch(url, { cache: 'no-store' });
-                if (!res.ok) throw new Error(`Yahoo quote HTTP ${res.status}`);
-                let data;
-                const txt = await res.text();
-                try { data = JSON.parse(txt); } catch { throw new Error('Yahoo non-JSON'); }
-                if (data && typeof data.contents === 'string') {
-                    try { data = JSON.parse(data.contents); } catch {}
-                }
-                const q = data?.quoteResponse?.result?.[0] || data?.result?.[0] || null;
-                const price = q?.regularMarketPrice ?? q?.navPrice ?? null;
-                const previousClose = q?.regularMarketPreviousClose ?? q?.previousClose ?? null;
+                if (!res.ok) throw new Error(`Yahoo chart HTTP ${res.status}`);
+                const json = await res.json();
+                const meta = json?.chart?.result?.[0]?.meta;
+                if (!meta) throw new Error('No chart meta');
+                const price = meta?.regularMarketPrice ?? meta?.chartPreviousClose ?? null;
+                const previousClose = meta?.previousClose ?? meta?.chartPreviousClose ?? null;
                 if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid price');
-                const currentPrice = price;
+                const name = meta?.shortName || meta?.longName || null;
+                const quoteType = meta?.instrumentType || null;
                 const previousClosePrice = (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null;
-                const name = q?.shortName || q?.longName || q?.displayName || null;
-                const quoteType = q?.quoteType || null; // EQUITY, ETF, MUTUALFUND etc.
-                console.log(`Yahoo Quote → ${sym}: $${currentPrice} (${name || 'no name'})`);
-                return { currentPrice, previousClosePrice, name, quoteType };
+                console.log(`Yahoo ✅ ${sym}: $${price} (${name || 'no name'})`);
+                return { currentPrice: price, previousClosePrice, name, quoteType };
             } catch (err) {
-                // Fall back to chart-meta endpoint (better for mutual funds)
-                try {
-                    const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
-                    const res = await fetch(url, { cache: 'no-store' });
-                    if (!res.ok) throw new Error(`Yahoo chart HTTP ${res.status}`);
-                    const json = await res.json();
-                    const meta = json?.chart?.result?.[0]?.meta;
-                    if (!meta) throw new Error('No chart meta');
-                    const price = meta?.regularMarketPrice ?? meta?.chartPreviousClose ?? null;
-                    const previousClose = meta?.previousClose ?? meta?.chartPreviousClose ?? null;
-                    if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid chart price');
-                    const chartName = meta?.shortName || meta?.longName || null;
-                    const chartType = meta?.instrumentType || null;
-                    console.log(`Yahoo Chart → ${sym}: $${price} (${chartName || 'no name'})`);
-                    return {
-                        currentPrice: price,
-                        previousClosePrice: (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null,
-                        name: chartName,
-                        quoteType: chartType
-                    };
-                } catch (err2) {
-                    console.warn(`Yahoo failed for ${sym}:`, err2.message);
-                    return { currentPrice: null, previousClosePrice: null };
-                }
+                console.warn(`Yahoo failed for ${sym}:`, err.message);
+                return { currentPrice: null, previousClosePrice: null };
             }
         }
 
@@ -3816,6 +3802,98 @@
         window.setPriceMode = setPriceMode;
         window.updatePriceModeUI = updatePriceModeUI;
 
+
+        // ─────────────────────────────────────────────────────────────
+        //  AUTO BACKUP via EmailJS — sends JSON export to your email
+        //  Free tier: 200 emails/month
+        //  Setup: sign up at emailjs.com, create a service + template
+        //  Then fill in your IDs below
+        // ─────────────────────────────────────────────────────────────
+        const EMAILJS_SERVICE_ID  = 'service_9jnoib6';
+        const EMAILJS_TEMPLATE_ID = 'qigcres';
+        const EMAILJS_PUBLIC_KEY  = 'I15gJm9MKxGRBd9CQ';
+        const BACKUP_EMAIL        = 'khanhjunkemails@gmail.com';
+        const BACKUP_INTERVAL_MS  = 60 * 60 * 1000; // Every 1 hour
+        const BACKUP_STORAGE_KEY  = 'lastAutoBackupTime';
+
+        let backupIntervalId = null;
+
+        function getBackupData() {
+            return {
+                transactions: portfolioData.transactions || [],
+                recurringTransactions: portfolioData.recurringTransactions || [],
+                activityLog: (portfolioData.activityLog || []).slice(-20), // last 20 only
+                exportedAt: new Date().toISOString(),
+                totalTransactions: (portfolioData.transactions || []).length
+            };
+        }
+
+        async function sendBackupEmail(isManual = false) {
+            if (!EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID || !EMAILJS_PUBLIC_KEY || !BACKUP_EMAIL) {
+                if (isManual) showBackupStatus('fail', '⚠️ EmailJS not configured — see Settings');
+                return false;
+            }
+
+            showBackupStatus('busy', '📤 Sending backup...');
+
+            try {
+                emailjs.init(EMAILJS_PUBLIC_KEY);
+
+                const data = getBackupData();
+                const jsonStr = JSON.stringify(data, null, 2);
+                const now = new Date().toLocaleString();
+
+                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+                    to_email:     BACKUP_EMAIL,
+                    subject:      `Portfolio Backup — ${now}`,
+                    backup_date:  now,
+                    record_count: data.totalTransactions,
+                    backup_json:  jsonStr.length > 45000
+                                    ? jsonStr.substring(0, 45000) + '\n... (truncated, use Export button for full data)'
+                                    : jsonStr
+                });
+
+                localStorage.setItem(BACKUP_STORAGE_KEY, Date.now().toString());
+                showBackupStatus('ok', `✅ Backed up at ${new Date().toLocaleTimeString()}`);
+                logActivity(`Auto-backup sent to ${BACKUP_EMAIL}`);
+                console.log('Auto-backup email sent ✅');
+                return true;
+            } catch (e) {
+                console.error('Backup email failed:', e);
+                showBackupStatus('fail', '❌ Backup failed — check console');
+                return false;
+            }
+        }
+
+        function showBackupStatus(type, msg) {
+            let el = document.getElementById('backupStatusBadge');
+            if (!el) return;
+            el.textContent = msg;
+            el.className = `backup-status ${type}`;
+            if (type === 'ok') {
+                setTimeout(() => { el.textContent = ''; el.className = 'backup-status'; }, 8000);
+            }
+        }
+
+        function startAutoBackup() {
+            if (!EMAILJS_SERVICE_ID) return; // silently skip if not configured
+            if (backupIntervalId) clearInterval(backupIntervalId);
+
+            // Check if we missed a backup while offline
+            const lastBackup = parseInt(localStorage.getItem(BACKUP_STORAGE_KEY) || '0');
+            const elapsed = Date.now() - lastBackup;
+            if (elapsed > BACKUP_INTERVAL_MS) {
+                // Missed one — send after a short delay to let app finish loading
+                setTimeout(() => sendBackupEmail(false), 10000);
+            }
+
+            backupIntervalId = setInterval(() => sendBackupEmail(false), BACKUP_INTERVAL_MS);
+            console.log(`Auto-backup scheduled every ${BACKUP_INTERVAL_MS / 60000} minutes`);
+        }
+
+        window.sendBackupEmail = sendBackupEmail;
+        window.startAutoBackup = startAutoBackup;
+
         window.filterChart = filterChart;
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
@@ -4087,13 +4165,18 @@
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
         </div>
-        <div style="display:flex; align-items:center; gap:10px; margin: 0 0 16px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
             <span class="price-mode-label">Stock/ETF Price Source:</span>
             <div class="price-mode-toggle">
                 <button class="price-mode-btn" id="priceModeRealtime" onclick="setPriceMode('realtime')">⚡ Real-Time (Finnhub)</button>
                 <button class="price-mode-btn" id="priceModeDelayed" onclick="setPriceMode('delayed')">🕐 15-Min Delay (Yahoo)</button>
             </div>
             <span id="priceModeIndicator" class="realtime">🟢 Real-Time</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; margin: 0 0 16px; flex-wrap:wrap;">
+            <span class="price-mode-label">Auto Backup:</span>
+            <button class="price-mode-btn active-delayed" onclick="sendBackupEmail(true)" title="Send a backup of your portfolio data to your email now">📧 Backup Now</button>
+            <span id="backupStatusBadge" class="backup-status"></span>
         </div>
         <div class="charts-section">
             <div class="chart-container">
