@@ -3813,7 +3813,7 @@
         const EMAILJS_TEMPLATE_ID = 'template_wbsgl1q';
         const EMAILJS_PUBLIC_KEY  = 'I15gJm9MKxGRBd9CQ';
         const BACKUP_EMAIL        = 'khanhjunkemails@gmail.com';
-        const BACKUP_INTERVAL_MS  = 3 * 60 * 1000; // Every 1 hour
+        const BACKUP_INTERVAL_MS  = 3 * 60 * 1000; // Every 3 minutes
         const BACKUP_STORAGE_KEY  = 'lastAutoBackupTime';
 
         let backupIntervalId = null;
@@ -3894,8 +3894,116 @@
             }
 
             backupIntervalId = setInterval(() => sendBackupEmail(false), BACKUP_INTERVAL_MS);
-            console.log(`Auto-backup scheduled every ${BACKUP_INTERVAL_MS / 60000} minutes`);
+            console.log(`Auto-backup scheduled every ${BACKUP_INTERVAL_MS / 60000} minutes (${BACKUP_INTERVAL_MS / 1000}s)`);
         }
+
+
+        // --- Restore from backup JSON ---
+        function restoreFromBackupJSON() {
+            const json = document.getElementById('restoreJsonInput').value.trim();
+            if (!json) {
+                showConfirmationModal('Please paste your backup JSON first.', null);
+                return;
+            }
+            let data;
+            try {
+                data = JSON.parse(json);
+            } catch(e) {
+                showConfirmationModal('Invalid JSON — make sure you copied the full backup content from the email.', null);
+                return;
+            }
+
+            const transactions = data.transactions || [];
+            const recurring = data.recurringTransactions || [];
+
+            if (transactions.length === 0) {
+                showConfirmationModal('No transactions found in the backup JSON.', null);
+                return;
+            }
+
+            showConfirmationModal(
+                `This will restore ${transactions.length} transactions from the backup dated ${data.exportedAt || 'unknown'}. This will OVERWRITE your current data. Continue?`,
+                async () => {
+                    portfolioData.transactions = transactions;
+                    portfolioData.recurringTransactions = recurring;
+                    logActivity(`Restored ${transactions.length} transactions from email backup.`);
+                    await saveDataToFirestore();
+                    updateDisplay();
+                    document.getElementById('restoreJsonInput').value = '';
+                    document.getElementById('restorePanel').style.display = 'none';
+                    showConfirmationModal(`✅ Successfully restored ${transactions.length} transactions!`, null);
+                }
+            );
+        }
+        window.restoreFromBackupJSON = restoreFromBackupJSON;
+
+
+        // --- Portfolio Snapshot Modal ---
+        function openPortfolioSnapshot() {
+            const modal = document.getElementById('portfolioSnapshotModal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            renderSnapshotTable();
+        }
+
+        function closePortfolioSnapshot() {
+            const modal = document.getElementById('portfolioSnapshotModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function renderSnapshotTable(sortBy = 'accountType') {
+            const holdings = calculateHoldingsAndCash();
+            const tbody = document.getElementById('snapshotTableBody');
+            if (!tbody) return;
+
+            // Sort
+            const sorted = [...holdings].sort((a, b) => {
+                if (sortBy === 'accountType') return (a.accountType || '').localeCompare(b.accountType || '');
+                if (sortBy === 'symbol') return (a.symbol || '').localeCompare(b.symbol || '');
+                if (sortBy === 'value') return (b.totalShares * (b.currentPrice || 0)) - (a.totalShares * (a.currentPrice || 0));
+                if (sortBy === 'type') return (a.type || '').localeCompare(b.type || '');
+                return 0;
+            });
+
+            const totalValue = sorted.reduce((sum, h) => sum + (h.totalShares * (h.currentPrice || 0)), 0);
+
+            tbody.innerHTML = sorted.map(h => {
+                const price = h.currentPrice;
+                const value = h.totalShares * (price || 0);
+                const prevClose = h.previousClosePrice;
+                const change = (price && prevClose) ? price - prevClose : null;
+                const changePct = (change && prevClose) ? (change / prevClose * 100) : null;
+                const gl = h.totalCost > 0 ? value - h.totalCost : null;
+                const glPct = (gl !== null && h.totalCost > 0) ? (gl / h.totalCost * 100) : null;
+                const isPos = change >= 0;
+                const isGLPos = gl >= 0;
+
+                return `<tr>
+                    <td><span class="account-badge ${getAccountBadgeClass(h.accountType)}">${h.accountType || '—'}</span></td>
+                    <td style="font-weight:700">${h.symbol}</td>
+                    <td style="color:var(--text-secondary);font-size:0.82rem">${h.type || '—'}</td>
+                    <td style="text-align:right">${price != null ? formatCurrency(price) : '—'}</td>
+                    <td style="text-align:right;color:${change == null ? 'var(--text-secondary)' : isPos ? 'var(--color-positive, #27ae60)' : 'var(--color-negative, #e74c3c)'}">
+                        ${change == null ? '—' : (isPos ? '+' : '') + formatCurrency(change)}
+                        ${changePct != null ? '<br><small>' + (isPos ? '+' : '') + changePct.toFixed(2) + '%</small>' : ''}
+                    </td>
+                    <td style="text-align:right">${formatNumber(h.totalShares, 4)}</td>
+                    <td style="text-align:right;font-weight:600">${price != null ? formatCurrency(value) : '—'}</td>
+                    <td style="text-align:right;color:${gl == null ? 'var(--text-secondary)' : isGLPos ? 'var(--color-positive, #27ae60)' : 'var(--color-negative, #e74c3c)'}">
+                        ${gl == null ? '—' : (isGLPos ? '+' : '') + formatCurrency(gl)}
+                        ${glPct != null ? '<br><small>' + (isGLPos ? '+' : '') + glPct.toFixed(2) + '%</small>' : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Update total
+            const totalEl = document.getElementById('snapshotTotal');
+            if (totalEl) totalEl.textContent = formatCurrency(totalValue);
+        }
+
+        window.openPortfolioSnapshot = openPortfolioSnapshot;
+        window.closePortfolioSnapshot = closePortfolioSnapshot;
+        window.renderSnapshotTable = renderSnapshotTable;
 
         window.sendBackupEmail = sendBackupEmail;
         window.startAutoBackup = startAutoBackup;
@@ -4170,6 +4278,7 @@
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" onclick="refreshAllPrices(true)">Refresh Now</button>
+            <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
             <span class="price-mode-label">Stock/ETF Price Source:</span>
@@ -4316,7 +4425,12 @@
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
             <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
-            <button class="btn" onclick="sendBackupEmail(true)" style="background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;border:none;">📧 Backup Now</button>
+            <button class="btn" onclick="document.getElementById('restorePanel').style.display=document.getElementById('restorePanel').style.display==='none'?'block':'none'" style="background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:#fff;border:none;">📥 Restore from Email Backup</button>
+            <div id="restorePanel" style="display:none; margin-top:12px; width:100%;">
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">Paste the full JSON content from your backup email below, then click Restore:</p>
+                <textarea id="restoreJsonInput" rows="6" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary); font-family:monospace; font-size:0.8rem; resize:vertical;" placeholder='Paste backup JSON here... { "transactions": [...] }'></textarea>
+                <button class="btn" onclick="restoreFromBackupJSON()" style="margin-top:8px; background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:#fff;border:none;">✅ Restore Now</button>
+            </div>
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
@@ -4326,6 +4440,49 @@
         <div id="refreshMessageCard" class="refresh-message-card"></div>
         <div id="nextUpdateTimer" class="next-update-timer"></div>
     </div>
+
+<!-- Portfolio Snapshot Modal -->
+<div id="portfolioSnapshotModal" class="modal" style="display:none;">
+  <div class="modal-content" style="max-width:1100px;width:96%;max-height:88vh;overflow-y:auto;padding:24px;">
+    <button class="close-modal-btn" onclick="closePortfolioSnapshot()">×</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+      <h3 class="modal-title" style="margin:0;">📊 Full Portfolio Snapshot</h3>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:0.82rem;color:var(--text-secondary);">Sort by:</span>
+        <button onclick="renderSnapshotTable('accountType')" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;">Account</button>
+        <button onclick="renderSnapshotTable('symbol')" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;">Symbol</button>
+        <button onclick="renderSnapshotTable('value')" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;">Value ↓</button>
+        <button onclick="renderSnapshotTable('type')" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;">Type</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border-color);text-align:left;">
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;">Account</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;">Symbol</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;">Type</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Price</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Today</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Shares</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Value</th>
+            <th style="padding:8px 10px;color:var(--text-secondary);font-weight:700;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Total G/L</th>
+          </tr>
+        </thead>
+        <tbody id="snapshotTableBody"></tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border-color);">
+            <td colspan="6" style="padding:10px;font-weight:700;font-size:0.9rem;">Total Portfolio Value</td>
+            <td style="padding:10px;font-weight:800;font-size:1rem;text-align:right;" id="snapshotTotal">$0.00</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:12px;">Prices shown are from the last refresh. Click Refresh Now to get latest prices first.</p>
+  </div>
+</div>
+
 </body>
 </html>
 
