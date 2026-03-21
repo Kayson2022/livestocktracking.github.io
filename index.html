@@ -3987,7 +3987,7 @@
                         ${change == null ? '—' : (isPos ? '+' : '') + formatCurrency(change)}
                         ${changePct != null ? '<br><small>' + (isPos ? '+' : '') + changePct.toFixed(2) + '%</small>' : ''}
                     </td>
-                    <td style="text-align:right">${formatNumber(h.totalShares, 4)}</td>
+                    <td style="text-align:right">${h.totalShares % 1 === 0 ? h.totalShares.toLocaleString() : h.totalShares.toFixed(4)}</td>
                     <td style="text-align:right;font-weight:600">${price != null ? formatCurrency(value) : '—'}</td>
                     <td style="text-align:right;color:${gl == null ? 'var(--text-secondary)' : isGLPos ? 'var(--color-positive, #27ae60)' : 'var(--color-negative, #e74c3c)'}">
                         ${gl == null ? '—' : (isGLPos ? '+' : '') + formatCurrency(gl)}
