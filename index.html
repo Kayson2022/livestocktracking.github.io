@@ -3844,7 +3844,13 @@
                 const now = new Date().toLocaleString();
 
                 await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+                    // Required by Contact Us template
                     to_email:     BACKUP_EMAIL,
+                    name:         'Portfolio App',
+                    email:        BACKUP_EMAIL,
+                    title:        `Portfolio Backup — ${now}`,
+                    message:      `Backup Date: ${now} | Records: ${data.totalTransactions}`,
+                    // Backup-specific variables
                     subject:      `Portfolio Backup — ${now}`,
                     backup_date:  now,
                     record_count: data.totalTransactions,
@@ -4175,7 +4181,7 @@
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 16px; flex-wrap:wrap;">
             <span class="price-mode-label">Auto Backup:</span>
-            <button class="price-mode-btn active-delayed" onclick="sendBackupEmail(true)" title="Send a backup of your portfolio data to your email now">📧 Backup Now</button>
+            <button onclick="sendBackupEmail(true)" style="padding:8px 16px;border-radius:999px;border:none;background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">📧 Backup Now</button>
             <span id="backupStatusBadge" class="backup-status"></span>
         </div>
         <div class="charts-section">
@@ -4310,6 +4316,7 @@
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
             <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
+            <button class="btn" onclick="sendBackupEmail(true)" style="background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;border:none;">📧 Backup Now</button>
             <button class="btn" id="clearAllDataBtn" onclick="clearAllData()">Clear All Cloud Data</button>
         </div>
     </div>
