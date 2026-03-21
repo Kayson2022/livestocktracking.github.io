@@ -1611,8 +1611,10 @@
                 if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid price');
                 const currentPrice = price;
                 const previousClosePrice = (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null;
-                console.log(`Yahoo Quote → ${sym}: $${currentPrice}`);
-                return { currentPrice, previousClosePrice };
+                const name = q?.shortName || q?.longName || q?.displayName || null;
+                const quoteType = q?.quoteType || null; // EQUITY, ETF, MUTUALFUND etc.
+                console.log(`Yahoo Quote → ${sym}: $${currentPrice} (${name || 'no name'})`);
+                return { currentPrice, previousClosePrice, name, quoteType };
             } catch (err) {
                 // Fall back to chart-meta endpoint (better for mutual funds)
                 try {
@@ -1625,10 +1627,14 @@
                     const price = meta?.regularMarketPrice ?? meta?.chartPreviousClose ?? null;
                     const previousClose = meta?.previousClose ?? meta?.chartPreviousClose ?? null;
                     if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid chart price');
-                    console.log(`Yahoo Chart → ${sym}: $${price}`);
+                    const chartName = meta?.shortName || meta?.longName || null;
+                    const chartType = meta?.instrumentType || null;
+                    console.log(`Yahoo Chart → ${sym}: $${price} (${chartName || 'no name'})`);
                     return {
                         currentPrice: price,
-                        previousClosePrice: (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null
+                        previousClosePrice: (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null,
+                        name: chartName,
+                        quoteType: chartType
                     };
                 } catch (err2) {
                     console.warn(`Yahoo failed for ${sym}:`, err2.message);
@@ -2044,11 +2050,20 @@
                 try {
                     const yahooResult = await fetchPriceFromYahooQuote(symbol);
                     if (yahooResult && yahooResult.currentPrice > 0) {
+                        const displayName = yahooResult.name || symbol;
                         statusEl.textContent = '✅';
-                        statusEl.title = `Validated via Yahoo: $${yahooResult.currentPrice}`;
-                        // Auto-fill name if blank
+                        statusEl.title = `Validated: ${displayName} — $${yahooResult.currentPrice}`;
+                        // Auto-fill name with real company/fund name
                         const nameEl = document.getElementById('name');
-                        if (!nameEl.value) nameEl.value = symbol;
+                        if (!nameEl.value || nameEl.value === symbol) nameEl.value = displayName;
+                        // Auto-set type based on Yahoo quoteType
+                        const typeEl = document.getElementById('type');
+                        if (yahooResult.quoteType) {
+                            const qt = yahooResult.quoteType.toUpperCase();
+                            if (qt === 'ETF') typeEl.value = 'ETF';
+                            else if (qt === 'MUTUALFUND') typeEl.value = 'Mutual Fund';
+                            else if (qt === 'EQUITY') typeEl.value = 'Stock';
+                        }
                         isSymbolValidated = true;
                         return;
                     }
