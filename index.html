@@ -1269,60 +1269,76 @@
             // We only fetch if prices are completely missing from session cache.
             const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
             
-            if (symbolsToFetch.length > 0 && ALPHA_VANTAGE_API_KEY) {
-                 const MAX_AV_HISTORICAL_CALLS = 10; 
-                 const symbolsToFetchLimited = symbolsToFetch.slice(0, MAX_AV_HISTORICAL_CALLS);
-                
-                console.log(`Attempting to fetch historical data for ${symbolsToFetchLimited.length} of ${symbolsToFetch.length} symbols using Alpha Vantage...`);
-                
-                if (symbolsToFetch.length > MAX_AV_HISTORICAL_CALLS) {
-                    console.warn(`NOTE: Skipped historical fetch for ${symbolsToFetch.length - MAX_AV_HISTORICAL_CALLS} symbols to conserve Alpha Vantage limit.`);
+            if (symbolsToFetch.length > 0) {
+                console.log(`Fetching historical data for ${symbolsToFetch.length} symbols via Yahoo Finance (free, unlimited)...`);
+
+                // Helper: fetch full daily history from Yahoo Finance via corsproxy.io
+                async function fetchYahooHistory(symbol) {
+                    // Use max range to cover 5Y/All — Yahoo returns up to 10+ years
+                    const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max`;
+                    const res = await fetch(url, { cache: 'no-store' });
+                    if (!res.ok) throw new Error(`Yahoo history HTTP ${res.status}`);
+                    const json = await res.json();
+                    const result = json?.chart?.result?.[0];
+                    if (!result) throw new Error('No Yahoo chart result');
+                    const timestamps = result.timestamp || [];
+                    const closes = result.indicators?.quote?.[0]?.close || [];
+                    // Build date→price map matching Alpha Vantage format
+                    const priceMap = {};
+                    timestamps.forEach((t, i) => {
+                        if (closes[i] == null || isNaN(closes[i])) return;
+                        const dateStr = new Date(t * 1000).toISOString().split('T')[0];
+                        priceMap[dateStr] = { '4. close': closes[i].toFixed(4) };
+                    });
+                    return priceMap;
                 }
-                
-                for (const symbol of symbolsToFetchLimited) {
-                    await delay(API_THROTTLE_DELAY * 2.5); 
+
+                for (const symbol of symbolsToFetch) {
+                    await delay(300); // Small delay to avoid hammering proxy
+                    let fetched = false;
+
+                    // --- Primary: Yahoo Finance (free, no API key, full history) ---
                     try {
-                        const outputSize = 'compact'; 
-                        // Call Alpha Vantage directly - no CORS proxy needed for historical data
-                        const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=${outputSize}&apikey=${ALPHA_VANTAGE_API_KEY}`;
-                        const response = await fetch(url);
-                        
-                        // Error handling is complex here, keeping robust checks
-                        if (!response.ok) {
-                             console.warn(`Alpha Vantage failed historical fetch for ${symbol}: ${response.status}`);
-                             historicalPriceCache[symbol] = {}; 
-                             continue;
-                        }
-                        const text = await response.text();
-                        let data;
-                        try {
-                            data = JSON.parse(text);
-                        } catch (e) {
-                            console.error(`Alpha Vantage historical fetch error for ${symbol}: Non-JSON response received.`, e);
-                            historicalPriceCache[symbol] = {}; 
-                            continue;
-                        }
-                        
-                        if (data.Information || data.Note) {
-                            console.warn(`Alpha Vantage API limit likely reached for historical fetch of ${symbol}.`);
-                            historicalPriceCache[symbol] = {}; 
-                        } else if (data['Time Series (Daily)']) {
-                            historicalPriceCache[symbol] = data['Time Series (Daily)'];
+                        const priceMap = await fetchYahooHistory(symbol);
+                        if (Object.keys(priceMap).length > 0) {
+                            historicalPriceCache[symbol] = priceMap;
+                            console.log(`Yahoo historical ✅ ${symbol}: ${Object.keys(priceMap).length} days`);
+                            fetched = true;
                         } else {
-                            console.warn(`No historical data returned for ${symbol}.`);
-                            historicalPriceCache[symbol] = {}; 
+                            console.warn(`Yahoo returned empty history for ${symbol}`);
                         }
                     } catch (e) {
-                        console.error(`Network or JSON parse error fetching historical data for ${symbol}:`, e);
-                        historicalPriceCache[symbol] = {}; 
+                        console.warn(`Yahoo historical failed for ${symbol}:`, e.message);
+                    }
+
+                    // --- Fallback: Alpha Vantage (only if Yahoo failed and key exists) ---
+                    if (!fetched && ALPHA_VANTAGE_API_KEY) {
+                        await delay(API_THROTTLE_DELAY * 2);
+                        try {
+                            const avUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=full&apikey=${ALPHA_VANTAGE_API_KEY}`;
+                            const avRes = await fetch(avUrl);
+                            if (avRes.ok) {
+                                const avText = await avRes.text();
+                                let avData;
+                                try { avData = JSON.parse(avText); } catch { avData = null; }
+                                if (avData && avData['Time Series (Daily)']) {
+                                    historicalPriceCache[symbol] = avData['Time Series (Daily)'];
+                                    console.log(`Alpha Vantage historical ✅ ${symbol} (fallback)`);
+                                    fetched = true;
+                                } else if (avData && (avData.Information || avData.Note)) {
+                                    console.warn(`Alpha Vantage limit reached for ${symbol} — skipping.`);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn(`Alpha Vantage historical failed for ${symbol}:`, e.message);
+                        }
+                    }
+
+                    if (!fetched) {
+                        historicalPriceCache[symbol] = {}; // Mark as attempted so we don't retry
+                        console.warn(`No historical data available for ${symbol} — chart may be incomplete.`);
                     }
                 }
-                
-                symbolsToFetch.slice(MAX_AV_HISTORICAL_CALLS).forEach(s => {
-                    historicalPriceCache[s] = {};
-                });
-            } else if (symbolsToFetch.length > 0 && !ALPHA_VANTAGE_API_KEY) {
-                 console.warn("Alpha Vantage API key is missing. Cannot fetch historical data for chart.");
             }
 
             const dailySnapshots = {};
