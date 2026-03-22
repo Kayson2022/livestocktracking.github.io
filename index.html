@@ -2489,10 +2489,12 @@
 
         // --- Settings Modal (Unchanged from uploaded file, except for sign out button) ---
         function openSettingsModal() {
-            // Load saved age bracket
+            // Load saved age bracket — set to 50to59 if not yet configured
             const saved = localStorage.getItem('userAgeBracket') || 'under50';
             const sel = document.getElementById('ageBracketSelect');
             if (sel) sel.value = saved;
+            // Show current bracket in console for debugging
+            console.log('Settings opened — current age bracket:', saved);
             document.getElementById('finnhubApiKeyInput').value = FINNHUB_API_KEY;
             document.getElementById('alphaVantageApiKeyInput').value = ALPHA_VANTAGE_API_KEY;
             document.getElementById('fmpApiKeyInput').value = FMP_API_KEY; 
@@ -4128,6 +4130,8 @@
             localStorage.setItem(CONTRIB_STORAGE_KEY, JSON.stringify(data));
             renderContributionTracker();
         }
+        window.saveManualContribution = saveManualContribution;
+        window.getManualContributions = getManualContributions;
 
         function renderContributionTracker() {
             const grid = document.getElementById('contributionTrackerGrid');
