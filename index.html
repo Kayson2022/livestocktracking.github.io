@@ -1653,8 +1653,9 @@
 
         function getIrsLimits() {
             const bracket = localStorage.getItem('userAgeBracket') || 'under50';
+            console.log('Age bracket:', bracket);
             if (bracket === '60to63') return { ira: 8000, k401: 34250, k529: 18000, label: 'Age 60–63' };
-            if (bracket === '50to59') return { ira: 8000, k401: 30500, k529: 18000, label: 'Age 50–59 / 64+' };
+            if (bracket === '50to59') return { ira: 8000, k401: 30500, k529: 18000, label: 'Age 50–59/64+' };
             return { ira: 7000, k401: 23000, k529: 18000, label: 'Under 50' };
         }
 
@@ -4133,55 +4134,92 @@
             if (!grid) return;
 
             const year = new Date().getFullYear();
-            const manual = getManualContributions();
+
+            // Sum BUY transactions for the current year per account
+            // This uses the actual data the user entered in "Your Portfolio"
+            const acctTotals = {};
+            const acctTxnCount = {};
+            (portfolioData.transactions || []).forEach(t => {
+                if ((t.transactionType || '').toUpperCase() !== 'BUY') return;
+                const d = new Date(t.date);
+                if (d.getFullYear() !== year) return;
+                const acct = t.accountType || 'Unknown';
+                if (!acctTotals[acct]) { acctTotals[acct] = 0; acctTxnCount[acct] = 0; }
+                acctTotals[acct] += (parseFloat(t.shares) || 0) * (parseFloat(t.price) || 0);
+                acctTxnCount[acct]++;
+            });
 
             const limits = getIrsLimits();
+            const manual  = getManualContributions();
+
+            // 401k and Roth IRA: manual entry (user updates snapshots, not individual transactions)
+            // 529 and Brokerage: auto from BUY transactions
             const accounts = [
-                { key: 'Roth IRA',           limit: limits.ira,  color: '#e74c3c', note: `${limits.label} IRA limit` },
-                { key: '401(k)',              limit: limits.k401, color: '#f39c12', note: `${limits.label} 401(k) limit` },
-                { key: '529 College Saving',  limit: limits.k529, color: '#9b59b6', note: 'Annual gift tax exclusion' }
+                { key: 'Roth IRA',           limit: limits.ira,  color: '#e74c3c', note: `${limits.label} IRA limit`,     isManual: true  },
+                { key: '401(k)',              limit: limits.k401, color: '#f39c12', note: `${limits.label} 401(k) limit`,  isManual: true  },
+                { key: '529 College Saving',  limit: limits.k529, color: '#9b59b6', note: 'Annual gift tax exclusion',     isManual: false }
             ];
 
-            const totalManual = accounts.reduce((s, a) => s + (manual[a.key] || 0), 0);
+            const totalAuto   = acctTotals['529 College Saving'] || 0;
+            const totalManual = (manual['Roth IRA'] || 0) + (manual['401(k)'] || 0);
+            const grandTotal  = totalAuto + totalManual;
 
-            const items = accounts.map(({ key, limit, color, note }) => {
-                const contributed = manual[key] || 0;
+            const items = accounts.map(({ key, limit, color, note, isManual }) => {
+                const contributed = isManual
+                    ? (manual[key] || 0)
+                    : (acctTotals[key] || 0);
+                const txnCount    = isManual ? null : (acctTxnCount[key] || 0);
                 const pct         = Math.min(100, (contributed / limit) * 100);
                 const remaining   = Math.max(0, limit - contributed);
                 const overLimit   = contributed > limit;
                 const inputId     = 'contrib_' + key.replace(/[^a-z0-9]/gi, '_');
+
+                const sourceRow = isManual
+                    ? `<div style="margin-bottom:8px;">
+                           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                               <span style="font-size:0.78rem;color:var(--text-color-secondary);">Your ${year} contribution:</span>
+                               <span style="font-size:0.82rem;font-weight:700;color:var(--text-color-secondary);">Limit: ${formatCurrency(limit)}</span>
+                           </div>
+                           <input id="${inputId}" type="number" min="0" step="100"
+                               value="${contributed || ''}"
+                               placeholder="e.g. 4000"
+                               onchange="saveManualContribution('${key}', this.value)"
+                               style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.95rem;font-weight:700;box-sizing:border-box;">
+                           <div style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:3px;">✏️ Manual entry — snapshot-based account</div>
+                       </div>`
+                    : `<div style="margin-bottom:8px;">
+                           <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
+                               <div style="font-size:1.2rem;font-weight:800;">${formatCurrency(contributed)}</div>
+                               <div style="font-size:0.82rem;color:var(--text-color-secondary);">of ${formatCurrency(limit)}</div>
+                           </div>
+                           <div style="font-size:0.7rem;color:var(--text-color-secondary);">📊 ${txnCount} BUY transaction${txnCount !== 1 ? 's' : ''} in ${year} (auto)</div>
+                       </div>`;
+
                 return `
                 <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid ${color};border-radius:12px;padding:16px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                         <div style="font-weight:700;font-size:0.9rem;">${key}</div>
                         <div style="font-size:0.7rem;color:var(--text-color-secondary);">${year} IRS Limit</div>
                     </div>
-                    <div style="font-size:0.7rem;color:var(--text-color-secondary);margin-bottom:10px;">${note}</div>
-                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
-                        <span style="font-size:0.8rem;color:var(--text-color-secondary);">$</span>
-                        <input id="${inputId}" type="number" min="0" step="100"
-                            value="${contributed || ''}"
-                            placeholder="Enter your ${year} contribution..."
-                            onchange="saveManualContribution('${key}', this.value)"
-                            style="flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.88rem;font-weight:600;">
-                        <span style="font-size:0.78rem;color:var(--text-color-secondary);white-space:nowrap;">of ${formatCurrency(limit)}</span>
-                    </div>
+                    <div style="font-size:0.7rem;color:var(--text-color-secondary);margin-bottom:8px;">${note}</div>
+                    ${sourceRow}
                     <div style="background:var(--bg-secondary,#f0f2f5);border-radius:999px;height:8px;overflow:hidden;margin-bottom:6px;">
                         <div style="height:100%;width:${pct}%;background:${overLimit ? '#e74c3c' : color};border-radius:999px;transition:width 0.4s ease;"></div>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:0.78rem;">
-                        <span style="font-weight:700;color:${contributed > 0 ? color : 'var(--text-color-secondary)'};">${pct.toFixed(1)}% used</span>
-                        <span style="color:var(--text-color-secondary);">${contributed === 0 ? 'Enter your contribution above' : overLimit ? '⚠️ Over IRS limit!' : formatCurrency(remaining) + ' remaining'}</span>
+                        <span style="font-weight:700;color:${contributed > 0 ? color : 'var(--text-color-secondary)'};">${contributed > 0 ? pct.toFixed(1) + '% used' : isManual ? 'Enter amount above' : 'No ' + year + ' transactions'}</span>
+                        <span style="color:var(--text-color-secondary);">${contributed === 0 ? '' : overLimit ? '⚠️ Over IRS limit!' : formatCurrency(remaining) + ' remaining'}</span>
                     </div>
                 </div>`;
             });
 
-            // Summary card
             items.unshift(`
                 <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid #3498db;border-radius:12px;padding:16px;">
                     <div style="font-weight:700;font-size:0.9rem;margin-bottom:8px;">💰 Total Contributions in ${year}</div>
-                    <div style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(totalManual)}</div>
-                    <div style="font-size:0.75rem;color:var(--text-color-secondary);margin-top:6px;line-height:1.5;">Enter your actual contributions<br>in each account box to track progress.</div>
+                    <div style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(grandTotal)}</div>
+                    <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:6px;line-height:1.6;">
+                        401(k) + Roth IRA: manual entry<br>529: auto from BUY transactions
+                    </div>
                 </div>`);
 
             grid.innerHTML = items.join('');
