@@ -1651,7 +1651,20 @@
             autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 300;
         }
 
+        function getIrsLimits() {
+            const bracket = localStorage.getItem('userAgeBracket') || 'under50';
+            if (bracket === '60to63') return { ira: 8000, k401: 34250, k529: 18000, label: 'Age 60–63' };
+            if (bracket === '50to59') return { ira: 8000, k401: 30500, k529: 18000, label: 'Age 50–59 / 64+' };
+            return { ira: 7000, k401: 23000, k529: 18000, label: 'Under 50' };
+        }
+
         function saveSettings() {
+            // Save age bracket
+            const ageBracket = document.getElementById('ageBracketSelect')?.value;
+            if (ageBracket) {
+                localStorage.setItem('userAgeBracket', ageBracket);
+                renderContributionTracker(); // refresh limits immediately
+            }
             FINNHUB_API_KEY = document.getElementById('finnhubApiKeyInput').value.trim();
             ALPHA_VANTAGE_API_KEY = document.getElementById('alphaVantageApiKeyInput').value.trim();
             FMP_API_KEY = document.getElementById('fmpApiKeyInput').value.trim();
@@ -2475,6 +2488,10 @@
 
         // --- Settings Modal (Unchanged from uploaded file, except for sign out button) ---
         function openSettingsModal() {
+            // Load saved age bracket
+            const saved = localStorage.getItem('userAgeBracket') || 'under50';
+            const sel = document.getElementById('ageBracketSelect');
+            if (sel) sel.value = saved;
             document.getElementById('finnhubApiKeyInput').value = FINNHUB_API_KEY;
             document.getElementById('alphaVantageApiKeyInput').value = ALPHA_VANTAGE_API_KEY;
             document.getElementById('fmpApiKeyInput').value = FMP_API_KEY; 
@@ -4037,7 +4054,9 @@
             holdings.forEach(h => {
                 const acct = h.accountType || 'Unknown';
                 if (!accounts[acct]) accounts[acct] = { value: 0, cost: 0, count: 0 };
-                const val  = h.totalShares * (h.currentPrice || 0);
+                // For 401k/529, no live price is fetched — use avg cost as proxy for current value
+                const effectivePrice = h.currentPrice || h.averagePurchasePrice || 0;
+                const val  = h.totalShares * effectivePrice;
                 const cost = h.totalCost || 0;
                 accounts[acct].value += val;
                 accounts[acct].cost  += cost;
@@ -4088,73 +4107,81 @@
         }
 
         // ── 2. Annual Contribution Tracker ──────────────────────────
-        const ROTH_IRA_LIMIT   = 7000;
-        const IRA_LIMIT        = 7000;
-        const K401_LIMIT       = 23000;
-        const K529_LIMIT       = 18000; // annual gift tax exclusion as proxy
+        // IRS limits are dynamic — see getIrsLimits() which reads user's age bracket from Settings
+        // These are just fallback defaults (under-50 standard limits)
+        const DEFAULT_IRA_LIMIT  = 7000;
+        const DEFAULT_K401_LIMIT = 23000;
+        const DEFAULT_K529_LIMIT = 18000;
+
+        const CONTRIB_STORAGE_KEY = 'manualContributions2026';
+
+        function getManualContributions() {
+            try {
+                return JSON.parse(localStorage.getItem(CONTRIB_STORAGE_KEY) || '{}');
+            } catch { return {}; }
+        }
+
+        function saveManualContribution(account, amount) {
+            const data = getManualContributions();
+            data[account] = parseFloat(amount) || 0;
+            localStorage.setItem(CONTRIB_STORAGE_KEY, JSON.stringify(data));
+            renderContributionTracker();
+        }
 
         function renderContributionTracker() {
             const grid = document.getElementById('contributionTrackerGrid');
             if (!grid) return;
 
             const year = new Date().getFullYear();
-            const txns = (portfolioData.transactions || []).filter(t => {
-                const d = new Date(t.date);
-                return d.getFullYear() === year && t.transactionType === 'BUY';
-            });
+            const manual = getManualContributions();
 
-            const acctTotals = {};
-            txns.forEach(t => {
-                const acct = t.accountType || 'Unknown';
-                if (!acctTotals[acct]) acctTotals[acct] = 0;
-                acctTotals[acct] += (parseFloat(t.shares) || 0) * (parseFloat(t.price) || 0);
-            });
+            const limits = getIrsLimits();
+            const accounts = [
+                { key: 'Roth IRA',           limit: limits.ira,  color: '#e74c3c', note: `${limits.label} IRA limit` },
+                { key: '401(k)',              limit: limits.k401, color: '#f39c12', note: `${limits.label} 401(k) limit` },
+                { key: '529 College Saving',  limit: limits.k529, color: '#9b59b6', note: 'Annual gift tax exclusion' }
+            ];
 
-            const limits = {
-                'Roth IRA':           ROTH_IRA_LIMIT,
-                '401(k)':             K401_LIMIT,
-                '529 College Saving': K529_LIMIT
-            };
+            const totalManual = accounts.reduce((s, a) => s + (manual[a.key] || 0), 0);
 
-            const acctColors = {
-                'Roth IRA':           '#e74c3c',
-                '401(k)':             '#f39c12',
-                '529 College Saving': '#9b59b6'
-            };
-
-            const items = Object.entries(limits).map(([acct, limit]) => {
-                const contributed = acctTotals[acct] || 0;
+            const items = accounts.map(({ key, limit, color, note }) => {
+                const contributed = manual[key] || 0;
                 const pct         = Math.min(100, (contributed / limit) * 100);
                 const remaining   = Math.max(0, limit - contributed);
-                const color       = acctColors[acct] || '#3498db';
                 const overLimit   = contributed > limit;
+                const inputId     = 'contrib_' + key.replace(/[^a-z0-9]/gi, '_');
                 return `
                 <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid ${color};border-radius:12px;padding:16px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <div style="font-weight:700;font-size:0.9rem;">${acct}</div>
-                        <div style="font-size:0.75rem;font-weight:700;color:var(--text-color-secondary);">${year} Limit</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <div style="font-weight:700;font-size:0.9rem;">${key}</div>
+                        <div style="font-size:0.7rem;color:var(--text-color-secondary);">${year} IRS Limit</div>
                     </div>
-                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                        <div style="font-size:1.2rem;font-weight:800;">${formatCurrency(contributed)}</div>
-                        <div style="font-size:0.85rem;color:var(--text-color-secondary);">of ${formatCurrency(limit)}</div>
+                    <div style="font-size:0.7rem;color:var(--text-color-secondary);margin-bottom:10px;">${note}</div>
+                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+                        <span style="font-size:0.8rem;color:var(--text-color-secondary);">$</span>
+                        <input id="${inputId}" type="number" min="0" step="100"
+                            value="${contributed || ''}"
+                            placeholder="Enter your ${year} contribution..."
+                            onchange="saveManualContribution('${key}', this.value)"
+                            style="flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.88rem;font-weight:600;">
+                        <span style="font-size:0.78rem;color:var(--text-color-secondary);white-space:nowrap;">of ${formatCurrency(limit)}</span>
                     </div>
                     <div style="background:var(--bg-secondary,#f0f2f5);border-radius:999px;height:8px;overflow:hidden;margin-bottom:6px;">
                         <div style="height:100%;width:${pct}%;background:${overLimit ? '#e74c3c' : color};border-radius:999px;transition:width 0.4s ease;"></div>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:0.78rem;">
-                        <span style="font-weight:700;color:${color};">${pct.toFixed(1)}% used</span>
-                        <span style="color:var(--text-color-secondary);">${overLimit ? '⚠️ Over limit!' : formatCurrency(remaining) + ' remaining'}</span>
+                        <span style="font-weight:700;color:${contributed > 0 ? color : 'var(--text-color-secondary)'};">${pct.toFixed(1)}% used</span>
+                        <span style="color:var(--text-color-secondary);">${contributed === 0 ? 'Enter your contribution above' : overLimit ? '⚠️ Over IRS limit!' : formatCurrency(remaining) + ' remaining'}</span>
                     </div>
                 </div>`;
             });
 
-            // Also show total contributed this year across all accounts
-            const totalContrib = Object.values(acctTotals).reduce((s, v) => s + v, 0);
+            // Summary card
             items.unshift(`
                 <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid #3498db;border-radius:12px;padding:16px;">
-                    <div style="font-weight:700;font-size:0.9rem;margin-bottom:8px;">💰 Total Invested in ${year}</div>
-                    <div style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(totalContrib)}</div>
-                    <div style="font-size:0.8rem;color:var(--text-color-secondary);margin-top:4px;">${txns.length} buy transaction${txns.length !== 1 ? 's' : ''} this year</div>
+                    <div style="font-weight:700;font-size:0.9rem;margin-bottom:8px;">💰 Total Contributions in ${year}</div>
+                    <div style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(totalManual)}</div>
+                    <div style="font-size:0.75rem;color:var(--text-color-secondary);margin-top:6px;line-height:1.5;">Enter your actual contributions<br>in each account box to track progress.</div>
                 </div>`);
 
             grid.innerHTML = items.join('');
@@ -4369,6 +4396,15 @@
             <div class="form-group">
                 <label for="alphaVantageApiKeyInput">Alpha Vantage API Key</label>
                 <input type="text" id="alphaVantageApiKeyInput" placeholder="Enter your Alpha Vantage API Key">
+            </div>
+            <div class="form-group">
+                <label for="ageBracketSelect">Your Age Bracket (for IRS contribution limits)</label>
+                <select id="ageBracketSelect">
+                    <option value="under50">Under 50 — Standard limits</option>
+                    <option value="50to59">50–59 or 64+ — Catch-up eligible (+$1k IRA / +$7.5k 401k)</option>
+                    <option value="60to63">60–63 — Higher catch-up (+$1k IRA / +$11.25k 401k)</option>
+                </select>
+                <small>Used by the Annual Contribution Tracker to show correct IRS limits.</small>
             </div>
             <div class="form-group">
                 <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
