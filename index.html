@@ -1652,11 +1652,16 @@
         }
 
         function getIrsLimits() {
+            // 2026 IRS Contribution Limits
+            // Roth IRA: $7,500 base + $1,100 catch-up (50+) = $8,600
+            // 401(k):   $23,500 base + $7,500 catch-up (50-59/64+) = $31,000
+            //           Special super catch-up for age 60-63: +$11,250 = $34,750
+            // 529:      $19,000 annual gift tax exclusion
             const bracket = localStorage.getItem('userAgeBracket') || 'under50';
             console.log('Age bracket:', bracket);
-            if (bracket === '60to63') return { ira: 8000, k401: 34250, k529: 18000, label: 'Age 60–63' };
-            if (bracket === '50to59') return { ira: 8000, k401: 30500, k529: 18000, label: 'Age 50–59/64+' };
-            return { ira: 7000, k401: 23000, k529: 18000, label: 'Under 50' };
+            if (bracket === '60to63') return { ira: 8600, k401: 34750, k529: 19000, label: 'Age 60–63' };
+            if (bracket === '50to59') return { ira: 8600, k401: 31000, k529: 19000, label: 'Age 50–59/64+' };
+            return { ira: 7500, k401: 23500, k529: 19000, label: 'Under 50' };
         }
 
         function saveSettings() {
@@ -3044,7 +3049,10 @@
                 renderAllTransactions();
                 renderAccountBreakdown();
                 renderContributionTracker();
-                filterTransactions(); // refresh search results too
+                filterTransactions();
+                initMonthlyChartYears();
+                renderMonthlyChart();
+                checkAlerts401k();
             } finally {
                 isUpdatingDisplay = false;
             }
@@ -4111,10 +4119,10 @@
 
         // ── 2. Annual Contribution Tracker ──────────────────────────
         // IRS limits are dynamic — see getIrsLimits() which reads user's age bracket from Settings
-        // These are just fallback defaults (under-50 standard limits)
-        const DEFAULT_IRA_LIMIT  = 7000;
-        const DEFAULT_K401_LIMIT = 23000;
-        const DEFAULT_K529_LIMIT = 18000;
+        // These are just fallback defaults (under-50, 2026 limits)
+        const DEFAULT_IRA_LIMIT  = 7500;
+        const DEFAULT_K401_LIMIT = 23500;
+        const DEFAULT_K529_LIMIT = 19000;
 
         const CONTRIB_STORAGE_KEY = 'manualContributions2026';
 
@@ -4305,6 +4313,211 @@
         window.toggleAccountBreakdown   = toggleAccountBreakdown;
         window.toggleContributionTracker = toggleContributionTracker;
 
+
+        // ══════════════════════════════════════════════════════════
+        //  MONTHLY INVESTMENT CHART
+        // ══════════════════════════════════════════════════════════
+        let monthlyChartInstance = null;
+
+        function initMonthlyChartYears() {
+            const sel = document.getElementById('monthlyChartYear');
+            if (!sel) return;
+            const txns = portfolioData.transactions || [];
+            const years = [...new Set(txns.map(t => new Date(t.date).getFullYear()))].sort((a,b) => b-a);
+            if (!years.includes(new Date().getFullYear())) years.unshift(new Date().getFullYear());
+            sel.innerHTML = years.map(y => `<option value="${y}" ${y === new Date().getFullYear() ? 'selected' : ''}>${y}</option>`).join('');
+        }
+
+        function renderMonthlyChart() {
+            const year    = parseInt(document.getElementById('monthlyChartYear')?.value || new Date().getFullYear());
+            const account = document.getElementById('monthlyChartAccount')?.value || '';
+            const canvas  = document.getElementById('monthlyInvestmentChart');
+            const summary = document.getElementById('monthlyChartSummary');
+            if (!canvas) return;
+
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const buyData  = new Array(12).fill(0);
+            const sellData = new Array(12).fill(0);
+
+            (portfolioData.transactions || []).forEach(t => {
+                const d = new Date(t.date);
+                if (d.getFullYear() !== year) return;
+                if (account && t.accountType !== account) return;
+                const m   = d.getMonth();
+                const amt = (parseFloat(t.shares) || 0) * (parseFloat(t.price) || 0);
+                if ((t.transactionType || '').toUpperCase() === 'BUY')  buyData[m]  += amt;
+                if ((t.transactionType || '').toUpperCase() === 'SELL') sellData[m] += amt;
+            });
+
+            if (monthlyChartInstance) { monthlyChartInstance.destroy(); monthlyChartInstance = null; }
+
+            const isDark   = document.body.classList.contains('dark-mode');
+            const gridClr  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+            const labelClr = isDark ? '#ccc' : '#555';
+
+            monthlyChartInstance = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: 'Bought',
+                            data: buyData,
+                            backgroundColor: 'rgba(39,174,96,0.75)',
+                            borderColor: 'rgba(39,174,96,1)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        },
+                        {
+                            label: 'Sold',
+                            data: sellData,
+                            backgroundColor: 'rgba(231,76,60,0.6)',
+                            borderColor: 'rgba(231,76,60,1)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { grid: { color: gridClr }, ticks: { color: labelClr } },
+                        y: { grid: { color: gridClr }, ticks: { color: labelClr, callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v) } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: labelClr } },
+                        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` } }
+                    }
+                }
+            });
+
+            // Summary stats
+            const totalBought = buyData.reduce((s,v) => s+v, 0);
+            const totalSold   = sellData.reduce((s,v) => s+v, 0);
+            const activeMons  = buyData.filter(v => v > 0).length;
+            const avgPerMonth = activeMons > 0 ? totalBought / activeMons : 0;
+            const bestMonth   = months[buyData.indexOf(Math.max(...buyData))];
+            if (summary) summary.innerHTML = `
+                <span>💰 Total bought: <strong>${formatCurrency(totalBought)}</strong></span>
+                <span>📤 Total sold: <strong>${formatCurrency(totalSold)}</strong></span>
+                <span>📊 Avg/active month: <strong>${formatCurrency(avgPerMonth)}</strong></span>
+                <span>🏆 Most active: <strong>${bestMonth}</strong></span>
+            `;
+        }
+
+        window.renderMonthlyChart = renderMonthlyChart;
+        window.initMonthlyChartYears = initMonthlyChartYears;
+
+        // ══════════════════════════════════════════════════════════
+        //  PRICE ALERTS (401k App)
+        // ══════════════════════════════════════════════════════════
+        const ALERTS_KEY = 'portfolioAlerts401k';
+
+        function getAlerts() {
+            try { return JSON.parse(localStorage.getItem(ALERTS_KEY) || '[]'); } catch { return []; }
+        }
+
+        function saveAlerts(alerts) {
+            localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts));
+        }
+
+        function openAlertsModal() {
+            document.getElementById('alertsModal401k').style.display = 'flex';
+            renderAlertsModal();
+        }
+
+        function closeAlertsModal() {
+            document.getElementById('alertsModal401k').style.display = 'none';
+        }
+
+        function renderAlertsModal() {
+            const alerts  = getAlerts();
+            const holdings = calculateHoldingsAndCash().filter(h => h.currentPrice > 0);
+            const list    = document.getElementById('alertsList401k');
+            const form    = document.getElementById('alertFormSection');
+
+            // Populate symbol dropdown
+            const symSel = document.getElementById('alertSymbolSel');
+            if (symSel) {
+                symSel.innerHTML = '<option value="">Select symbol...</option>' +
+                    holdings.map(h => `<option value="${h.symbol}">${h.symbol} — ${formatCurrency(h.currentPrice)}</option>`).join('');
+            }
+
+            if (!list) return;
+            if (alerts.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-color-secondary);text-align:center;padding:16px;">No alerts set. Add one below.</p>';
+            } else {
+                list.innerHTML = alerts.map((a, i) => {
+                    const holding = holdings.find(h => h.symbol === a.symbol);
+                    const curPrice = holding?.currentPrice || 0;
+                    const triggered = a.type === 'above' ? curPrice >= a.price : curPrice <= a.price;
+                    return `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color);gap:10px;flex-wrap:wrap;">
+                        <div>
+                            <span style="font-weight:700;">${a.symbol}</span>
+                            <span style="font-size:0.82rem;color:var(--text-color-secondary);margin-left:8px;">${a.type === 'above' ? '📈 Above' : '📉 Below'} ${formatCurrency(a.price)}</span>
+                            ${triggered ? '<span style="font-size:0.75rem;font-weight:700;color:var(--positive-color);margin-left:6px;">⚡ TRIGGERED</span>' : ''}
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <span style="font-size:0.78rem;color:var(--text-color-secondary);">Current: ${formatCurrency(curPrice)}</span>
+                            <button onclick="deleteAlert401k(${i})" style="padding:4px 10px;border-radius:6px;border:none;background:rgba(231,76,60,0.15);color:#e74c3c;font-size:0.78rem;font-weight:700;cursor:pointer;">Delete</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+        }
+
+        function addAlert401k() {
+            const symbol = document.getElementById('alertSymbolSel')?.value;
+            const price  = parseFloat(document.getElementById('alertPriceInput')?.value);
+            const type   = document.getElementById('alertTypeSel')?.value;
+            if (!symbol || isNaN(price) || price <= 0) {
+                alert('Please select a symbol and enter a valid price.'); return;
+            }
+            const alerts = getAlerts();
+            alerts.push({ symbol, price, type, createdAt: new Date().toISOString() });
+            saveAlerts(alerts);
+            renderAlertsModal();
+            document.getElementById('alertPriceInput').value = '';
+        }
+
+        function deleteAlert401k(index) {
+            const alerts = getAlerts();
+            alerts.splice(index, 1);
+            saveAlerts(alerts);
+            renderAlertsModal();
+        }
+
+        function checkAlerts401k() {
+            const alerts   = getAlerts();
+            const holdings = calculateHoldingsAndCash();
+            alerts.forEach(a => {
+                const h = holdings.find(h => h.symbol === a.symbol);
+                if (!h || !h.currentPrice) return;
+                const triggered = a.type === 'above' ? h.currentPrice >= a.price : h.currentPrice <= a.price;
+                if (triggered && !a.notified) {
+                    a.notified = true;
+                    console.log(`🔔 Alert: ${a.symbol} is ${a.type} ${formatCurrency(a.price)} — current: ${formatCurrency(h.currentPrice)}`);
+                    // Show in-app notification
+                    const badge = document.getElementById('backupStatusBadge');
+                    if (badge) {
+                        badge.textContent = `🔔 ${a.symbol} hit ${formatCurrency(a.price)}!`;
+                        badge.className = 'backup-status ok';
+                        setTimeout(() => { badge.textContent = ''; badge.className = 'backup-status'; }, 10000);
+                    }
+                }
+            });
+            saveAlerts(alerts);
+        }
+
+        window.openAlertsModal   = openAlertsModal;
+        window.closeAlertsModal  = closeAlertsModal;
+        window.addAlert401k      = addAlert401k;
+        window.deleteAlert401k   = deleteAlert401k;
+        window.checkAlerts401k   = checkAlerts401k;
+
         window.filterChart = filterChart;
         window.toggleAddForm = toggleAddForm;
         window.toggleTransactionFields = toggleTransactionFields;
@@ -4442,9 +4655,9 @@
             <div class="form-group">
                 <label for="ageBracketSelect">Your Age Bracket (for IRS contribution limits)</label>
                 <select id="ageBracketSelect">
-                    <option value="under50">Under 50 — Standard limits</option>
-                    <option value="50to59">50–59 or 64+ — Catch-up eligible (+$1k IRA / +$7.5k 401k)</option>
-                    <option value="60to63">60–63 — Higher catch-up (+$1k IRA / +$11.25k 401k)</option>
+                    <option value="under50">Under 50 — IRA $7,500 / 401k $23,500</option>
+                    <option value="50to59">50–59 or 64+ — IRA $8,600 / 401k $31,000</option>
+                    <option value="60to63">60–63 — IRA $8,600 / 401k $34,750 (super catch-up)</option>
                 </select>
                 <small>Used by the Annual Contribution Tracker to show correct IRS limits.</small>
             </div>
@@ -4609,6 +4822,7 @@
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" id="refreshNowBtn" onclick="refreshAllPrices(true)">Refresh Now</button>
             <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
+            <button type="button" class="btn" onclick="openAlertsModal()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;border:none;">🔔 Price Alerts</button>
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
             <span class="price-mode-label">Stock/ETF Price Source:</span>
@@ -4624,6 +4838,27 @@
             <button id="toggleBackupBtn401" onclick="toggleAutoBackup401()" style="padding:8px 16px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-primary);font-weight:700;font-size:0.85rem;cursor:pointer;">⏸️ Pause Auto-Backup</button>
             <span id="backupStatusBadge" class="backup-status"></span>
         </div>
+        <!-- Monthly Investment Chart -->
+        <div class="card-panel" style="margin-bottom:24px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+                <h3 style="margin:0;font-size:1rem;font-weight:700;">📅 Monthly Investment Activity</h3>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <select id="monthlyChartYear" onchange="renderMonthlyChart()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.85rem;"></select>
+                    <select id="monthlyChartAccount" onchange="renderMonthlyChart()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.85rem;">
+                        <option value="">All Accounts</option>
+                        <option value="Regular Brokerage">Regular Brokerage</option>
+                        <option value="Roth IRA">Roth IRA</option>
+                        <option value="401(k)">401(k)</option>
+                        <option value="529 College Saving">529 College Saving</option>
+                    </select>
+                </div>
+            </div>
+            <div style="position:relative;height:260px;">
+                <canvas id="monthlyInvestmentChart"></canvas>
+            </div>
+            <div id="monthlyChartSummary" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color);font-size:0.82rem;color:var(--text-color-secondary);"></div>
+        </div>
+
         <div class="charts-section">
             <div class="chart-container">
                 <h3>Portfolio Performance History</h3>
@@ -4828,6 +5063,39 @@
       </table>
     </div>
     <p id="snapshotNote" style="font-size:0.75rem;color:var(--text-secondary);margin-top:12px;">Prices shown are from the last refresh. Click Refresh Now to get latest prices first.</p>
+  </div>
+</div>
+
+
+<!-- Price Alerts Modal (401k) -->
+<div id="alertsModal401k" class="modal-overlay" style="display:none;">
+  <div class="modal-content" style="max-width:560px;width:96%;max-height:85vh;overflow-y:auto;">
+    <button class="modal-close-btn" onclick="closeAlertsModal()">×</button>
+    <h3>🔔 Price Alerts</h3>
+    <p style="font-size:0.82rem;color:var(--text-color-secondary);margin-bottom:16px;">Get notified when a holding crosses your target price. Alerts are checked on every refresh.</p>
+    <div id="alertsList401k" style="margin-bottom:20px;"></div>
+    <div id="alertFormSection" style="border-top:1px solid var(--border-color);padding-top:16px;">
+        <h4 style="font-size:0.9rem;font-weight:700;margin-bottom:12px;">Add New Alert</h4>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="flex:2;min-width:140px;">
+                <label style="font-size:0.78rem;font-weight:600;color:var(--text-color-secondary);display:block;margin-bottom:4px;">Symbol</label>
+                <select id="alertSymbolSel" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.88rem;"></select>
+            </div>
+            <div style="flex:1;min-width:100px;">
+                <label style="font-size:0.78rem;font-weight:600;color:var(--text-color-secondary);display:block;margin-bottom:4px;">Type</label>
+                <select id="alertTypeSel" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.88rem;">
+                    <option value="above">📈 Rises above</option>
+                    <option value="below">📉 Falls below</option>
+                </select>
+            </div>
+            <div style="flex:1;min-width:100px;">
+                <label style="font-size:0.78rem;font-weight:600;color:var(--text-color-secondary);display:block;margin-bottom:4px;">Target Price</label>
+                <input type="number" id="alertPriceInput" min="0" step="0.01" placeholder="e.g. 150.00"
+                    style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);font-size:0.88rem;box-sizing:border-box;">
+            </div>
+            <button onclick="addAlert401k()" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#27ae60,#2ecc71);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;white-space:nowrap;">+ Add Alert</button>
+        </div>
+    </div>
   </div>
 </div>
 
