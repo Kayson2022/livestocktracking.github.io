@@ -524,6 +524,96 @@
 </style>
   <!-- EmailJS for auto backup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<style>
+
+/* ══════════════════════════════════════════════════════════
+   MOBILE RESPONSIVENESS — 401k App
+   ══════════════════════════════════════════════════════════ */
+
+@media (max-width: 480px) {
+    .container { padding: 10px !important; }
+    .header h1 { font-size: 1.1rem !important; }
+
+    /* Stats grid — 2 cols */
+    .stats-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; }
+    .stat-card { padding: 14px 10px !important; }
+    .stat-value { font-size: 1.1em !important; }
+
+    /* Account & contribution grids */
+    #accountBreakdownGrid { grid-template-columns: 1fr !important; }
+    #contributionTrackerGrid { grid-template-columns: 1fr !important; }
+
+    /* Holdings list */
+    .investment-item { padding: 12px !important; }
+    .investment-header { flex-wrap: wrap; gap: 6px; }
+
+    /* Refresh buttons */
+    .refresh-button-container {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 7px !important;
+    }
+    .refresh-button-container .btn { width: 100% !important; font-size: 0.78rem !important; padding: 8px !important; }
+
+    /* Price mode toggle */
+    .price-mode-toggle { flex-wrap: wrap; gap: 5px; }
+    .price-mode-btn { font-size: 0.75rem !important; padding: 6px 10px !important; }
+
+    /* Charts */
+    .charts-section { gap: 14px !important; }
+    .chart-container { padding: 12px !important; }
+    .chart-wrapper { height: 220px !important; }
+    .chart-filters { gap: 4px !important; flex-wrap: wrap; }
+    .chart-filter-btn { padding: 5px 8px !important; font-size: 0.72rem !important; }
+
+    /* Monthly investment chart */
+    #monthlyInvestmentChart { height: 200px !important; }
+
+    /* Forms */
+    .form-group { margin-bottom: 10px !important; }
+    .controls-bar { flex-direction: column; gap: 8px !important; }
+    .controls-bar select, .controls-bar input { width: 100% !important; }
+
+    /* Transaction search */
+    #transactionsTab > div:first-child {
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+    #txnSearchInput, #txnAccountFilter, #txnTypeFilter {
+        width: 100% !important;
+    }
+
+    /* Modals */
+    .modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-radius: 18px 18px 0 0 !important;
+        padding: 18px !important;
+    }
+    .modal-overlay { align-items: flex-end !important; }
+
+    /* Portfolio snapshot */
+    #portfolioSnapshotModal .modal-content { padding: 14px !important; }
+    #snapshotTableBody td, #snapshotTableBody th { font-size: 0.72rem !important; padding: 5px 4px !important; }
+
+    /* Tab links */
+    .tab-links { flex-wrap: wrap; gap: 6px; }
+    .tab-link { font-size: 0.82rem !important; padding: 7px 10px !important; }
+
+    /* Data transfer section */
+    #dataTransfer button { width: 100% !important; margin: 4px 0 !important; }
+}
+
+@media (min-width: 481px) and (max-width: 768px) {
+    .container { padding: 14px !important; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    #accountBreakdownGrid { grid-template-columns: repeat(2, 1fr) !important; }
+    #contributionTrackerGrid { grid-template-columns: repeat(2, 1fr) !important; }
+    .refresh-button-container { flex-wrap: wrap; }
+    .chart-wrapper { height: 260px !important; }
+}
+
+</style>
 </head>
 <body>
 
@@ -844,7 +934,7 @@
                 if (isAutoRefreshEnabled && !isRefreshing) { // Check if not already refreshing
                      startAutoRefresh(); 
                 } else {
-                    updateAutoRefreshButton(); updatePriceModeUI(); startAutoBackup();
+                    updateAutoRefreshButton(); updatePriceModeUI(); startAutoBackup(); updatePushBtn401k();
                 }
             }, (error) => console.error("Error listening to portfolio:", error));
 
@@ -4499,14 +4589,21 @@
                 const triggered = a.type === 'above' ? h.currentPrice >= a.price : h.currentPrice <= a.price;
                 if (triggered && !a.notified) {
                     a.notified = true;
-                    console.log(`🔔 Alert: ${a.symbol} is ${a.type} ${formatCurrency(a.price)} — current: ${formatCurrency(h.currentPrice)}`);
-                    // Show in-app notification
+                    const msg = `🔔 ${a.symbol} hit ${formatCurrency(a.price)}! Current: ${formatCurrency(h.currentPrice)}`;
+                    console.log(msg);
+                    // In-app badge
                     const badge = document.getElementById('backupStatusBadge');
                     if (badge) {
-                        badge.textContent = `🔔 ${a.symbol} hit ${formatCurrency(a.price)}!`;
+                        badge.textContent = msg;
                         badge.className = 'backup-status ok';
                         setTimeout(() => { badge.textContent = ''; badge.className = 'backup-status'; }, 10000);
                     }
+                    // Browser push
+                    const direction = a.type === 'above' ? 'rose above' : 'fell below';
+                    sendPushNotification401k(
+                        `🔔 ${a.symbol} Price Alert!`,
+                        `${a.symbol} ${direction} ${formatCurrency(a.price)}. Current: ${formatCurrency(h.currentPrice)}`
+                    );
                 }
             });
             saveAlerts(alerts);
@@ -4517,6 +4614,71 @@
         window.addAlert401k      = addAlert401k;
         window.deleteAlert401k   = deleteAlert401k;
         window.checkAlerts401k   = checkAlerts401k;
+
+
+        // ── Browser Push Notifications (401k app) ──────────────────
+        function enablePushNotifications() {
+            if (!('Notification' in window)) {
+                alert('Push notifications are not supported in this browser.');
+                return;
+            }
+            if (Notification.permission === 'granted') {
+                alert('✅ Push notifications are already enabled!');
+                updatePushBtn401k();
+                return;
+            }
+            if (Notification.permission === 'denied') {
+                alert('Notifications are blocked. Please enable them in your browser settings → Site Settings → Notifications.');
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    new Notification('Portfolio Tracker', {
+                        body: 'Price alert notifications are now active! 🔔',
+                        icon: 'https://placehold.co/64x64/6d28d9/ffffff?text=401k'
+                    });
+                    showBackupStatus('ok', '✅ Push notifications enabled!');
+                } else {
+                    showBackupStatus('fail', '❌ Notification permission denied');
+                }
+                updatePushBtn401k();
+            });
+        }
+
+        function updatePushBtn401k() {
+            const btn = document.getElementById('pushNotifBtn401k');
+            if (!btn) return;
+            if (!('Notification' in window)) {
+                btn.textContent = '🔕 Not Supported';
+                btn.disabled = true;
+            } else if (Notification.permission === 'granted') {
+                btn.textContent = '✅ Notifications On';
+                btn.style.background = 'linear-gradient(135deg,#27ae60,#2ecc71)';
+                btn.style.color = '#fff';
+                btn.style.border = 'none';
+            } else if (Notification.permission === 'denied') {
+                btn.textContent = '🚫 Blocked';
+                btn.disabled = true;
+            } else {
+                btn.textContent = '🔔 Enable Alerts';
+            }
+        }
+
+        function sendPushNotification401k(title, body) {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            try {
+                new Notification(title, {
+                    body,
+                    icon: 'https://placehold.co/64x64/6d28d9/ffffff?text=401k',
+                    tag: 'price-alert-401k',
+                    requireInteraction: true
+                });
+            } catch(e) { console.warn('Push notification failed:', e); }
+        }
+
+        window.enablePushNotifications = enablePushNotifications;
+        window.updatePushBtn401k = updatePushBtn401k;
+        window.sendPushNotification401k = sendPushNotification401k;
 
         window.filterChart = filterChart;
         window.toggleAddForm = toggleAddForm;
@@ -4823,6 +4985,7 @@
             <button type="button" class="btn" id="refreshNowBtn" onclick="refreshAllPrices(true)">Refresh Now</button>
             <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
             <button type="button" class="btn" onclick="openAlertsModal()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;border:none;">🔔 Price Alerts</button>
+            <button type="button" class="btn" id="pushNotifBtn401k" onclick="enablePushNotifications()">🔔 Enable Alerts</button>
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
             <span class="price-mode-label">Stock/ETF Price Source:</span>
