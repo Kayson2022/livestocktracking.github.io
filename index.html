@@ -5310,9 +5310,29 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 
 <!-- Contribution Calendar Widget -->
 <div id="contribCalWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
-  <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:4px;color:var(--text-color-primary);">📅 Contribution Calendar</h3>
-  <p style="font-size:0.78rem;color:var(--text-color-secondary);margin-bottom:12px;">Each square = one day. Darker = more invested that day.</p>
-  <div class="contrib-calendar" id="contribCalGrid"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">📅 Contribution Calendar</h3>
+    <div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--text-color-secondary);">
+      <span>Less</span>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--bg-color);border:1px solid var(--border-color);"></span>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:rgba(109,40,217,0.25);"></span>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:rgba(109,40,217,0.55);"></span>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:rgba(109,40,217,0.80);"></span>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:rgba(109,40,217,1.00);"></span>
+      <span>More</span>
+    </div>
+  </div>
+  <p style="font-size:0.78rem;color:var(--text-color-secondary);margin-bottom:14px;">Each square = one day. Darker purple = more invested that day. Hover for details.</p>
+  <div id="contribCalSummary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:0.82rem;"></div>
+  <div style="overflow-x:auto;">
+    <div id="contribCalOuter" style="display:flex;flex-direction:column;gap:4px;min-width:700px;">
+      <div id="contribCalMonthLabels" style="display:flex;padding-left:28px;margin-bottom:2px;font-size:0.7rem;color:var(--text-color-secondary);"></div>
+      <div style="display:flex;gap:4px;">
+        <div id="contribCalDayLabels" style="display:flex;flex-direction:column;gap:2px;padding-top:0px;font-size:0.68rem;color:var(--text-color-secondary);width:24px;flex-shrink:0;"></div>
+        <div class="contrib-calendar" id="contribCalGrid" style="display:flex;gap:2px;flex-wrap:nowrap;"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
@@ -5486,36 +5506,110 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 
   /* ── Contribution Calendar ── */
   window.buildContribCalendar = function() {
-    const grid = document.getElementById('contribCalGrid');
+    const grid        = document.getElementById('contribCalGrid');
+    const monthLabels = document.getElementById('contribCalMonthLabels');
+    const dayLabels   = document.getElementById('contribCalDayLabels');
+    const summaryEl   = document.getElementById('contribCalSummary');
     if (!grid) return;
-    const txns = (window.portfolioData && window.portfolioData.transactions) ? window.portfolioData.transactions : [];
+
+    const txns = (window.portfolioData && window.portfolioData.transactions)
+      ? window.portfolioData.transactions : [];
+
+    // Build dayMap using correct field name: transactionType
     const dayMap = {};
     txns.forEach(t => {
       if (!t.date) return;
-      const type = (t.transactionType||t.type||'').toUpperCase();
-      if (!['BUY','SELL'].includes(type)) return;
-      const d = t.date.slice(0,10);
+      const ttype = (t.transactionType || '').toUpperCase();
+      if (!['BUY','SELL'].includes(ttype)) return;
+      const d   = t.date.slice(0, 10);
       const amt = Math.abs((parseFloat(t.shares)||0) * (parseFloat(t.price)||0));
-      dayMap[d] = (dayMap[d]||0) + amt;
+      if (!dayMap[d]) dayMap[d] = { amount: 0, symbols: [] };
+      dayMap[d].amount += amt;
+      if (t.symbol && !dayMap[d].symbols.includes(t.symbol)) dayMap[d].symbols.push(t.symbol);
     });
-    const maxAmt = Math.max(...Object.values(dayMap), 1);
-    const today = new Date();
+
+    const amounts  = Object.values(dayMap).map(v => v.amount);
+    const maxAmt   = amounts.length ? Math.max(...amounts) : 1;
+    const totalAmt = amounts.reduce((s,a) => s+a, 0);
+    const activeDays = amounts.length;
+
+    // Summary stats row
+    if (summaryEl) {
+      const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n);
+      summaryEl.innerHTML = [
+        { label:'Active days', val: activeDays },
+        { label:'Total invested', val: fc2(totalAmt) },
+        { label:'Avg per active day', val: activeDays ? fc2(totalAmt/activeDays) : '$0' },
+        { label:'Biggest day', val: fc2(maxAmt) }
+      ].map(s => `<span style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;padding:5px 10px;">
+        <span style="color:var(--text-color-secondary);">${s.label}: </span>
+        <strong style="color:var(--text-color-primary);">${s.val}</strong>
+      </span>`).join('');
+    }
+
+    // Day-of-week labels (Sun=0 … Sat=6, show Mon/Wed/Fri)
+    if (dayLabels) {
+      dayLabels.innerHTML = '';
+      ['','Mon','','Wed','','Fri',''].forEach(d => {
+        const span = document.createElement('div');
+        span.style.cssText = 'height:16px;line-height:16px;font-size:0.68rem;';
+        span.textContent = d;
+        dayLabels.appendChild(span);
+      });
+    }
+
+    // Calendar start: Sunday 52 weeks ago
+    const today    = new Date(); today.setHours(0,0,0,0);
+    const calStart = new Date(today);
+    calStart.setDate(today.getDate() - today.getDay() - 51*7); // back to Sunday
+
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     grid.innerHTML = '';
-    for (let i = 364; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0,10);
-      const amt = dayMap[key] || 0;
-      const div = document.createElement('div');
-      div.className = 'contrib-day';
-      if (amt > 0) {
-        const level = amt >= maxAmt*0.75 ? 4 : amt >= maxAmt*0.5 ? 3 : amt >= maxAmt*0.2 ? 2 : 1;
-        div.classList.add('level-'+level);
-        div.title = key + ': ' + fc(amt);
-      } else {
-        div.title = key;
+    if (monthLabels) monthLabels.innerHTML = '';
+    let lastMonth = -1;
+
+    for (let w = 0; w < 52; w++) {
+      const col = document.createElement('div');
+      col.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(calStart);
+        date.setDate(calStart.getDate() + w*7 + d);
+        const key     = date.toISOString().slice(0,10);
+        const data    = dayMap[key];
+        const isFuture = date > today;
+
+        const cell = document.createElement('div');
+        cell.style.cssText = 'width:14px;height:14px;border-radius:3px;flex-shrink:0;';
+
+        if (isFuture) {
+          cell.style.background = 'transparent';
+        } else if (data && data.amount > 0) {
+          const pct   = data.amount / maxAmt;
+          const alpha = pct >= 0.75 ? 1.0 : pct >= 0.50 ? 0.80 : pct >= 0.20 ? 0.55 : 0.25;
+          cell.style.background = `rgba(109,40,217,${alpha})`;
+          cell.style.cursor = 'default';
+          const symStr = data.symbols.length ? '\n' + data.symbols.join(', ') : '';
+          cell.title = `${key}  —  ${fc(data.amount)}${symStr}`;
+        } else {
+          cell.style.background = 'var(--bg-color)';
+          cell.style.border = '1px solid var(--border-color)';
+          cell.title = key;
+        }
+        col.appendChild(cell);
       }
-      grid.appendChild(div);
+      grid.appendChild(col);
+
+      // Month label above first week of each new month
+      if (monthLabels) {
+        const weekStartDate = new Date(calStart);
+        weekStartDate.setDate(calStart.getDate() + w*7);
+        const m = weekStartDate.getMonth();
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'width:16px;flex-shrink:0;font-size:0.68rem;color:var(--text-color-secondary);overflow:visible;white-space:nowrap;';
+        if (m !== lastMonth) { wrapper.textContent = MONTHS[m]; lastMonth = m; }
+        monthLabels.appendChild(wrapper);
+      }
     }
   };
 
