@@ -6883,8 +6883,25 @@ window.rebalV2SaveGoal        = (a,field,v)=>{ const g=rLoadGoals(); if(!g[a])g[
 window.rebalV2Run = function() {
   const el=document.getElementById('rebalV2Content');
   if (!el) return;
-  el.innerHTML='<p style="color:var(--text-color-secondary);text-align:center;padding:20px;">Calculating...</p>';
-  setTimeout(()=>{ try{_rebalV2Build(el);}catch(e){el.innerHTML=`<p style="color:var(--negative-color);padding:20px;">Error: ${e.message}</p>`;console.error(e);} },30);
+  el.innerHTML='<p style="color:var(--text-color-secondary);text-align:center;padding:20px;">Loading portfolio data...</p>';
+
+  function tryBuild(attemptsLeft) {
+    const txns = window.portfolioData && window.portfolioData.transactions;
+    const hasData = txns && txns.length > 0;
+    // Also check priceCache has at least some entries
+    const hasCache = window.priceCache && Object.keys(window.priceCache).length > 0;
+    if ((!hasData || !hasCache) && attemptsLeft > 0) {
+      setTimeout(() => tryBuild(attemptsLeft - 1), 400);
+      return;
+    }
+    if (!hasData) {
+      el.innerHTML='<p style="color:var(--text-color-secondary);text-align:center;padding:20px;">No portfolio data found. Please make sure you are signed in and your data has loaded.</p>';
+      return;
+    }
+    try { _rebalV2Build(el); }
+    catch(e) { el.innerHTML=`<p style="color:var(--negative-color);padding:20px;">Error: ${e.message}</p>`; console.error(e); }
+  }
+  tryBuild(20); // poll up to 20x × 400ms = 8 seconds max
 };
 
 function _rebalV2Build(el) {
@@ -7253,7 +7270,11 @@ function openRebalV2() {
   if (!w) return;
   const isOpen=w.style.display!=='none';
   w.style.display=isOpen?'none':'block';
-  if (!isOpen){w.scrollIntoView({behavior:'smooth',block:'start'});window.rebalV2Run();}
+  if (!isOpen){
+    w.scrollIntoView({behavior:'smooth',block:'start'});
+    // Auto-run Calculate — polls until data is ready
+    window.rebalV2Run();
+  }
 }
 window.openRebalWidget=openRebalV2;
 
