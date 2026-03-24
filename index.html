@@ -5165,6 +5165,7 @@
                 <div class="tabs-nav">
                     <button class="tab-link active" onclick="showTab('investments')">Your Investments</button>
                     <button class="tab-link" onclick="showTab('transactions')">All Transactions</button>
+                    <button class="tab-link" onclick="showTab('tax'); renderTaxSummary();">🧾 Tax Summary</button>
                 </div>
                 <div id="investmentsTab" class="tab-content active">
                     <div class="controls-bar">
@@ -5206,6 +5207,11 @@
                         <span id="txnSearchCount" style="font-size:0.82rem;color:var(--text-color-secondary);font-weight:600;white-space:nowrap;"></span>
                     </div>
                     <div id="allTransactionsList"></div>
+                </div>
+
+                <!-- ── Tax Summary Tab ── -->
+                <div id="taxTab" class="tab-content">
+                  <div id="taxSummaryContent"></div>
                 </div>
             </div>
         </div>
@@ -5949,7 +5955,253 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     wireGoalTargetSave();
   }
 
-  setTimeout(injectHeaderControls, 1500);
+  /* ── Tax Summary ── */
+  window.renderTaxSummary = function() {
+    const el = document.getElementById('taxSummaryContent');
+    if (!el) return;
+
+    const txns = (window.portfolioData && window.portfolioData.transactions)
+      ? [...window.portfolioData.transactions] : [];
+    const today = new Date(); today.setHours(0,0,0,0);
+    const currentYear = today.getFullYear();
+    const selectedYear = window._taxYear || currentYear;
+
+    const fc = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+    const fcs = n => `<span style="color:${n>=0?'var(--positive-color)':'var(--negative-color)'};font-weight:700">${n>=0?'+':''}${fc(n)}</span>`;
+
+    // IRS rule: held > 365 days = long-term, ≤ 365 = short-term
+    const isLongTerm = (buyDate, sellDate) => {
+      const b = new Date(buyDate); b.setHours(0,0,0,0);
+      const s = new Date(sellDate); s.setHours(0,0,0,0);
+      return (s - b) > 365 * 24 * 60 * 60 * 1000;
+    };
+
+    // ── 1. Realized gains (SELL transactions, FIFO matching) ──
+    const sortedTxns = txns.sort((a,b) => new Date(a.date) - new Date(b.date));
+    const lots = {}; // positionKey → [{shares, price, date}]
+    const realizedRows = []; // {symbol, account, shares, buyPrice, buyDate, sellPrice, sellDate, gain, isLong}
+
+    sortedTxns.forEach(t => {
+      const type = (t.transactionType||'').toUpperCase();
+      const shares = parseFloat(t.shares); const price = parseFloat(t.price);
+      if (!t.symbol || isNaN(shares) || isNaN(price)) return;
+      const key = `${t.symbol}|||${t.accountType}`;
+
+      if (type === 'BUY') {
+        if (!lots[key]) lots[key] = [];
+        lots[key].push({ shares, price, date: t.date });
+      } else if (type === 'SELL') {
+        if (!lots[key]) lots[key] = [];
+        let toSell = shares;
+        while (toSell > 0.0001 && lots[key].length > 0) {
+          const lot = lots[key][0];
+          const used = Math.min(toSell, lot.shares);
+          realizedRows.push({
+            symbol: t.symbol, account: t.accountType,
+            shares: used,
+            buyPrice: lot.price, buyDate: lot.date,
+            sellPrice: price, sellDate: t.date,
+            gain: used * (price - lot.price),
+            isLong: isLongTerm(lot.date, t.date),
+            year: new Date(t.date).getFullYear()
+          });
+          lot.shares -= used; toSell -= used;
+          if (lot.shares < 0.0001) lots[key].shift();
+        }
+      }
+    });
+
+    // ── 2. Unrealized gains (open lots vs current price) ──
+    const unrealizedRows = [];
+    Object.entries(lots).forEach(([key, openLots]) => {
+      const [symbol, account] = key.split('|||');
+      const cached = window.priceCache && window.priceCache[symbol];
+      const currentPrice = cached?.currentPrice || cached?.manualPrice || null;
+      openLots.forEach(lot => {
+        if (lot.shares < 0.0001) return;
+        const buyDate = new Date(lot.date); buyDate.setHours(0,0,0,0);
+        const daysHeld = Math.floor((today - buyDate) / (1000*60*60*24));
+        const daysToLT = Math.max(0, 366 - daysHeld);
+        const unrealizedGL = currentPrice ? lot.shares * (currentPrice - lot.price) : null;
+        unrealizedRows.push({
+          symbol, account, shares: lot.shares,
+          buyPrice: lot.price, buyDate: lot.date,
+          currentPrice, daysHeld, daysToLT,
+          unrealizedGL,
+          isLong: daysHeld > 365
+        });
+      });
+    });
+
+    // ── 3. Totals ──
+    const thisYearRealized = realizedRows.filter(r => r.year === selectedYear);
+    const stGain  = thisYearRealized.filter(r => !r.isLong).reduce((s,r) => s+r.gain, 0);
+    const ltGain  = thisYearRealized.filter(r =>  r.isLong).reduce((s,r) => s+r.gain, 0);
+    const totalRealized = stGain + ltGain;
+
+    const urST = unrealizedRows.filter(r => !r.isLong && r.unrealizedGL !== null).reduce((s,r) => s+r.unrealizedGL, 0);
+    const urLT = unrealizedRows.filter(r =>  r.isLong && r.unrealizedGL !== null).reduce((s,r) => s+r.unrealizedGL, 0);
+
+    // ── 4. Tax estimates (simplified, US 2025 rates) ──
+    // ST = ordinary income (assume 22% bracket as middle estimate)
+    // LT = 15% for most filers, 20% for high income
+    const stTaxEst  = Math.max(0, stGain) * 0.22;
+    const ltTaxEst  = Math.max(0, ltGain) * 0.15;
+    const totalTaxEst = stTaxEst + ltTaxEst;
+
+    // ── 5. Wash sale candidates (sold at a loss within last 30 days) ──
+    const thirtyDaysAgo = new Date(today); thirtyDaysAgo.setDate(today.getDate() - 30);
+    const washSaleCandidates = realizedRows.filter(r =>
+      r.gain < 0 && new Date(r.sellDate) >= thirtyDaysAgo
+    );
+
+    // ── Build HTML ──
+    const colorGL = (n, showSign=true) => {
+      const sign = showSign && n >= 0 ? '+' : '';
+      return `<span style="color:${n>=0?'var(--positive-color)':'var(--negative-color)'};font-weight:700;">${sign}${fc(n)}</span>`;
+    };
+
+    const summaryCards = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px;">
+        <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:16px;border-left:4px solid #e74c3c;">
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Short-Term Realized</div>
+          <div style="font-size:1.4rem;font-weight:800;color:${stGain>=0?'var(--positive-color)':'var(--negative-color)'};">${stGain>=0?'+':''}${fc(stGain)}</div>
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:4px;">Est. tax ~${fc(stTaxEst)} @ 22%</div>
+        </div>
+        <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:16px;border-left:4px solid #27ae60;">
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Long-Term Realized</div>
+          <div style="font-size:1.4rem;font-weight:800;color:${ltGain>=0?'var(--positive-color)':'var(--negative-color)'};">${ltGain>=0?'+':''}${fc(ltGain)}</div>
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:4px;">Est. tax ~${fc(ltTaxEst)} @ 15%</div>
+        </div>
+        <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:16px;border-left:4px solid #f39c12;">
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Total Est. Tax Bill</div>
+          <div style="font-size:1.4rem;font-weight:800;color:var(--text-color-primary);">${fc(totalTaxEst)}</div>
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:4px;">Based on ${currentYear} sales only</div>
+        </div>
+        <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:16px;border-left:4px solid #3498db;">
+          <div style="font-size:0.72rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Unrealized (Open)</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);">ST: ${colorGL(urST)}</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);">LT: ${colorGL(urLT)}</div>
+        </div>
+      </div>`;
+
+    // Wash sale warning
+    const washSaleHTML = washSaleCandidates.length ? `
+      <div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.3);border-radius:10px;padding:14px 16px;margin-bottom:20px;">
+        <div style="font-weight:700;color:#e74c3c;margin-bottom:6px;">⚠️ Potential Wash Sale Warning (${washSaleCandidates.length} lot${washSaleCandidates.length>1?'s':''})</div>
+        <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-bottom:10px;">You sold these at a loss within the last 30 days. If you bought the same security within 30 days before or after the sale, the IRS may disallow the loss deduction (wash sale rule).</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+          <thead><tr style="border-bottom:1px solid var(--border-color);">
+            <th style="padding:5px 8px;text-align:left;color:var(--text-color-secondary);">Symbol</th>
+            <th style="padding:5px 8px;text-align:left;color:var(--text-color-secondary);">Account</th>
+            <th style="padding:5px 8px;text-align:right;color:var(--text-color-secondary);">Sold</th>
+            <th style="padding:5px 8px;text-align:right;color:var(--text-color-secondary);">Loss</th>
+          </tr></thead>
+          <tbody>${washSaleCandidates.map(r=>`
+            <tr style="border-bottom:0.5px solid var(--border-color);">
+              <td style="padding:5px 8px;font-weight:700;">${r.symbol}</td>
+              <td style="padding:5px 8px;font-size:0.75rem;">${r.account}</td>
+              <td style="padding:5px 8px;text-align:right;">${r.sellDate}</td>
+              <td style="padding:5px 8px;text-align:right;color:var(--negative-color);font-weight:700;">${fc(r.gain)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
+
+    // Open lots table — sorted by days to long-term
+    const openLotsRows = unrealizedRows
+      .filter(r => r.unrealizedGL !== null)
+      .sort((a,b) => a.daysToLT - b.daysToLT)
+      .map(r => `
+        <tr style="border-bottom:0.5px solid var(--border-color);">
+          <td style="padding:6px 8px;font-weight:700;">${r.symbol}</td>
+          <td style="padding:6px 8px;font-size:0.75rem;color:var(--text-color-secondary);">${r.account}</td>
+          <td style="padding:6px 8px;text-align:right;">${r.shares.toFixed(3)}</td>
+          <td style="padding:6px 8px;text-align:right;">${fc(r.buyPrice)}</td>
+          <td style="padding:6px 8px;text-align:right;">${r.buyDate}</td>
+          <td style="padding:6px 8px;text-align:center;">
+            <span style="padding:2px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:${r.isLong?'rgba(39,174,96,0.12)':'rgba(231,76,60,0.10)'};color:${r.isLong?'var(--positive-color)':'var(--negative-color)'};">
+              ${r.isLong ? 'Long-term' : r.daysToLT + 'd to LT'}
+            </span>
+          </td>
+          <td style="padding:6px 8px;text-align:right;">${colorGL(r.unrealizedGL)}</td>
+        </tr>`).join('');
+
+    // Realized table for this year
+    const realizedRowsHTML = thisYearRealized.length ? thisYearRealized
+      .sort((a,b) => new Date(b.sellDate) - new Date(a.sellDate))
+      .map(r => `
+        <tr style="border-bottom:0.5px solid var(--border-color);">
+          <td style="padding:6px 8px;font-weight:700;">${r.symbol}</td>
+          <td style="padding:6px 8px;font-size:0.75rem;color:var(--text-color-secondary);">${r.account}</td>
+          <td style="padding:6px 8px;text-align:right;">${r.shares.toFixed(3)}</td>
+          <td style="padding:6px 8px;text-align:right;">${fc(r.buyPrice)}</td>
+          <td style="padding:6px 8px;text-align:right;">${fc(r.sellPrice)}</td>
+          <td style="padding:6px 8px;text-align:center;">
+            <span style="padding:2px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:${r.isLong?'rgba(39,174,96,0.12)':'rgba(231,76,60,0.10)'};color:${r.isLong?'var(--positive-color)':'var(--negative-color)'};">
+              ${r.isLong ? 'Long-term' : 'Short-term'}
+            </span>
+          </td>
+          <td style="padding:6px 8px;text-align:right;">${colorGL(r.gain)}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-color-secondary);">No realized gains/losses in ${currentYear} yet.</td></tr>`;
+
+    el.innerHTML = `
+      <div style="padding:4px 0 20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+          <div>
+            <h3 style="font-size:1.05rem;font-weight:700;color:var(--text-color-primary);margin:0;">${currentYear} Tax Summary</h3>
+            <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:4px 0 0;">Estimates only — consult a tax professional. Uses FIFO cost basis. Roth IRA &amp; 401k gains are tax-advantaged and shown for reference only.</p>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${[currentYear, currentYear-1, currentYear-2].map(y => `<button onclick="window._taxYear=${y};renderTaxSummary()" style="padding:5px 12px;border-radius:999px;border:1px solid var(--border-color);background:${(window._taxYear||currentYear)===y?'var(--accent-color-1)':'var(--bg-color)'};color:${(window._taxYear||currentYear)===y?'#fff':'var(--text-color-secondary)'};font-size:0.78rem;font-weight:700;cursor:pointer;">${y}</button>`).join('')}
+          </div>
+        </div>
+
+        ${summaryCards}
+        ${washSaleHTML}
+
+        <h4 style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:10px;">Open Lots — Unrealized Gains &amp; Losses</h4>
+        <p style="font-size:0.75rem;color:var(--text-color-secondary);margin-bottom:10px;">Sorted by days until long-term status. Lots close to the 365-day mark are at the top.</p>
+        <div style="overflow-x:auto;margin-bottom:24px;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+            <thead><tr style="border-bottom:2px solid var(--border-color);">
+              <th style="padding:6px 8px;text-align:left;color:var(--text-color-secondary);">Symbol</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--text-color-secondary);">Account</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Shares</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Cost/Share</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Buy Date</th>
+              <th style="padding:6px 8px;text-align:center;color:var(--text-color-secondary);">Term</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Unrealized G/L</th>
+            </tr></thead>
+            <tbody>${openLotsRows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-color-secondary);">No open lots found.</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <h4 style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:10px;">${(window._taxYear||currentYear)} Realized Gains &amp; Losses</h4>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+            <thead><tr style="border-bottom:2px solid var(--border-color);">
+              <th style="padding:6px 8px;text-align:left;color:var(--text-color-secondary);">Symbol</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--text-color-secondary);">Account</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Shares</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Cost Basis</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Sale Price</th>
+              <th style="padding:6px 8px;text-align:center;color:var(--text-color-secondary);">Term</th>
+              <th style="padding:6px 8px;text-align:right;color:var(--text-color-secondary);">Gain / Loss</th>
+            </tr></thead>
+            <tbody>${realizedRowsHTML}</tbody>
+            <tfoot><tr style="border-top:2px solid var(--border-color);">
+              <td colspan="6" style="padding:8px;font-weight:700;">Total Realized ${(window._taxYear||currentYear)}</td>
+              <td style="padding:8px;text-align:right;">${colorGL(totalRealized)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  // Support year switching
+  window._taxYear = new Date().getFullYear();
   window.addEventListener('load', () => { setTimeout(injectHeaderControls, 800); setTimeout(initWidgets, 2000); });
 
   /* ── Today's G/L diagnostic breakdown modal ── */
