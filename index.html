@@ -5240,18 +5240,22 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <h3>🎯 Retirement Goal Tracker</h3>
   <div class="goal-inputs">
     <div>
-      <label>Target Amount ($)</label>
-      <input type="number" id="goalTarget" placeholder="e.g. 1200000" min="1000" step="1000">
+      <label>Current Invested Amount ($) <span style="font-size:0.72rem;color:var(--text-color-secondary);font-weight:400;">— auto-filled from your portfolio</span></label>
+      <input type="number" id="goalCurrent" placeholder="Auto-filled from portfolio" min="0" step="100">
     </div>
     <div>
-      <label>Expected Annual Return (%)</label>
-      <input type="number" id="goalReturn" placeholder="e.g. 7" min="0" max="30" step="0.5" value="7">
+      <label>Retirement Target ($)</label>
+      <input type="number" id="goalTarget" placeholder="e.g. 1200000" min="1000" step="1000">
     </div>
     <div>
       <label>Monthly Contribution ($)</label>
       <input type="number" id="goalMonthly" placeholder="e.g. 500" min="0" step="50" value="500">
     </div>
-    <button onclick="calcGoal()" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1),var(--accent-color-2));color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;">Calculate</button>
+    <div>
+      <label>Expected Annual Return (%)</label>
+      <input type="number" id="goalReturn" placeholder="e.g. 7" min="0" max="30" step="0.5" value="7">
+    </div>
+    <button onclick="calcGoal()" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1),var(--accent-color-2));color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;align-self:flex-end;">Calculate</button>
   </div>
   <div id="goalResult" style="display:none;">
     <div class="goal-progress-bar-bg"><div class="goal-progress-bar-fill" id="goalBar" style="width:0%"></div></div>
@@ -5260,7 +5264,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       <span id="goalPctLabel">0% of goal</span>
       <span id="goalTargetLabel">Target: $0</span>
     </div>
-    <div id="goalProjection" style="margin-top:12px;padding:12px;background:rgba(109,40,217,0.08);border-radius:10px;border:1px solid rgba(109,40,217,0.2);font-size:0.88rem;color:var(--text-color-primary);">
+    <div id="goalProjection" style="margin-top:12px;padding:12px;background:rgba(109,40,217,0.08);border-radius:10px;border:1px solid rgba(109,40,217,0.2);font-size:0.88rem;color:var(--text-color-primary);line-height:1.6;">
     </div>
   </div>
 </div>
@@ -5268,9 +5272,21 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 <!-- What-If Simulator Widget -->
 <div id="whatifWidget" class="whatif-card" style="display:none;margin:0 20px 30px;">
   <h3>🔮 What-If Simulator</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+    <div>
+      <label style="font-size:0.78rem;font-weight:600;color:var(--text-color-secondary);display:block;margin-bottom:4px;">Current Invested Amount ($) <span style="font-size:0.7rem;font-weight:400;">— auto-filled</span></label>
+      <input type="number" id="wiCurrent" placeholder="Auto-filled from portfolio" min="0" step="100"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.88rem;" oninput="runWhatIf()">
+    </div>
+    <div>
+      <label style="font-size:0.78rem;font-weight:600;color:var(--text-color-secondary);display:block;margin-bottom:4px;">Target Amount ($) <span style="font-size:0.7rem;font-weight:400;">— optional</span></label>
+      <input type="number" id="wiTarget" placeholder="e.g. 1200000" min="0" step="1000"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.88rem;" oninput="runWhatIf()">
+    </div>
+  </div>
   <div class="whatif-slider-row">
     <label>Monthly Contribution</label>
-    <input type="range" id="wiMonthly" min="0" max="3000" step="50" value="500" oninput="runWhatIf()">
+    <input type="range" id="wiMonthly" min="0" max="5000" step="50" value="500" oninput="runWhatIf()">
     <span id="wiMonthlyVal">$500</span>
   </div>
   <div class="whatif-slider-row">
@@ -5289,6 +5305,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     <div class="whatif-result-item"><div class="wlabel">Investment Gains</div><div class="wval" id="wiGains">—</div></div>
     <div class="whatif-result-item"><div class="wlabel">Return Multiple</div><div class="wval" id="wiMultiple">—</div></div>
   </div>
+  <div id="wiTargetProgress" style="display:none;margin-top:12px;padding:12px;background:rgba(109,40,217,0.08);border-radius:10px;border:1px solid rgba(109,40,217,0.2);font-size:0.88rem;color:var(--text-color-primary);line-height:1.6;"></div>
 </div>
 
 <!-- Contribution Calendar Widget -->
@@ -5324,8 +5341,23 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n);
   }
 
-  /* ── Read live portfolio value from the DOM (totalValue stat card) ── */
+  /* ── Read live portfolio value — field overrides auto-fill ── */
   function getLivePortfolioValue() {
+    // User-entered value takes priority
+    const fieldVal = parseFloat(document.getElementById('goalCurrent')?.value);
+    if (!isNaN(fieldVal) && fieldVal > 0) return fieldVal;
+    // Fall back to live stat card
+    const el = document.getElementById('totalValue');
+    if (el) {
+      const v = parseFloat(el.textContent.replace(/[^0-9.]/g,''));
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return window._enhPortfolioValue || 0;
+  }
+
+  function getWiCurrentValue() {
+    const fieldVal = parseFloat(document.getElementById('wiCurrent')?.value);
+    if (!isNaN(fieldVal) && fieldVal >= 0) return fieldVal;
     const el = document.getElementById('totalValue');
     if (el) {
       const v = parseFloat(el.textContent.replace(/[^0-9.]/g,''));
@@ -5403,26 +5435,53 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 
   /* ── What-If Simulator ── */
   window.runWhatIf = function() {
+    const current = getWiCurrentValue();
     const monthly = parseFloat(document.getElementById('wiMonthly')?.value) || 0;
     const annual  = parseFloat(document.getElementById('wiReturn')?.value)  || 7;
     const years   = parseFloat(document.getElementById('wiYears')?.value)   || 20;
+    const target  = parseFloat(document.getElementById('wiTarget')?.value)  || 0;
 
     document.getElementById('wiMonthlyVal').textContent = fc(monthly);
     document.getElementById('wiReturnVal').textContent  = annual.toFixed(1) + '%';
     document.getElementById('wiYearsVal').textContent   = years + ' yrs';
 
-    const r      = annual / 100 / 12;
-    const n      = years * 12;
-    const fv     = r > 0 ? monthly * ((Math.pow(1+r,n)-1)/r) : monthly * n;
-    const contrib = monthly * n;
-    const gains   = fv - contrib;
-    const mult    = contrib > 0 ? (fv / contrib).toFixed(2) : '0';
+    const r   = annual / 100 / 12;
+    const n   = years * 12;
+    // Future value includes current balance compounding + new contributions
+    const fvCurrent = current * Math.pow(1 + r, n);
+    const fvContrib = r > 0 ? monthly * ((Math.pow(1+r,n)-1)/r) : monthly * n;
+    const fv        = fvCurrent + fvContrib;
+    const contrib   = monthly * n;
+    const gains     = fv - contrib - current;
+    const totalIn   = contrib + current;
+    const mult      = totalIn > 0 ? (fv / totalIn).toFixed(2) : '0';
 
     const el = id => document.getElementById(id);
     if (el('wiFV'))       el('wiFV').textContent       = fc(fv);
     if (el('wiContrib'))  el('wiContrib').textContent  = fc(contrib);
     if (el('wiGains'))    el('wiGains').textContent    = fc(gains);
     if (el('wiMultiple')) el('wiMultiple').textContent = mult + 'x';
+
+    // Show target progress if a target was entered
+    const progEl = el('wiTargetProgress');
+    if (progEl) {
+      if (target > 0) {
+        progEl.style.display = 'block';
+        if (fv >= target) {
+          const yearsNeeded = (() => {
+            let v = current, m = 0;
+            while (v < target && m < n) { v = v*(1+r)+monthly; m++; }
+            return m < n ? (m/12).toFixed(1) : years;
+          })();
+          progEl.innerHTML = `✅ With these settings, you'll reach <strong>${fc(target)}</strong> in about <strong>${yearsNeeded} years</strong> — and grow to <strong>${fc(fv)}</strong> by year ${years}.`;
+        } else {
+          const gap = target - fv;
+          progEl.innerHTML = `⚠️ You'll reach <strong>${fc(fv)}</strong> in ${years} years — still <strong>${fc(gap)}</strong> short of your ${fc(target)} target. Try increasing contributions or years.`;
+        }
+      } else {
+        progEl.style.display = 'none';
+      }
+    }
   };
 
   /* ── Contribution Calendar ── */
@@ -5466,19 +5525,35 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     if (!orig || orig._patched) return;
     window.updateStats = function(stats) {
       orig.call(this, stats);
-      // Cache live value for our widgets
       window._enhPortfolioValue = stats.totalValue || 0;
+      const liveVal = Math.round(stats.totalValue || 0);
+
+      // Keep current amount fields in sync if user hasn't manually overridden them
+      const goalCurrentInput = document.getElementById('goalCurrent');
+      if (goalCurrentInput && (!goalCurrentInput._userEdited) && liveVal > 0) {
+        goalCurrentInput.value = liveVal;
+      }
+      const wiCurrentInput = document.getElementById('wiCurrent');
+      if (wiCurrentInput && (!wiCurrentInput._userEdited) && liveVal > 0) {
+        wiCurrentInput.value = liveVal;
+      }
+
       // Auto-refresh open widgets
       const goalW = document.getElementById('goalTrackerWidget');
-      if (goalW && goalW.style.display !== 'none') {
-        renderGoal();
-      }
+      if (goalW && goalW.style.display !== 'none') renderGoal();
+
       const wiW = document.getElementById('whatifWidget');
-      if (wiW && wiW.style.display !== 'none') {
-        window.runWhatIf();
-      }
+      if (wiW && wiW.style.display !== 'none') window.runWhatIf();
     };
     window.updateStats._patched = true;
+
+    // Mark fields as user-edited if they manually type a value
+    setTimeout(() => {
+      ['goalCurrent','wiCurrent'].forEach(id => {
+        const inp = document.getElementById(id);
+        if (inp) inp.addEventListener('input', () => { inp._userEdited = true; });
+      });
+    }, 2000);
   }
 
   /* ── Open Goal widget: pre-fill fields then calculate ── */
@@ -5488,26 +5563,31 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     const isOpen = w.style.display !== 'none';
     w.style.display = isOpen ? 'none' : 'block';
     if (!isOpen) {
-      // Pre-fill monthly from transaction history if field is empty / default
+      // Always sync current amount from live portfolio
+      const liveVal = window._enhPortfolioValue || (() => {
+        const el = document.getElementById('totalValue');
+        return el ? parseFloat(el.textContent.replace(/[^0-9.]/g,'')) || 0 : 0;
+      })();
+      const currentInput = document.getElementById('goalCurrent');
+      if (currentInput && liveVal > 0) currentInput.value = Math.round(liveVal);
+
+      // Pre-fill monthly from transaction history
       const monthlyInput = document.getElementById('goalMonthly');
       if (monthlyInput && (!monthlyInput.value || monthlyInput.value === '500')) {
-        const est = estimateMonthlyContrib();
-        monthlyInput.value = est;
+        monthlyInput.value = estimateMonthlyContrib();
       }
-      // Pre-fill target from localStorage if saved
+      // Restore saved target
       const targetInput = document.getElementById('goalTarget');
       const saved = localStorage.getItem('_enhGoalTarget');
       if (targetInput && saved && !targetInput.value) targetInput.value = saved;
 
-      // Auto-run if target already set
       if (targetInput && targetInput.value) {
         renderGoal();
       } else {
-        // Show prompt to enter target
         const res = document.getElementById('goalResult');
         const proj = document.getElementById('goalProjection');
         if (res) res.style.display = 'block';
-        if (proj) proj.innerHTML = '👆 Enter your retirement target above and click <strong>Calculate</strong> to see your progress.';
+        if (proj) proj.innerHTML = '👆 Enter your retirement target above and click <strong>Calculate</strong> to see your projected timeline.';
       }
       w.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -5522,19 +5602,31 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     }
   }
 
-  /* ── Open What-If widget: pre-fill slider from portfolio data then run ── */
+  /* ── Open What-If widget: pre-fill from portfolio data then run ── */
   function openWhatIfWidget() {
     const w = document.getElementById('whatifWidget');
     if (!w) return;
     const isOpen = w.style.display !== 'none';
     w.style.display = isOpen ? 'none' : 'block';
     if (!isOpen) {
+      // Sync current invested amount from live portfolio
+      const liveVal = window._enhPortfolioValue || (() => {
+        const el = document.getElementById('totalValue');
+        return el ? parseFloat(el.textContent.replace(/[^0-9.]/g,'')) || 0 : 0;
+      })();
+      const currentInput = document.getElementById('wiCurrent');
+      if (currentInput && liveVal > 0) currentInput.value = Math.round(liveVal);
+
       // Seed monthly contribution slider from real data
       const est = estimateMonthlyContrib();
       const slider = document.getElementById('wiMonthly');
-      if (slider) {
-        slider.value = Math.min(est, parseInt(slider.max));
-      }
+      if (slider) slider.value = Math.min(est, parseInt(slider.max));
+
+      // Restore saved target
+      const savedTarget = localStorage.getItem('_enhGoalTarget');
+      const wiTargetInput = document.getElementById('wiTarget');
+      if (wiTargetInput && savedTarget && !wiTargetInput.value) wiTargetInput.value = savedTarget;
+
       window.runWhatIf();
       w.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
