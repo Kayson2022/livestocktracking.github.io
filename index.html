@@ -1318,8 +1318,7 @@
             // NO FILTERING HERE: return all holdings for display/overall stats
             return calculatedHoldings;
         }
-        
-        // --- NEW FUNCTION: Calculate Portfolio Volatility (Annualized Standard Deviation) ---
+        window.calculateHoldingsAndCash = calculateHoldingsAndCash; // expose for rebalancer + other external scripts
         function calculatePortfolioVolatility(history) {
             if (!history || history.length < 2) {
                 return 0; // Not enough data points
@@ -6888,9 +6887,7 @@ window.rebalV2Run = function() {
   function tryBuild(attemptsLeft) {
     const txns = window.portfolioData && window.portfolioData.transactions;
     const hasData = txns && txns.length > 0;
-    // Also check priceCache has at least some entries
-    const hasCache = window.priceCache && Object.keys(window.priceCache).length > 0;
-    if ((!hasData || !hasCache) && attemptsLeft > 0) {
+    if (!hasData && attemptsLeft > 0) {
       setTimeout(() => tryBuild(attemptsLeft - 1), 400);
       return;
     }
