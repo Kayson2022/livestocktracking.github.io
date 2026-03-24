@@ -879,7 +879,9 @@
 
             const priceCacheDocRef = doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC);
             getDoc(priceCacheDocRef).then(docSnap => {
-                if (docSnap.exists()) {
+                // Only restore Firestore cache if we haven't already done a fresh fetch
+                // (prevents stale cache from overwriting a mode-switch refresh)
+                if (docSnap.exists() && !window._priceCacheFreshFetched) {
                     priceCache = docSnap.data();
                 }
             }).catch(e => console.error("Error loading priceCache:", e));
@@ -1903,29 +1905,36 @@
         // --- ADDED MISSING HELPER FUNCTIONS ---
         async function fetchPriceFromFinnhub(symbol) {
             if (!FINNHUB_API_KEY) return { currentPrice: null, previousClosePrice: null };
-            try {
-                const url = `https://finnhub-proxy.giolamchieu1975.workers.dev/quote?symbol=${encodeURIComponent(symbol)}`;
-                const r = await fetch(url);
+            
+            // Try the proxy first, then fall back to direct Finnhub API
+            const endpoints = [
+                `https://finnhub-proxy.giolamchieu1975.workers.dev/quote?symbol=${encodeURIComponent(symbol)}`,
+                `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_API_KEY}`
+            ];
 
-                if (!r.ok) {
-                    if (r.status === 403) {
-                        console.log(`Finnhub fetch for ${symbol} was forbidden.`);
-                    } else {
-                        console.warn(`Finnhub API returned a non-OK status for ${symbol}: ${r.status}`);
+            for (const url of endpoints) {
+                try {
+                    const r = await fetch(url);
+                    if (!r.ok) {
+                        console.warn(`Finnhub endpoint ${url.includes('proxy') ? 'proxy' : 'direct'} returned ${r.status} for ${symbol}`);
+                        continue; // try next endpoint
                     }
-                    return { currentPrice: null, previousClosePrice: null };
+                    const d = await r.json();
+                    const currentPrice       = (d && typeof d.c === 'number' && d.c > 0) ? d.c : null;
+                    const previousClosePrice = (d && typeof d.pc === 'number' && d.pc > 0) ? d.pc : null;
+                    
+                    console.log(`Finnhub ${url.includes('proxy')?'proxy':'direct'} ${symbol}: c=${d?.c} pc=${d?.pc} → cur=$${currentPrice} prev=$${previousClosePrice}`);
+                    
+                    if (currentPrice !== null || previousClosePrice !== null) {
+                        return { currentPrice, previousClosePrice };
+                    }
+                    // Got a response but both values are null/0 — try next endpoint
+                    console.warn(`Finnhub ${symbol}: got response but c=${d?.c} pc=${d?.pc} — both invalid`);
+                } catch (e) {
+                    console.error(`Finnhub fetch error for ${symbol} (${url.includes('proxy')?'proxy':'direct'}):`, e.message);
                 }
-
-                const d = await r.json();
-                // Ensure 'c' (current) and 'pc' (previous close) are valid numbers
-                const currentPrice = (d && typeof d.c === 'number' && d.c > 0) ? d.c : null;
-                const previousClosePrice = (d && typeof d.pc === 'number' && d.pc > 0) ? d.pc : null;
-                
-                return { currentPrice, previousClosePrice };
-            } catch (e) {
-                console.error(`A network error occurred while fetching from Finnhub for ${symbol}:`, e);
-                return { currentPrice: null, previousClosePrice: null };
             }
+            return { currentPrice: null, previousClosePrice: null };
         }
 
         async function fetchPriceFromFMP(symbol) {
@@ -2096,13 +2105,34 @@
                             if (cached?.manualPrice == null || forceRefresh) {
                                 priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
                                 priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                                priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+
+                                // CRITICAL FIX: only store previousClosePrice if it genuinely
+                                // differs from currentPrice. Yahoo after-hours returns prev=current
+                                // (same exact value), which makes G/L = $0 for every symbol.
+                                // A real previous close must differ by at least $0.01.
+                                // If prev==current, keep the existing cached value (don't overwrite
+                                // a good Finnhub value with a bad Yahoo one).
+                                const pc  = priceData.previousClosePrice;
+                                const cur = priceData.currentPrice;
+                                const isGoodPrevClose = pc !== null && pc > 0 && Math.abs(pc - cur) >= 0.01;
+                                const isBadSameValue  = pc !== null && pc > 0 && Math.abs(pc - cur) < 0.01;
+                                if (isGoodPrevClose) {
+                                    priceCache[holding.symbol].previousClosePrice = pc;
+                                } else if (!isBadSameValue) {
+                                    // pc is null — clear it
+                                    priceCache[holding.symbol].previousClosePrice = null;
+                                }
+                                // if isBadSameValue (Yahoo bug): leave existing cache entry alone
                             }
                             priceCache[holding.symbol].lastFetchTimestamp = Date.now();
                             if (priceDelta > 0.0001) refreshStats.gained++;
                             else if (priceDelta < -0.0001) refreshStats.lost++;
                         } else {
                             refreshStats.failed++;
+                            // On forceRefresh, also clear stale previousClosePrice for failed symbols
+                            if (forceRefresh && priceCache[holding.symbol]) {
+                                priceCache[holding.symbol].previousClosePrice = null;
+                            }
                             console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
                         }
                     });
@@ -2118,6 +2148,7 @@
                 updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
                 logActivity(`Refreshed prices for ${totalFetched} Stocks/ETFs.`);
                 await saveDataToFirestore(); // Save updated price cache
+                if (forceRefresh) window._priceCacheFreshFetched = true; // block Firestore from overwriting
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
             
             } catch (error) {
@@ -3860,15 +3891,20 @@
             localStorage.setItem('portfolioPriceMode', mode);
             updatePriceModeUI();
 
-            // CRITICAL FIX: flush ALL cached previousClosePrice values when switching sources.
-            // Finnhub and Yahoo use different reference points for "previous close" —
-            // keeping old previousClose values while fetching new currentPrice from a
-            // different source produces a completely wrong Today's G/L.
+            // On mode switch, clear currentPrice to force re-fetch from new source.
+            // We intentionally KEEP previousClosePrice — it was set by Finnhub which is
+            // always reliable for pc. Clearing it would lose the good value and replace it
+            // with Yahoo's broken same-value after the next fetch.
             Object.keys(priceCache).forEach(sym => {
                 if (priceCache[sym]) {
-                    priceCache[sym].previousClosePrice = null;
-                    priceCache[sym].currentPrice = null; // force full re-fetch
-                    delete priceCache[sym].lastFetchTimestamp; // bypass cache staleness check
+                    priceCache[sym].currentPrice = null;
+                    delete priceCache[sym].lastFetchTimestamp;
+                    // Only clear previousClosePrice if it looks like a bad same-value entry
+                    // (i.e. it was poisoned by Yahoo before this fix was applied)
+                    const pc  = priceCache[sym].previousClosePrice;
+                    const cur = priceCache[sym].currentPrice; // already null now
+                    // Can't compare null cur, so just leave pc in place — the cache-write
+                    // guard above will reject bad values on the next fetch
                 }
             });
 
@@ -3901,6 +3937,22 @@
                 }
             }
         }
+
+        window.hardClearCacheAndRefresh = async function() {
+            // Nuke the entire in-memory price cache
+            priceCache = {};
+            window._priceCacheFreshFetched = false;
+            // Also wipe it from Firestore so it doesn't reload stale data on next page load
+            try {
+                const portfolioColRef = collection(db, 'users', userId, 'portfolio');
+                await setDoc(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), {});
+                console.log('Price cache cleared from Firestore.');
+            } catch(e) {
+                console.warn('Could not clear Firestore price cache:', e);
+            }
+            // Now do a full force refresh
+            await refreshAllPrices(true);
+        };
 
         window.setPriceMode = setPriceMode;
         window.updatePriceModeUI = updatePriceModeUI;
@@ -4945,6 +4997,7 @@
             <button type="button" class="btn" id="toggleAutoRefreshBtn" onclick="toggleAutoRefresh()">Pause Auto-Refresh</button>
             <button type="button" class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button type="button" class="btn" id="refreshNowBtn" onclick="refreshAllPrices(true)">Refresh Now</button>
+            <button type="button" class="btn" onclick="hardClearCacheAndRefresh()" style="background:linear-gradient(135deg,#e67e22,#f39c12);color:#fff;border:none;" title="Wipes all cached prices and fetches fresh from scratch">🗑️ Clear Cache &amp; Refresh</button>
             <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
             <button type="button" class="btn" onclick="openAlertsModal()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;border:none;">🔔 Price Alerts</button>
         </div>
