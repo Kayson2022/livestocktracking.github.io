@@ -5314,59 +5314,92 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 (function() {
   'use strict';
 
+  /* ── Shared state: live portfolio value fed from updateStats hook ── */
+  window._enhPortfolioValue = 0;
+  window._enhMonthlyContrib = 0;
+
   /* ── Currency formatter ── */
   function fc(n) {
-    return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+    if (typeof n !== 'number' || isNaN(n)) return '$0';
+    return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n);
   }
 
-  /* ── Goal Tracker ── */
-  window.calcGoal = function() {
-    const target  = parseFloat(document.getElementById('goalTarget')?.value) || 0;
-    const annualR = parseFloat(document.getElementById('goalReturn')?.value)  || 7;
-    const monthly = parseFloat(document.getElementById('goalMonthly')?.value) || 0;
-    if (!target) { alert('Please enter a target amount.'); return; }
+  /* ── Read live portfolio value from the DOM (totalValue stat card) ── */
+  function getLivePortfolioValue() {
+    const el = document.getElementById('totalValue');
+    if (el) {
+      const v = parseFloat(el.textContent.replace(/[^0-9.]/g,''));
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return window._enhPortfolioValue || 0;
+  }
 
-    // Get current portfolio value from stat cards or global state
-    let current = 0;
-    const statEls = document.querySelectorAll('.stat-value');
-    statEls.forEach(el => {
-      if (el.closest('.stat-card')?.querySelector('.stat-label')?.textContent?.includes('Total Value')) {
-        const v = parseFloat(el.textContent.replace(/[^0-9.-]/g,''));
-        if (!isNaN(v) && v > current) current = v;
-      }
-    });
+  /* ── Estimate average monthly contribution from transaction history ── */
+  function estimateMonthlyContrib() {
+    const txns = (window.portfolioData && window.portfolioData.transactions) ? window.portfolioData.transactions : [];
+    const buys = txns.filter(t => (t.transactionType||t.type||'').toUpperCase() === 'BUY');
+    if (!buys.length) return 500; // sensible default
+    const total = buys.reduce((s,t) => s + Math.abs((parseFloat(t.shares)||0)*(parseFloat(t.price)||0)), 0);
+    const dates = buys.map(t => new Date(t.date)).filter(d => !isNaN(d));
+    if (dates.length < 2) return Math.round(total / 12);
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    const months = Math.max(1, (maxDate - minDate) / (1000*60*60*24*30));
+    return Math.round(total / months);
+  }
 
+  /* ── Core Goal calculation ── */
+  function _calcGoal(current, target, monthly, annualR) {
     const monthlyR = annualR / 100 / 12;
     const pct = target > 0 ? Math.min(100, (current / target) * 100) : 0;
+    let months = 0, val = current;
+    while (val < target && months < 1200) { val = val*(1+monthlyR)+monthly; months++; }
+    return { pct, months };
+  }
 
-    // How many months to reach target with compound growth
-    let months = 0;
-    let val = current;
-    while (val < target && months < 1200) {
-      val = val * (1 + monthlyR) + monthly;
-      months++;
+  /* ── Render goal results into the widget ── */
+  function renderGoal() {
+    const target  = parseFloat(document.getElementById('goalTarget')?.value)  || 0;
+    const annualR = parseFloat(document.getElementById('goalReturn')?.value)   || 7;
+    const monthly = parseFloat(document.getElementById('goalMonthly')?.value)  || 0;
+    const current = getLivePortfolioValue();
+
+    if (!target) {
+      const proj = document.getElementById('goalProjection');
+      if (proj) proj.innerHTML = '⚠️ Please enter your retirement target amount above, then click Calculate.';
+      const res = document.getElementById('goalResult');
+      if (res) res.style.display = 'block';
+      return;
     }
+
+    const { pct, months } = _calcGoal(current, target, monthly, annualR);
+    const yrs = Math.floor(months/12), mos = months % 12;
 
     const bar = document.getElementById('goalBar');
     if (bar) bar.style.width = pct.toFixed(1) + '%';
+
     const res = document.getElementById('goalResult');
     if (res) res.style.display = 'block';
 
     const el = id => document.getElementById(id);
     if (el('goalCurrentLabel')) el('goalCurrentLabel').textContent = 'Current: ' + fc(current);
     if (el('goalPctLabel'))     el('goalPctLabel').textContent     = pct.toFixed(1) + '% of goal';
-    if (el('goalTargetLabel'))  el('goalTargetLabel').textContent  = 'Target: ' + fc(target);
+    if (el('goalTargetLabel'))  el('goalTargetLabel').textContent  = 'Target: '  + fc(target);
 
     const proj = el('goalProjection');
     if (proj) {
-      if (months >= 1200) {
-        proj.innerHTML = `⚠️ At ${monthly ? fc(monthly)+'/mo' : 'current pace'} and ${annualR}% return, the target may not be reachable. Try increasing contributions or return rate.`;
+      if (pct >= 100) {
+        proj.innerHTML = `🎉 <strong>Goal reached!</strong> Your portfolio of ${fc(current)} already meets your ${fc(target)} target. Consider raising your goal!`;
+      } else if (months >= 1200) {
+        proj.innerHTML = `⚠️ At ${fc(monthly)}/month and ${annualR}% return, the target won't be reached in a practical timeframe. Try increasing contributions or the expected return.`;
       } else {
-        const yrs = Math.floor(months/12), mos = months % 12;
-        proj.innerHTML = `🚀 At <strong>${fc(monthly)}/month</strong> and <strong>${annualR}% annual return</strong>, you'll reach <strong>${fc(target)}</strong> in approximately <strong>${yrs > 0 ? yrs+'y ' : ''}${mos > 0 ? mos+'m' : ''}</strong>.`;
+        const timeStr = (yrs > 0 ? yrs+'y ' : '') + (mos > 0 ? mos+'m' : '');
+        proj.innerHTML = `🚀 You're <strong>${pct.toFixed(1)}%</strong> of the way to ${fc(target)}. At <strong>${fc(monthly)}/month</strong> and <strong>${annualR}% annual return</strong>, you'll get there in approximately <strong>${timeStr}</strong>.`;
       }
     }
-  };
+  }
+
+  window.calcGoal = renderGoal;
 
   /* ── What-If Simulator ── */
   window.runWhatIf = function() {
@@ -5378,42 +5411,37 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     document.getElementById('wiReturnVal').textContent  = annual.toFixed(1) + '%';
     document.getElementById('wiYearsVal').textContent   = years + ' yrs';
 
-    const r   = annual / 100 / 12;
-    const n   = years * 12;
-    const fv  = r > 0 ? monthly * ((Math.pow(1+r,n)-1)/r) : monthly * n;
+    const r      = annual / 100 / 12;
+    const n      = years * 12;
+    const fv     = r > 0 ? monthly * ((Math.pow(1+r,n)-1)/r) : monthly * n;
     const contrib = monthly * n;
     const gains   = fv - contrib;
-    const mult    = contrib > 0 ? (fv / contrib).toFixed(2) : '—';
+    const mult    = contrib > 0 ? (fv / contrib).toFixed(2) : '0';
 
     const el = id => document.getElementById(id);
-    if (el('wiFV'))      el('wiFV').textContent      = fc(fv);
-    if (el('wiContrib')) el('wiContrib').textContent = fc(contrib);
-    if (el('wiGains'))   el('wiGains').textContent   = fc(gains);
-    if (el('wiMultiple'))el('wiMultiple').textContent = mult + 'x';
+    if (el('wiFV'))       el('wiFV').textContent       = fc(fv);
+    if (el('wiContrib'))  el('wiContrib').textContent  = fc(contrib);
+    if (el('wiGains'))    el('wiGains').textContent    = fc(gains);
+    if (el('wiMultiple')) el('wiMultiple').textContent = mult + 'x';
   };
-  runWhatIf();
 
   /* ── Contribution Calendar ── */
   window.buildContribCalendar = function() {
     const grid = document.getElementById('contribCalGrid');
     if (!grid) return;
-
-    // Gather transaction dates from portfolioData if available
     const txns = (window.portfolioData && window.portfolioData.transactions) ? window.portfolioData.transactions : [];
-
-    // Build day → amount map for past 365 days
     const dayMap = {};
     txns.forEach(t => {
-      if (!t.date || !['BUY','SELL'].includes((t.type||'').toUpperCase())) return;
+      if (!t.date) return;
+      const type = (t.transactionType||t.type||'').toUpperCase();
+      if (!['BUY','SELL'].includes(type)) return;
       const d = t.date.slice(0,10);
       const amt = Math.abs((parseFloat(t.shares)||0) * (parseFloat(t.price)||0));
       dayMap[d] = (dayMap[d]||0) + amt;
     });
-
     const maxAmt = Math.max(...Object.values(dayMap), 1);
     const today = new Date();
     grid.innerHTML = '';
-
     for (let i = 364; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
@@ -5424,13 +5452,93 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       if (amt > 0) {
         const level = amt >= maxAmt*0.75 ? 4 : amt >= maxAmt*0.5 ? 3 : amt >= maxAmt*0.2 ? 2 : 1;
         div.classList.add('level-'+level);
-        div.title = `${key}: ${fc(amt)}`;
+        div.title = key + ': ' + fc(amt);
       } else {
         div.title = key;
       }
       grid.appendChild(div);
     }
   };
+
+  /* ── Hook into updateStats so widgets refresh with live data ── */
+  function patchUpdateStats() {
+    const orig = window.updateStats;
+    if (!orig || orig._patched) return;
+    window.updateStats = function(stats) {
+      orig.call(this, stats);
+      // Cache live value for our widgets
+      window._enhPortfolioValue = stats.totalValue || 0;
+      // Auto-refresh open widgets
+      const goalW = document.getElementById('goalTrackerWidget');
+      if (goalW && goalW.style.display !== 'none') {
+        renderGoal();
+      }
+      const wiW = document.getElementById('whatifWidget');
+      if (wiW && wiW.style.display !== 'none') {
+        window.runWhatIf();
+      }
+    };
+    window.updateStats._patched = true;
+  }
+
+  /* ── Open Goal widget: pre-fill fields then calculate ── */
+  function openGoalWidget() {
+    const w = document.getElementById('goalTrackerWidget');
+    if (!w) return;
+    const isOpen = w.style.display !== 'none';
+    w.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      // Pre-fill monthly from transaction history if field is empty / default
+      const monthlyInput = document.getElementById('goalMonthly');
+      if (monthlyInput && (!monthlyInput.value || monthlyInput.value === '500')) {
+        const est = estimateMonthlyContrib();
+        monthlyInput.value = est;
+      }
+      // Pre-fill target from localStorage if saved
+      const targetInput = document.getElementById('goalTarget');
+      const saved = localStorage.getItem('_enhGoalTarget');
+      if (targetInput && saved && !targetInput.value) targetInput.value = saved;
+
+      // Auto-run if target already set
+      if (targetInput && targetInput.value) {
+        renderGoal();
+      } else {
+        // Show prompt to enter target
+        const res = document.getElementById('goalResult');
+        const proj = document.getElementById('goalProjection');
+        if (res) res.style.display = 'block';
+        if (proj) proj.innerHTML = '👆 Enter your retirement target above and click <strong>Calculate</strong> to see your progress.';
+      }
+      w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  // Save target to localStorage when changed
+  function wireGoalTargetSave() {
+    const inp = document.getElementById('goalTarget');
+    if (inp && !inp._enhWired) {
+      inp.addEventListener('change', () => localStorage.setItem('_enhGoalTarget', inp.value));
+      inp._enhWired = true;
+    }
+  }
+
+  /* ── Open What-If widget: pre-fill slider from portfolio data then run ── */
+  function openWhatIfWidget() {
+    const w = document.getElementById('whatifWidget');
+    if (!w) return;
+    const isOpen = w.style.display !== 'none';
+    w.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      // Seed monthly contribution slider from real data
+      const est = estimateMonthlyContrib();
+      const slider = document.getElementById('wiMonthly');
+      if (slider) {
+        slider.value = Math.min(est, parseInt(slider.max));
+      }
+      window.runWhatIf();
+      w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
 
   /* ── Keyboard shortcuts ── */
   const kbd401Btn   = document.getElementById('kbd401-btn');
@@ -5445,55 +5553,45 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   document.addEventListener('keydown', e => {
     const tag = (document.activeElement||{}).tagName||'';
     if (['INPUT','TEXTAREA','SELECT'].includes(tag)) return;
-
     const k = e.key.toLowerCase();
-    if (k === 'd') {
-      const cur = document.documentElement.getAttribute('data-theme');
-      document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
-      localStorage.setItem('myPortfolioTheme_v4', cur === 'dark' ? 'light' : 'dark');
-    } else if (k === 'r') {
-      const btn = document.getElementById('refreshMFBtn') || document.querySelector('[onclick*="refresh"]');
-      if (btn) btn.click();
-    } else if (k === 'c') {
-      compactMode = !compactMode;
-      document.body.classList.toggle('compact-mode', compactMode);
-    } else if (k === 'g') {
-      const w = document.getElementById('goalTrackerWidget');
-      if (w) { w.style.display = w.style.display === 'none' ? 'block' : 'none'; }
-    } else if (k === 'w') {
-      const w = document.getElementById('whatifWidget');
-      if (w) { w.style.display = w.style.display === 'none' ? 'block' : 'none'; }
-    } else if (k === 'k') {
-      const w = document.getElementById('contribCalWidget');
-      if (w) {
-        if (w.style.display === 'none') { w.style.display = 'block'; buildContribCalendar(); }
-        else w.style.display = 'none';
-      }
-    } else if (k === '?') {
-      if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display === 'block' ? 'none' : 'block';
-    }
+    if      (k === 'd') { const cur = document.documentElement.getAttribute('data-theme'); document.documentElement.setAttribute('data-theme', cur==='dark'?'light':'dark'); localStorage.setItem('myPortfolioTheme_v4', cur==='dark'?'light':'dark'); }
+    else if (k === 'r') { const btn = document.getElementById('refreshMFBtn') || document.querySelector('[onclick*="refresh"]'); if (btn) btn.click(); }
+    else if (k === 'c') { compactMode = !compactMode; document.body.classList.toggle('compact-mode', compactMode); }
+    else if (k === 'g') { openGoalWidget(); }
+    else if (k === 'w') { openWhatIfWidget(); }
+    else if (k === 'k') { const w = document.getElementById('contribCalWidget'); if (w) { if (w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';} } }
+    else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
-  /* ── Inject density toggle + widget buttons into header ── */
+  /* ── Inject buttons into header ── */
   function injectHeaderControls() {
     const rightHeader = document.querySelector('.header-right');
     if (!rightHeader || document.getElementById('_enhControlsInjected')) return;
-
     const group = document.createElement('div');
     group.id = '_enhControlsInjected';
     group.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
     group.innerHTML = `
       <span class="density-toggle" onclick="document.body.classList.toggle('compact-mode')" title="Toggle compact view (C)">⊞ Compact</span>
-      <span class="density-toggle" onclick="(function(){const w=document.getElementById('goalTrackerWidget');w.style.display=w.style.display==='none'?'block':'none'})()" title="Goal Tracker (G)">🎯 Goal</span>
-      <span class="density-toggle" onclick="(function(){const w=document.getElementById('whatifWidget');w.style.display=w.style.display==='none'?'block':'none'})()" title="What-If Simulator (W)">🔮 What-If</span>
+      <span class="density-toggle" id="_goalBtn" title="Goal Tracker (G)">🎯 Goal</span>
+      <span class="density-toggle" id="_wiBtn"   title="What-If Simulator (W)">🔮 What-If</span>
       <span class="density-toggle" onclick="(function(){const w=document.getElementById('contribCalWidget');if(w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';}})()" title="Contribution Calendar (K)">📅 Calendar</span>
     `;
     rightHeader.appendChild(group);
+    document.getElementById('_goalBtn').addEventListener('click', openGoalWidget);
+    document.getElementById('_wiBtn').addEventListener('click', openWhatIfWidget);
+    wireGoalTargetSave();
+    patchUpdateStats();
   }
 
-  // Run after app renders
+  // Also run What-If immediately on page load so it shows numbers right away
+  function initWidgets() {
+    runWhatIf();
+    patchUpdateStats();
+    wireGoalTargetSave();
+  }
+
   setTimeout(injectHeaderControls, 1500);
-  window.addEventListener('load', () => setTimeout(injectHeaderControls, 800));
+  window.addEventListener('load', () => { setTimeout(injectHeaderControls, 800); setTimeout(initWidgets, 2000); });
 })();
 </script>
 
