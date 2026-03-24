@@ -592,11 +592,13 @@
              recurringTransactions: [],
              activityLog: []
         };
+        window.portfolioData = portfolioData; // expose as global
         let uiState = {
             expandedGroups: {},
             expandedTransactions: {}
         };
         let priceCache = {};
+        window.priceCache = priceCache; // expose as global
 
         let totalRealizedGainLoss = 0;
         let isSymbolValidated = false;
@@ -839,6 +841,7 @@
                 let needsSave = false;
                 if (docSnap.exists()) {
                     portfolioData = docSnap.data();
+                    window.portfolioData = portfolioData; // keep global in sync
                      // Backwards compatibility for new features
                     if (!portfolioData.recurringTransactions) {
                         portfolioData.recurringTransactions = [];
@@ -850,6 +853,7 @@
                     }
                 } else {
                     portfolioData = { username: '', transactions: [], recurringTransactions: [], activityLog: [] };
+                    window.portfolioData = portfolioData; // keep global in sync
                     needsSave = true;
                 }
                 
@@ -896,6 +900,7 @@
                 // (prevents stale cache from overwriting a mode-switch refresh)
                 if (docSnap.exists() && !window._priceCacheFreshFetched) {
                     priceCache = docSnap.data();
+                    window.priceCache = priceCache; // keep global in sync
                 }
             }).catch(e => console.error("Error loading priceCache:", e));
             // --- End Unchanged Listeners ---
@@ -6767,16 +6772,20 @@ const _origBuild = window._buildTaxSummary;
 if (_origBuild) {
   window._buildTaxSummary = function(el) {
     _origBuild(el);
-    // Append TLH section after tax summary renders
-    setTimeout(() => {
+    function appendTLH(attemptsLeft) {
+      const txns = window.portfolioData && window.portfolioData.transactions;
+      if ((!txns || txns.length === 0) && attemptsLeft > 0) {
+        setTimeout(() => appendTLH(attemptsLeft - 1), 300);
+        return;
+      }
       const content = document.getElementById('taxSummaryContent');
       if (!content) return;
-      const inner = content.querySelector('.tax-inner-wrap') || content;
+      // Remove stale TLH section if present
+      content.querySelectorAll('.tlh-section').forEach(el => el.parentElement && el.parentElement !== content ? el.parentElement.remove() : el.remove());
 
-      // Rebuild lots from scratch for TLH (we need fresh FIFO state)
-      const txns = [...getTxns()].sort((a,b) => new Date(a.date)-new Date(b.date));
+      const allTxns = [...(window.portfolioData?.transactions || [])].sort((a,b) => new Date(a.date)-new Date(b.date));
       const lots = {}; const realizedRows = [];
-      txns.forEach(t => {
+      allTxns.forEach(t => {
         const type = (t.transactionType||'').toUpperCase();
         const sh = parseFloat(t.shares), pr = parseFloat(t.price);
         if (!t.symbol || isNaN(sh) || isNaN(pr)) return;
@@ -6787,23 +6796,23 @@ if (_origBuild) {
           let toSell=sh;
           while(toSell>0.0001 && lots[key].length>0){
             const lot=lots[key][0]; const used=Math.min(toSell,lot.shares);
-            const isLong = (new Date()-new Date(lot.date))>365*24*60*60*1000;
-            realizedRows.push({symbol:t.symbol,account:t.accountType,gain:used*(pr-lot.price),
-              isLong,year:new Date(t.date).getFullYear()});
+            const isLong=(new Date()-new Date(lot.date))>365*24*60*60*1000;
+            realizedRows.push({symbol:t.symbol,account:t.accountType,gain:used*(pr-lot.price),isLong,year:new Date(t.date).getFullYear()});
             lot.shares-=used; toSell-=used;
             if(lot.shares<0.0001) lots[key].shift();
           }
         }
       });
-
       const selectedYear = window._taxYear || new Date().getFullYear();
       const tlhHTML = buildTaxLossSection(lots, realizedRows, selectedYear, colorGL, pill, fc);
       const div = document.createElement('div');
       div.innerHTML = tlhHTML;
-      inner.appendChild(div);
-    }, 60);
+      content.appendChild(div);
+    }
+    appendTLH(15); // poll up to 15x × 300ms = 4.5s
   };
 }
+
 
 // ═══════════════════════════════════════════════
 //  PORTFOLIO REBALANCING TOOL
