@@ -2029,46 +2029,70 @@
             }
             
             // --- Start Refresh Process ---
-            isRefreshing = true; // Set flag immediately
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
+            isRefreshing = true;
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 };
             
-            // UI setup for Refreshing state
-            const refreshButton = document.getElementById('refreshNowBtn'); // Target 'Refresh Now' by ID
-            if (refreshButton) { // Add null check for safety
-                refreshButton.textContent = 'Refreshing...';
-                refreshButton.disabled = true;
-            }
+            // UI setup
+            const refreshButton = document.getElementById('refreshNowBtn');
+            if (refreshButton) { refreshButton.textContent = 'Refreshing...'; refreshButton.disabled = true; }
             updateDataStatus('loading'); 
             document.getElementById('refreshStatusBox').style.display = 'block'; 
             document.getElementById('nextUpdateTimer').style.display = 'none'; 
-            // Clear any previous hide timeout just in case
             clearTimeout(hideBannerTimeoutId); 
-            // Show the message card initially (will be updated by updateRefreshProgress)
             document.getElementById('refreshMessageCard').style.display = 'flex'; 
 
             // --- Wrap core logic in try...finally ---
             try {
                 const currentHoldings = calculateHoldingsAndCash();
                 
-                // Fetch ALL Stocks, ETFs and Mutual Funds on every refresh — no stale check
-                // Deduplicate by symbol so we don't double-fetch the same ticker across accounts
                 const accountsToExclude = ['401(k)', '529 College Saving'];
                 const seenSymbols = new Set();
                 const fastAssetsToFetch = currentHoldings.filter(holding => {
                     const isRefreshable = holding.type === 'Stock' || holding.type === 'ETF' || holding.type === 'Mutual Fund';
                     if (!isRefreshable) return false;
                     if (accountsToExclude.includes(holding.accountType)) return false;
-                    // Skip manually overridden prices unless force refreshing
                     const cached = priceCache[holding.symbol];
                     const isManualOverride = cached && cached.manualPrice != null;
                     if (!forceRefresh && isManualOverride) return false;
-                    // Deduplicate — one fetch per unique symbol is enough
                     if (seenSymbols.has(holding.symbol)) return false;
                     seenSymbols.add(holding.symbol);
                     return true;
                 });
                 
                 refreshStats.total = fastAssetsToFetch.length;
+
+                // ── AUTO PRE-FETCH: Always seed previousClosePrice from Finnhub first ──────
+                // This runs automatically on EVERY refresh — no manual steps needed.
+                // Finnhub's d.pc is the authoritative prior-day close. Yahoo's prev close
+                // fields are unreliable (often equal to current after hours = $0 G/L).
+                // We batch Finnhub calls silently before the main price fetch so that
+                // by the time we write currentPrice, a good previousClosePrice is already
+                // in the cache and the same-value guard below won't discard it.
+                const stockEtfSymbols = fastAssetsToFetch
+                    .filter(h => h.type === 'Stock' || h.type === 'ETF')
+                    .map(h => h.symbol);
+
+                if (stockEtfSymbols.length > 0 && FINNHUB_API_KEY) {
+                    console.log(`[PrevClose pre-fetch] Seeding ${stockEtfSymbols.length} symbols from Finnhub...`);
+                    const PC_BATCH = 8;
+                    for (let i = 0; i < stockEtfSymbols.length; i += PC_BATCH) {
+                        const batch = stockEtfSymbols.slice(i, i + PC_BATCH);
+                        const results = await Promise.all(batch.map(sym => fetchPriceFromFinnhub(sym)));
+                        results.forEach((data, idx) => {
+                            const sym = batch[idx];
+                            if (!priceCache[sym]) priceCache[sym] = {};
+                            // Only write pc if it's a valid non-zero, non-same-as-current value
+                            const pc = data?.previousClosePrice;
+                            if (pc && pc > 0) {
+                                priceCache[sym].previousClosePrice = pc;
+                                console.log(`[PrevClose] ${sym}: pc=$${pc}`);
+                            }
+                        });
+                        if (i + PC_BATCH < stockEtfSymbols.length) await delay(300);
+                    }
+                    console.log(`[PrevClose pre-fetch] Done.`);
+                }
+                // ── END PRE-FETCH ────────────────────────────────────────────────────────────
 
                 // --- Early Exit if nothing to fetch ---
                 if (fastAssetsToFetch.length === 0) {
