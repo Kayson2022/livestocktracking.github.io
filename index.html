@@ -1720,60 +1720,80 @@
         // Uses corsproxy.io/v8/finance/chart directly — allorigins.win is blocked on GitHub Pages
         async function fetchPriceFromYahooQuote(symbol) {
             const sym = symbol.toUpperCase().trim();
+
+            // Helper to validate a price number
+            const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
+
+            // ── Attempt 1: v8/finance/chart with range=2d ──
+            // regularMarketPreviousClose is the authoritative "yesterday's close" field.
+            // regularMarketPrice is the live/delayed current price.
             try {
-                // range=2d gives today + yesterday. interval=1d = daily candles.
                 const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=2d`;
                 const res = await fetch(url, { cache: 'no-store' });
-                if (!res.ok) throw new Error(`Yahoo chart HTTP ${res.status}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const json = await res.json();
                 const result = json?.chart?.result?.[0];
                 const meta   = result?.meta;
-                if (!meta) throw new Error('No chart meta');
+                if (!meta) throw new Error('No meta');
 
-                // Current price — regularMarketPrice is the live/delayed price
-                const price = meta?.regularMarketPrice ?? null;
-                if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid price');
+                const price = meta?.regularMarketPrice;
+                if (!isValid(price)) throw new Error('No valid current price');
 
-                // Previous close: try fields in order of reliability
-                // 1. regularMarketPreviousClose — most reliable, set at open and never changes
-                // 2. previousClose — sometimes correct, sometimes equals chartPreviousClose
-                // 3. Derive from OHLC closes array — yesterday's candle close (most accurate fallback)
+                // Best previous close fields in order of reliability:
                 let previousClosePrice = null;
+                const candidates = [
+                    meta?.regularMarketPreviousClose,  // most reliable
+                    meta?.previousClose,               // sometimes correct
+                ];
+                for (const c of candidates) {
+                    if (isValid(c)) { previousClosePrice = c; break; }
+                }
 
-                const rmpc = meta?.regularMarketPreviousClose;
-                if (typeof rmpc === 'number' && isFinite(rmpc) && rmpc > 0) {
-                    previousClosePrice = rmpc;
-                } else {
-                    // Derive from the closes array: with range=2d we get 2 candles.
-                    // The first candle's close = yesterday's close = correct previousClose.
-                    const closes = result?.indicators?.quote?.[0]?.close || [];
+                // Fallback: derive from yesterday's candle in the OHLC array
+                if (!previousClosePrice) {
+                    const closes     = result?.indicators?.quote?.[0]?.close || [];
                     const timestamps = result?.timestamp || [];
-                    // Find the candle from before today
-                    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-                    let derivedPrev = null;
-                    for (let i = 0; i < timestamps.length; i++) {
-                        const candleDate = new Date(timestamps[i] * 1000);
-                        candleDate.setHours(0,0,0,0);
-                        if (candleDate < todayStart && typeof closes[i] === 'number' && closes[i] > 0) {
-                            derivedPrev = closes[i]; // take the most recent candle before today
+                    const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+                    for (let i = timestamps.length - 1; i >= 0; i--) {
+                        const d = new Date(timestamps[i] * 1000); d.setHours(0,0,0,0);
+                        if (d < todayMidnight && isValid(closes[i])) {
+                            previousClosePrice = closes[i];
+                            break;
                         }
-                    }
-                    if (derivedPrev !== null) {
-                        previousClosePrice = derivedPrev;
-                        console.log(`Yahoo ${sym}: derived prevClose=$${derivedPrev} from OHLC candles`);
-                    } else {
-                        // Last resort: meta.previousClose
-                        const pc = meta?.previousClose;
-                        if (typeof pc === 'number' && isFinite(pc) && pc > 0) previousClosePrice = pc;
                     }
                 }
 
                 const name      = meta?.shortName || meta?.longName || null;
                 const quoteType = meta?.instrumentType || null;
-                console.log(`Yahoo ✅ ${sym}: current=$${price} prevClose=$${previousClosePrice}`);
+                console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice}`);
                 return { currentPrice: price, previousClosePrice, name, quoteType };
+
             } catch (err) {
-                console.warn(`Yahoo failed for ${sym}:`, err.message);
+                console.warn(`Yahoo chart failed for ${sym}: ${err.message}`);
+            }
+
+            // ── Attempt 2: v7/finance/quote (different endpoint, often has both fields) ──
+            try {
+                const url2 = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=regularMarketPrice,regularMarketPreviousClose,shortName,quoteType`;
+                const res2 = await fetch(url2, { cache: 'no-store' });
+                if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+                const json2 = await res2.json();
+                const q = json2?.quoteResponse?.result?.[0];
+                if (!q) throw new Error('No quote result');
+
+                const price2 = q?.regularMarketPrice;
+                const prev2  = q?.regularMarketPreviousClose;
+                if (!isValid(price2)) throw new Error('No valid price in v7');
+
+                console.log(`Yahoo v7 ✅ ${sym}: cur=$${price2} prev=$${prev2}`);
+                return {
+                    currentPrice:      price2,
+                    previousClosePrice: isValid(prev2) ? prev2 : null,
+                    name:      q?.shortName || null,
+                    quoteType: q?.quoteType || null
+                };
+            } catch (err2) {
+                console.warn(`Yahoo v7 also failed for ${sym}: ${err2.message}`);
                 return { currentPrice: null, previousClosePrice: null };
             }
         }
@@ -1828,21 +1848,38 @@
 
             } else if (isStockOrETF) {
                 if (priceMode === 'delayed') {
-                    // 15-min delay mode: Yahoo primary → Finnhub fallback
-                    console.log(`[Stock/ETF][Yahoo] Fetching ${symbol}`);
-                    priceData = await fetchPriceFromYahooQuote(symbol);
-                    if (priceData && priceData.currentPrice > 0) {
-                        console.log(`[Stock/ETF] ${symbol} via Yahoo ✅`);
-                        return priceData;
+                    // Yahoo mode: get current price from Yahoo (15-min delayed display price)
+                    // BUT always get previousClosePrice from Finnhub — Yahoo's prev close fields
+                    // are unreliable (often return same value as current after-hours, causing $0 G/L)
+                    console.log(`[Stock/ETF][Yahoo+Finnhub] Fetching ${symbol}`);
+                    
+                    const [yahooData, finnhubData] = await Promise.all([
+                        fetchPriceFromYahooQuote(symbol),
+                        fetchPriceFromFinnhub(symbol)
+                    ]);
+
+                    // Current price: Yahoo preferred (it's what the user sees as "delayed")
+                    // Fallback to Finnhub current if Yahoo fails
+                    const currentPrice = (yahooData?.currentPrice > 0)
+                        ? yahooData.currentPrice
+                        : (finnhubData?.currentPrice > 0 ? finnhubData.currentPrice : null);
+
+                    // Previous close: ALWAYS use Finnhub's pc field — it's always correct
+                    // Finnhub d.pc is the official prior day regular market close, never stale
+                    const previousClosePrice = (finnhubData?.previousClosePrice > 0)
+                        ? finnhubData.previousClosePrice
+                        : (yahooData?.previousClosePrice > 0 ? yahooData.previousClosePrice : null);
+
+                    if (currentPrice > 0) {
+                        const name      = yahooData?.name      || finnhubData?.name      || null;
+                        const quoteType = yahooData?.quoteType || finnhubData?.quoteType || null;
+                        console.log(`[Stock/ETF] ${symbol} cur=$${currentPrice}(${yahooData?.currentPrice>0?'Yahoo':'Finnhub'}) prev=$${previousClosePrice}(Finnhub)`);
+                        return { currentPrice, previousClosePrice, name, quoteType };
                     }
-                    console.warn(`[Stock/ETF] Yahoo failed for ${symbol}, trying Finnhub fallback.`);
-                    priceData = await fetchPriceFromFinnhub(symbol);
-                    if (priceData && priceData.currentPrice > 0) {
-                        console.log(`[Stock/ETF] ${symbol} via Finnhub fallback ✅`);
-                        return priceData;
-                    }
+                    // Both failed
+                    console.warn(`[Stock/ETF] Both Yahoo and Finnhub failed for ${symbol}`);
                 } else {
-                    // Real-time mode: Finnhub primary → Yahoo fallback
+                    // Real-time mode: Finnhub primary (both price and prev close) → Yahoo fallback
                     console.log(`[Stock/ETF][Finnhub] Fetching ${symbol}`);
                     priceData = await fetchPriceFromFinnhub(symbol);
                     if (priceData && priceData.currentPrice > 0) {
@@ -4870,7 +4907,7 @@
             
             <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> 
-            <div class="stat-card" style="position:relative;"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L <button onclick="showGLDiagnostic()" title="See per-symbol breakdown" style="background:none;border:none;cursor:pointer;font-size:0.75rem;color:var(--text-color-secondary);padding:0 4px;vertical-align:middle;">🔍</button></div> </div> 
+            <div class="stat-card" style="position:relative;"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> <button onclick="showGLDiagnostic()" title="See per-symbol breakdown" style="position:absolute;top:8px;right:8px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:6px;cursor:pointer;font-size:0.7rem;padding:2px 6px;color:var(--text-color-secondary);">🔍 breakdown</button> </div> 
             
             <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> 
