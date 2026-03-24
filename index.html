@@ -540,7 +540,7 @@
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
         const FIRESTORE_DATA_DOC = 'portfolioData';
@@ -721,16 +721,19 @@
                 } else {
                     firebaseApp = getApps()[0];
                 }
-                db = getFirestore(firebaseApp);
-                // Enable offline persistence so repeat visits load from cache instantly
-                // while syncing with the network in the background.
-                enableIndexedDbPersistence(db).catch(err => {
-                    if (err.code === 'failed-precondition') {
-                        console.warn('Firestore persistence unavailable: multiple tabs open.');
-                    } else if (err.code === 'unimplemented') {
-                        console.warn('Firestore persistence not supported in this browser.');
+                // Use modern Firestore cache API (multi-tab safe, no deprecation warning)
+                try {
+                    db = initializeFirestore(firebaseApp, {
+                        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+                    });
+                } catch(persistErr) {
+                    // Falls back to memory cache if IndexedDB is unavailable (private browsing, etc.)
+                    try {
+                        db = initializeFirestore(firebaseApp, { localCache: memoryLocalCache() });
+                    } catch(memErr) {
+                        db = getFirestore(firebaseApp);
                     }
-                });
+                }
                 auth = getAuth(firebaseApp);
 
                 onAuthStateChanged(auth, async (user) => {
@@ -3362,20 +3365,23 @@
             select.value = currentFilter;
         }
 
+        // Safe chart helper: always destroy any existing Chart on a canvas before creating a new one
+        function safeNewChart(canvasId, config) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return null;
+            // Destroy via Chart.js registry (covers all cases including orphaned instances)
+            const existing = Chart.getChart(canvas);
+            if (existing) { existing.destroy(); }
+            return new Chart(canvas.getContext('2d'), config);
+        }
+
         function updateCharts(dataPoints, holdings) {
             const chartData = dataPoints || [];
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
             const gridColor = currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
             const labelColor = currentTheme === 'dark' ? '#f5f5f5' : '#333';
-            // Only destroy charts if theme changed (otherwise update in-place for performance)
-            const themeChanged = updateCharts._lastTheme !== currentTheme;
-            updateCharts._lastTheme = currentTheme;
-            if (themeChanged) {
-                if(accountChart) { accountChart.destroy(); accountChart = null; }
-                if(investmentChart) { investmentChart.destroy(); investmentChart = null; }
-                if(historicalChart) { historicalChart.destroy(); historicalChart = null; }
-                if(dividendChart) { dividendChart.destroy(); dividendChart = null; }
-            }
+            // Always null-out references so stale instances can't cause double-destroy later
+            accountChart = null; investmentChart = null; historicalChart = null; dividendChart = null;
 
             // Holdings are ALL holdings for charts (original requirement)
             const portfolioHoldings = holdings.filter(h => h.accountType !== WATCHLIST_ACCOUNT_TYPE);
@@ -3427,21 +3433,21 @@
 
             if(Object.keys(accountData).length > 0) {
                  const accountColors = {'Regular Brokerage': '#3498db', 'Roth IRA': '#e74c3c', '401(k)': '#f39c12', '529 College Saving': '#9b59b6', 'Yahoo Finance': '#20c997'};
-                 accountChart = new Chart(document.getElementById('accountChart').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
+                 accountChart = safeNewChart('accountChart', { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
             }
            if(Object.keys(investmentData).length > 0) {
                  const investmentColors = {'Stock': '#2ecc71', 'ETF': '#3498db', 'Market Index': '#1abc9c', 'Bond': '#f39c12', 'Mutual Fund': '#9b59b6', 'Cryptocurrency': '#e67e22', 'Other': '#95a5a6', 'CASH': '#4CAF50', 'Money Market': '#4CAF50', '401k': '#f39c12'};
-                 investmentChart = new Chart(document.getElementById('investmentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
+                 investmentChart = safeNewChart('investmentChart', { type: 'pie', data: { labels: Object.keys(investmentData), datasets: [{ data: Object.values(investmentData), backgroundColor: Object.keys(investmentData).map(l => investmentColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
             }
             if (chartData && chartData.length > 0) {
-                historicalChart = new Chart(document.getElementById('historicalChart').getContext('2d'), { type: 'line', data: { labels: chartData.map(dp => new Date(dp.date).toLocaleDateString()), datasets: [{ label: 'Portfolio Value', data: chartData.map(dp => dp.value), borderColor: 'var(--accent-color-1)', backgroundColor: 'rgba(109, 40, 217, 0.1)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, x: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
+                historicalChart = safeNewChart('historicalChart', { type: 'line', data: { labels: chartData.map(dp => new Date(dp.date).toLocaleDateString()), datasets: [{ label: 'Portfolio Value', data: chartData.map(dp => dp.value), borderColor: 'var(--accent-color-1)', backgroundColor: 'rgba(109, 40, 217, 0.1)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: labelColor, callback: v => formatCurrency(v) }, grid: { color: gridColor } }, x: { ticks: { color: labelColor }, grid: { color: gridColor } } }, plugins: { legend: { display: false } } } });
             }
             const dividendData = portfolioHoldings.map(h => {
                 const totalShares = h.totalShares;
                 return { symbol: h.symbol, income: (Number(totalShares) || 0) * (Number(h.dividend) || 0) };
             }).filter(d => d.income > 0).sort((a,b) => b.income - a.income);
             if (dividendData.length > 0) {
-                 dividendChart = new Chart(document.getElementById('dividendChart').getContext('2d'), {
+                 dividendChart = safeNewChart('dividendChart', {
                      type: 'bar',
                      data: {
                          labels: dividendData.map(d => d.symbol),
@@ -4375,6 +4381,9 @@
             });
 
             if (monthlyChartInstance) { monthlyChartInstance.destroy(); monthlyChartInstance = null; }
+            // Also clear any orphaned Chart.js instance registered on this canvas
+            const _existingMonthly = Chart.getChart(canvas);
+            if (_existingMonthly) _existingMonthly.destroy();
 
             const isDark   = document.body.classList.contains('dark-mode');
             const gridClr  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
