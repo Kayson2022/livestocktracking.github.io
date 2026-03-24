@@ -2768,6 +2768,12 @@
             const todayEl = document.getElementById('todayPortfolioGainLoss');
             todayEl.textContent = formatCurrency(stats.totalDailyGainLoss);
             todayEl.className = 'stat-value ' + (stats.totalDailyGainLoss >= 0 ? 'positive' : 'negative');
+            // Update source label
+            const glSrc = document.getElementById('glSourceLabel');
+            if (glSrc) {
+                const mode = localStorage.getItem('portfolioPriceMode') || 'realtime';
+                glSrc.textContent = mode === 'delayed' ? 'price: Yahoo · G/L: Finnhub' : 'Finnhub real-time';
+            }
             document.getElementById('estimatedAnnualIncome').textContent = formatCurrency(stats.estimatedAnnualIncome);
             document.getElementById('portfolioYieldOnCost').textContent = formatPercentage(stats.portfolioYieldOnCost);
             
@@ -4983,7 +4989,7 @@
             
             <div class="stat-card"> <div class="stat-value" id="unrealizedGainLoss">$0.00</div> <div class="stat-label">Unrealized G/L</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="realizedGainLoss">$0.00</div> <div class="stat-label">Realized G/L</div> </div> 
-            <div class="stat-card" style="position:relative;"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> <button onclick="showGLDiagnostic()" title="See per-symbol breakdown" style="position:absolute;top:8px;right:8px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:6px;cursor:pointer;font-size:0.7rem;padding:2px 6px;color:var(--text-color-secondary);">🔍 breakdown</button> </div> 
+            <div class="stat-card" style="position:relative;padding-bottom:32px;"> <div class="stat-value" id="todayPortfolioGainLoss">$0.00</div> <div class="stat-label">Today's G/L</div> <div style="position:absolute;bottom:8px;left:0;right:0;display:flex;justify-content:center;gap:6px;align-items:center;"> <span id="glSourceLabel" style="font-size:0.65rem;color:var(--text-color-secondary);"></span> <button onclick="showGLDiagnostic()" style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:5px;cursor:pointer;font-size:0.65rem;padding:2px 7px;color:var(--text-color-secondary);">🔍 breakdown</button> </div> </div> 
             
             <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> 
