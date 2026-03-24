@@ -1727,13 +1727,21 @@
                 const json = await res.json();
                 const meta = json?.chart?.result?.[0]?.meta;
                 if (!meta) throw new Error('No chart meta');
-                const price = meta?.regularMarketPrice ?? meta?.chartPreviousClose ?? null;
-                const previousClose = meta?.previousClose ?? meta?.chartPreviousClose ?? null;
+
+                const price = meta?.regularMarketPrice ?? null;
                 if (typeof price !== 'number' || !isFinite(price) || price <= 0) throw new Error('No valid price');
+
+                // IMPORTANT: Only use meta.previousClose (true yesterday close).
+                // Never fall back to chartPreviousClose — that is the price at the START of the
+                // chart range (up to 5 days ago), which produces a wildly wrong Today's G/L.
+                const previousClose = meta?.previousClose ?? null;
+                const previousClosePrice = (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0)
+                    ? previousClose
+                    : null;  // null = we simply won't show Today's G/L for this symbol rather than show a wrong number
+
                 const name = meta?.shortName || meta?.longName || null;
                 const quoteType = meta?.instrumentType || null;
-                const previousClosePrice = (typeof previousClose === 'number' && isFinite(previousClose) && previousClose > 0) ? previousClose : null;
-                console.log(`Yahoo ✅ ${sym}: $${price} (${name || 'no name'})`);
+                console.log(`Yahoo ✅ ${sym}: $${price} prev:${previousClosePrice} (${name || 'no name'})`);
                 return { currentPrice: price, previousClosePrice, name, quoteType };
             } catch (err) {
                 console.warn(`Yahoo failed for ${sym}:`, err.message);
@@ -3782,7 +3790,20 @@
             priceMode = mode;
             localStorage.setItem('portfolioPriceMode', mode);
             updatePriceModeUI();
-            // Trigger a fresh refresh so prices update immediately with new source
+
+            // CRITICAL FIX: flush ALL cached previousClosePrice values when switching sources.
+            // Finnhub and Yahoo use different reference points for "previous close" —
+            // keeping old previousClose values while fetching new currentPrice from a
+            // different source produces a completely wrong Today's G/L.
+            Object.keys(priceCache).forEach(sym => {
+                if (priceCache[sym]) {
+                    priceCache[sym].previousClosePrice = null;
+                    priceCache[sym].currentPrice = null; // force full re-fetch
+                    delete priceCache[sym].lastFetchTimestamp; // bypass cache staleness check
+                }
+            });
+
+            // Trigger a fresh full refresh with the new source
             refreshAllPrices(true);
         }
 
