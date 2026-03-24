@@ -6500,46 +6500,42 @@ window.addEventListener('load', () => setTimeout(initFx401k, 500));
 .tlh-card-val   { font-size:1.25rem; font-weight:800; color:var(--text-color-primary); }
 .tlh-card-sub   { font-size:0.7rem; color:var(--text-color-secondary); margin-top:3px; }
 
-/* Rebalance widget */
-.rebal-widget { display:none; margin:0 20px 30px; background:var(--card-bg-color); border-radius:15px; padding:24px; border:1px solid var(--border-color); box-shadow:0 4px 10px var(--shadow-color); }
-.rebal-bar-bg { background:var(--bg-color); border-radius:999px; height:16px; overflow:hidden; margin:6px 0; position:relative; }
-.rebal-bar-current { height:100%; border-radius:999px; transition:width 0.6s ease; }
-.rebal-target-line { position:absolute; top:0; bottom:0; width:2px; background:var(--text-color-primary); opacity:0.5; }
-.rebal-account-row { margin-bottom:18px; }
-.rebal-input { width:70px; padding:5px 8px; border-radius:6px; border:1px solid var(--border-color); background:var(--input-bg-color); color:var(--text-color-primary); font-size:0.85rem; text-align:center; }
-.rebal-tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; margin-left:6px; }
-.rebal-over  { background:rgba(231,76,60,0.12);  color:var(--negative-color); }
-.rebal-under { background:rgba(39,174,96,0.12);  color:var(--positive-color); }
-.rebal-ok    { background:rgba(52,152,219,0.12); color:#3498db; }
-.rebal-action-table { width:100%; border-collapse:collapse; font-size:0.82rem; margin-top:10px; }
-.rebal-action-table th { padding:6px 8px; text-align:left; color:var(--text-color-secondary); border-bottom:2px solid var(--border-color); font-weight:700; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.4px; }
-.rebal-action-table td { padding:7px 8px; border-bottom:0.5px solid var(--border-color); }
-/* Within-account breakdown */
-.rebal-inner-table { width:100%; border-collapse:collapse; font-size:0.78rem; margin-top:8px; }
-.rebal-inner-table th { padding:4px 8px; color:var(--text-color-secondary); border-bottom:1px solid var(--border-color); }
-.rebal-inner-table td { padding:5px 8px; border-bottom:0.5px solid var(--border-color); }
-.rebal-inner-table input[type=number] { width:60px; padding:3px 6px; border-radius:5px; border:1px solid var(--border-color); background:var(--input-bg-color); color:var(--text-color-primary); font-size:0.78rem; text-align:center; }
+
+/* ── Rebalancer v2 ── */
+.rebal-v2 { display:none; margin:0 20px 30px; background:var(--card-bg-color); border-radius:15px; padding:24px; border:1px solid var(--border-color); }
+.rebal-v2 .phase-header { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-color-secondary); margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--border-color); }
+.rebal-v2 .acct-block { margin-bottom:20px; padding-bottom:20px; border-bottom:0.5px solid var(--border-color); }
+.rebal-v2 .acct-block:last-child { border-bottom:none; margin-bottom:0; }
+.rebal-v2 .bar-bg { background:var(--bg-color); border-radius:999px; height:12px; position:relative; overflow:visible; margin:6px 0 4px; }
+.rebal-v2 .bar-fill { height:100%; border-radius:999px; transition:width 0.5s ease; }
+.rebal-v2 .bar-target { position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--text-color-primary); opacity:0.35; border-radius:2px; }
+.rebal-v2 .rtag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.7rem; font-weight:700; }
+.rebal-v2 .rtag-over  { background:rgba(231,76,60,0.12); color:var(--negative-color); }
+.rebal-v2 .rtag-under { background:rgba(39,174,96,0.12); color:var(--positive-color); }
+.rebal-v2 .rtag-ok    { background:rgba(52,152,219,0.12); color:#3498db; }
+.rebal-v2 .rtag-info  { background:rgba(52,152,219,0.08); color:#3498db; }
+.rebal-v2 .rinput { width:70px; padding:5px 8px; border-radius:6px; border:1px solid var(--border-color); background:var(--input-bg-color,var(--bg-color)); color:var(--text-color-primary); font-size:0.82rem; text-align:center; }
+.rebal-v2 .rinput-wide { width:120px; }
+.rebal-v2 .scenario-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin:10px 0; }
+.rebal-v2 .scenario-card { background:var(--bg-color); border:1px solid var(--border-color); border-radius:10px; padding:12px; text-align:center; }
+.rebal-v2 .scenario-card.highlight { border-color:var(--accent-color-1,#3498db); }
+.rebal-v2 .scenario-val { font-size:1.1rem; font-weight:800; color:var(--text-color-primary); margin:4px 0 2px; }
+.rebal-v2 .suggest-box { background:rgba(52,152,219,0.06); border:1px solid rgba(52,152,219,0.2); border-radius:8px; padding:10px 14px; margin-top:8px; font-size:0.8rem; }
+
 </style>
 
-<!-- Rebalance panel widget -->
-<div id="rebalWidget" class="rebal-widget">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+<!-- ── Rebalancer v2 Widget ── -->
+<div id="rebalV2" class="rebal-v2">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
     <div>
       <h3 style="font-size:1.05rem;font-weight:700;color:var(--text-color-primary);margin:0;">⚖️ Portfolio Rebalancer</h3>
-      <p style="font-size:0.72rem;color:var(--text-color-secondary);margin:4px 0 0;">Set target allocations. Enter available cash to rebalance with new money first before selling.</p>
+      <p style="font-size:0.72rem;color:var(--text-color-secondary);margin:4px 0 0;">Assess your current allocation, plan this week's contributions, and project your path to goal.</p>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <label style="font-size:0.78rem;color:var(--text-color-secondary);">Available cash ($)</label>
-      <input type="number" id="rebalCash" value="0" min="0" step="100"
-        style="width:100px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;">
-      <label style="font-size:0.78rem;color:var(--text-color-secondary);">Drift threshold (%)</label>
-      <input type="number" id="rebalThreshold" value="5" min="1" max="20" step="1"
-        style="width:60px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;">
-      <button onclick="window.runRebalance()" style="padding:7px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1),var(--accent-color-2));color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">Calculate</button>
-    </div>
+    <button onclick="window.rebalV2Run()" style="padding:7px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1,#3498db),var(--accent-color-2,#2980b9));color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">Calculate</button>
   </div>
-  <div id="rebalContent"></div>
+  <div id="rebalV2Content"><p style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:20px;">Click Calculate to load your portfolio assessment.</p></div>
 </div>
+
 
 <script>
 (function(){
@@ -6815,296 +6811,464 @@ if (_origBuild) {
 
 
 // ═══════════════════════════════════════════════
-//  PORTFOLIO REBALANCING TOOL
+//  PORTFOLIO REBALANCER v2
 // ═══════════════════════════════════════════════
-
 const REBAL_KEY = 'portfolioRebalTargets';
+const REBAL_GOAL_KEY = 'portfolioRebalGoals';
+const REBAL_CONTRIB_KEY = 'portfolioRebalContribs';
+const ALL_ACCOUNTS_R = ['Regular Brokerage','Roth IRA','401(k)','529 College Saving'];
+const ACCT_COLORS_R = {
+  'Regular Brokerage':'#3498db','Roth IRA':'#e74c3c',
+  '401(k)':'#f39c12','529 College Saving':'#9b59b6'
+};
+const ASSET_SUGGESTIONS = {
+  'Stock':      'individual stocks (e.g. AAPL, NVDA, MSFT) — growth or dividend payers',
+  'ETF':        'broad-market ETFs (e.g. VOO, VTI, QQQ) — low-cost index funds',
+  'Mutual Fund':'index mutual funds (e.g. FXAIX, VTSAX) or actively managed funds',
+  'Bond':       'bond ETFs (e.g. BND, AGG) — treasury or corporate bonds',
+  'CASH':       'money market funds — hold as dry powder for market dips',
+  'Other':      'assets matching your strategy for this account',
+};
 
-function loadTargets() {
-  try { return JSON.parse(localStorage.getItem(REBAL_KEY) || 'null') || {}; }
-  catch(e) { return {}; }
+function rLoadTargets()  { try{return JSON.parse(localStorage.getItem(REBAL_KEY)||'null')||{};}catch(e){return{};} }
+function rSaveTargets(t) { localStorage.setItem(REBAL_KEY,JSON.stringify(t)); }
+function rLoadGoals()    { try{return JSON.parse(localStorage.getItem(REBAL_GOAL_KEY)||'null')||{};}catch(e){return{};} }
+function rSaveGoals(g)   { localStorage.setItem(REBAL_GOAL_KEY,JSON.stringify(g)); }
+function rLoadContribs() { try{return JSON.parse(localStorage.getItem(REBAL_CONTRIB_KEY)||'null')||{};}catch(e){return{};} }
+function rSaveContribs(c){ localStorage.setItem(REBAL_CONTRIB_KEY,JSON.stringify(c)); }
+
+const rfc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+const rfc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+
+function rGetHoldings() {
+  if (typeof calculateHoldingsAndCash==='function') return calculateHoldingsAndCash();
+  return [];
 }
-function saveTargets(t) { localStorage.setItem(REBAL_KEY, JSON.stringify(t)); }
 
-window.runRebalance = function() {
-  const content  = document.getElementById('rebalContent');
-  if (!content) return;
-
-  const holdings = getHoldings();
-  const cash     = parseFloat(document.getElementById('rebalCash')?.value) || 0;
-  const drift    = parseFloat(document.getElementById('rebalThreshold')?.value) || 5;
-  const targets  = loadTargets();
-
-  // ── Compute current values per account ──
-  const acctValues = {};
-  ALL_ACCOUNTS.forEach(a => acctValues[a] = 0);
+function rCalcActualReturn() {
+  const holdings = rGetHoldings();
+  let totalCost=0, totalCurrentVal=0;
   holdings.forEach(h => {
-    if (!ALL_ACCOUNTS.includes(h.accountType)) return;
-    const price = h.currentPrice || h.averagePurchasePrice || 0;
-    acctValues[h.accountType] = (acctValues[h.accountType]||0) + h.totalShares * price;
+    totalCost += h.totalCost||0;
+    totalCurrentVal += h.totalShares*(h.currentPrice||h.averagePurchasePrice||0);
   });
-  const totalPortfolio = Object.values(acctValues).reduce((s,v)=>s+v,0) + cash;
-  const totalWithoutCash = Object.values(acctValues).reduce((s,v)=>s+v,0);
+  if (!totalCost||totalCost<=0) return null;
+  const txns = (window.portfolioData?.transactions||[]).filter(t=>(t.transactionType||'').toUpperCase()==='BUY');
+  if (!txns.length) return null;
+  const dates = txns.map(t=>new Date(t.date)).filter(d=>!isNaN(d));
+  const earliest = new Date(Math.min(...dates));
+  const yearsHeld = (Date.now()-earliest)/(365.25*24*60*60*1000);
+  if (yearsHeld<0.25) return null;
+  return (Math.pow(totalCurrentVal/totalCost,1/yearsHeld)-1)*100;
+}
 
-  // ── Account-level target inputs ──
-  const acctTargetSum = ALL_ACCOUNTS.reduce((s,a) => s+(parseFloat(targets[a]?.pct)||0), 0);
-  const targetWarning = Math.abs(acctTargetSum - 100) > 0.5 && acctTargetSum > 0
-    ? `<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.3);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.8rem;color:var(--negative-color);">
-        ⚠️ Account targets sum to ${acctTargetSum.toFixed(1)}% — they must add up to 100% for accurate rebalancing.
-       </div>` : '';
-
-  // ── Build within-account asset type targets ──
-  // Get asset types per account from holdings
-  const assetTypesByAccount = {};
-  holdings.forEach(h => {
-    if (!ALL_ACCOUNTS.includes(h.accountType)) return;
-    if (!assetTypesByAccount[h.accountType]) assetTypesByAccount[h.accountType] = {};
-    const type = h.type || 'Other';
-    const price = h.currentPrice || h.averagePurchasePrice || 0;
-    assetTypesByAccount[h.accountType][type] = (assetTypesByAccount[h.accountType][type]||0) + h.totalShares * price;
+function rCalcAvgWeeklyContrib() {
+  const txns = (window.portfolioData?.transactions||[]).filter(t=>{
+    const tp=(t.transactionType||'').toUpperCase();
+    return tp==='BUY'||tp==='DEPOSIT';
   });
+  if (!txns.length) return 0;
+  const dates=txns.map(t=>new Date(t.date)).filter(d=>!isNaN(d));
+  const earliest=new Date(Math.min(...dates));
+  const weeksElapsed=Math.max(1,(Date.now()-earliest)/(7*24*60*60*1000));
+  const total=txns.reduce((s,t)=>s+(parseFloat(t.shares||0)*parseFloat(t.price||0)||parseFloat(t.amount||0)||0),0);
+  return total/weeksElapsed;
+}
 
-  // ── Account rows ──
-  let accountRows = '';
-  const actions = [];
+window.rebalV2SaveTarget      = (a,v)=>{ const t=rLoadTargets(); if(!t[a])t[a]={}; t[a].pct=parseFloat(v)||0; rSaveTargets(t); };
+window.rebalV2SaveInnerTarget = (a,tp,v)=>{ const t=rLoadTargets(); if(!t[a])t[a]={}; if(!t[a].types)t[a].types={}; t[a].types[tp]=parseFloat(v)||0; rSaveTargets(t); };
+window.rebalV2SaveContrib     = (a,v)=>{ const c=rLoadContribs(); c[a]=parseFloat(v)||0; rSaveContribs(c); };
+window.rebalV2SaveGoal        = (a,field,v)=>{ const g=rLoadGoals(); if(!g[a])g[a]={}; g[a][field]=parseFloat(v)||0; rSaveGoals(g); };
 
-  ALL_ACCOUNTS.forEach(acct => {
-    const curVal    = acctValues[acct] || 0;
-    const curPct    = totalPortfolio > 0 ? (curVal / totalPortfolio) * 100 : 0;
-    const tgtPct    = parseFloat(targets[acct]?.pct) || 0;
-    const diff      = curPct - tgtPct;
-    const tgtVal    = (tgtPct / 100) * totalPortfolio;
-    const dollarGap = tgtVal - curVal;
-    const color     = ACCOUNT_COLORS[acct] || '#95a5a6';
+window.rebalV2Run = function() {
+  const el=document.getElementById('rebalV2Content');
+  if (!el) return;
+  el.innerHTML='<p style="color:var(--text-color-secondary);text-align:center;padding:20px;">Calculating...</p>';
+  setTimeout(()=>{ try{_rebalV2Build(el);}catch(e){el.innerHTML=`<p style="color:var(--negative-color);padding:20px;">Error: ${e.message}</p>`;console.error(e);} },30);
+};
 
-    let statusBadge = '';
-    if (tgtPct === 0) { statusBadge = pill('No target set', 'rebal-ok'); }
-    else if (Math.abs(diff) <= drift) { statusBadge = pill('✓ On target', 'rebal-ok'); }
-    else if (diff > drift) { statusBadge = pill(`▲ +${diff.toFixed(1)}% over`, 'rebal-over'); }
-    else { statusBadge = pill(`▼ ${diff.toFixed(1)}% under`, 'rebal-under'); }
+function _rebalV2Build(el) {
+  const holdings  = rGetHoldings();
+  const targets   = rLoadTargets();
+  const goals     = rLoadGoals();
+  const contribs  = rLoadContribs();
+  const actualRet = rCalcActualReturn();
+  const avgWeekly = rCalcAvgWeeklyContrib();
 
-    if (tgtPct > 0 && Math.abs(diff) > drift) {
-      actions.push({ acct, dollarGap, curVal, tgtVal, curPct, tgtPct, diff,
-        isTaxAdv: ['401(k)','529 College Saving','Roth IRA'].includes(acct) });
-    }
+  // ── Current values ──
+  const acctValues={}; const acctAssets={};
+  ALL_ACCOUNTS_R.forEach(a=>{ acctValues[a]=0; acctAssets[a]={}; });
+  holdings.forEach(h=>{
+    if (!ALL_ACCOUNTS_R.includes(h.accountType)) return;
+    const price=h.currentPrice||h.averagePurchasePrice||0;
+    const val=h.totalShares*price;
+    acctValues[h.accountType]=(acctValues[h.accountType]||0)+val;
+    const tp=h.type||'Other';
+    acctAssets[h.accountType][tp]=(acctAssets[h.accountType][tp]||0)+val;
+  });
+  const totalPortfolio=Object.values(acctValues).reduce((s,v)=>s+v,0);
 
-    // Within-account asset breakdown
-    const assetTypes = assetTypesByAccount[acct] || {};
-    const acctTotal  = Object.values(assetTypes).reduce((s,v)=>s+v,0);
-    let innerRows = '';
-    Object.entries(assetTypes).sort((a,b)=>b[1]-a[1]).forEach(([type, val]) => {
-      const curTypePct  = acctTotal > 0 ? (val/acctTotal)*100 : 0;
-      const savedTypePct = parseFloat(targets[acct]?.types?.[type]) || 0;
-      const typeDiff    = curTypePct - savedTypePct;
-      const typeStatusBadge = savedTypePct === 0 ? ''
-        : Math.abs(typeDiff) <= drift ? `<span style="font-size:0.68rem;color:var(--positive-color);">✓</span>`
-        : typeDiff > 0 ? `<span style="font-size:0.68rem;color:var(--negative-color);">▲${typeDiff.toFixed(1)}%</span>`
-        : `<span style="font-size:0.68rem;color:var(--positive-color);">▼${Math.abs(typeDiff).toFixed(1)}%</span>`;
-      innerRows += `<tr>
-        <td style="padding:4px 8px;color:var(--text-color-secondary);">${type}</td>
-        <td style="padding:4px 8px;text-align:right;">${fc0(val)}</td>
-        <td style="padding:4px 8px;text-align:right;">${curTypePct.toFixed(1)}%</td>
+  // ══ PHASE 1 — ASSESS ══
+  const tgtSum=ALL_ACCOUNTS_R.reduce((s,a)=>s+(parseFloat(targets[a]?.pct)||0),0);
+  const tgtWarn=tgtSum>0&&Math.abs(tgtSum-100)>0.5
+    ?`<div style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.3);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.8rem;color:var(--negative-color);">⚠️ Account targets sum to ${tgtSum.toFixed(1)}% — they must add up to 100%.</div>`:''
+
+  let assessHTML='';
+  ALL_ACCOUNTS_R.forEach(acct=>{
+    const curVal=acctValues[acct]||0;
+    const curPct=totalPortfolio>0?(curVal/totalPortfolio)*100:0;
+    const tgtPct=parseFloat(targets[acct]?.pct)||0;
+    const tgtVal=(tgtPct/100)*totalPortfolio;
+    const diff=curPct-tgtPct;
+    const gap=tgtVal-curVal;
+    const color=ACCT_COLORS_R[acct]||'#95a5a6';
+
+    let badge='';
+    if (!tgtPct) badge=`<span class="rtag rtag-info">No target set</span>`;
+    else if (Math.abs(diff)<=2) badge=`<span class="rtag rtag-ok">✓ On target</span>`;
+    else if (diff>0) badge=`<span class="rtag rtag-over">▲ ${diff.toFixed(1)}% over</span>`;
+    else badge=`<span class="rtag rtag-under">▼ ${Math.abs(diff).toFixed(1)}% under · needs ${rfc(Math.abs(gap))}</span>`;
+
+    // Asset breakdown
+    const acctTotal=Object.values(acctAssets[acct]).reduce((s,v)=>s+v,0);
+    let innerRows=Object.entries(acctAssets[acct]).sort((a,b)=>b[1]-a[1]).map(([tp,val])=>{
+      const cPct=acctTotal>0?(val/acctTotal)*100:0;
+      const sTgt=parseFloat(targets[acct]?.types?.[tp])||0;
+      const sDiff=cPct-sTgt;
+      const sb=!sTgt?'':Math.abs(sDiff)<=3?`<span style="font-size:0.68rem;color:var(--positive-color);">✓</span>`
+        :sDiff>0?`<span style="font-size:0.68rem;color:var(--negative-color);">▲${sDiff.toFixed(1)}%</span>`
+        :`<span style="font-size:0.68rem;color:var(--positive-color);">▼${Math.abs(sDiff).toFixed(1)}%</span>`;
+      return `<tr>
+        <td style="padding:4px 8px;color:var(--text-color-secondary);">${tp}</td>
+        <td style="padding:4px 8px;text-align:right;">${rfc(val)}</td>
+        <td style="padding:4px 8px;text-align:right;">${cPct.toFixed(1)}%</td>
         <td style="padding:4px 8px;text-align:right;">
-          <input type="number" class="rebal-inner-table-input" min="0" max="100" step="1"
-            value="${savedTypePct||''}" placeholder="0"
-            data-account="${acct}" data-type="${type}"
-            onchange="window._saveRebalInnerTarget('${acct}','${type}',this.value)">
-          <span style="font-size:0.72rem;color:var(--text-color-secondary);">%</span>
+          <input type="number" class="rinput" style="width:55px;" min="0" max="100" step="1"
+            value="${sTgt||''}" placeholder="0"
+            onchange="window.rebalV2SaveInnerTarget('${acct}','${tp}',this.value)">%
         </td>
-        <td style="padding:4px 8px;text-align:center;">${typeStatusBadge}</td>
+        <td style="padding:4px 8px;text-align:center;">${sb}</td>
       </tr>`;
-    });
+    }).join('');
 
-    const innerTable = Object.keys(assetTypes).length ? `
+    const innerTable=Object.keys(acctAssets[acct]).length?`
     <details style="margin-top:8px;">
-      <summary style="font-size:0.78rem;color:var(--text-color-secondary);cursor:pointer;user-select:none;">
-        Within-account breakdown (${Object.keys(assetTypes).length} asset types)
+      <summary style="font-size:0.78rem;color:var(--text-color-secondary);cursor:pointer;user-select:none;padding:4px 0;">
+        Within-account asset breakdown — click to expand &amp; set targets
       </summary>
-      <table class="rebal-inner-table" style="margin-top:6px;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:6px;">
         <thead><tr>
-          <th style="padding:4px 8px;text-align:left;">Asset Type</th>
-          <th style="padding:4px 8px;text-align:right;">Value</th>
-          <th style="padding:4px 8px;text-align:right;">Current %</th>
-          <th style="padding:4px 8px;text-align:right;">Target %</th>
-          <th style="padding:4px 8px;text-align:center;">Status</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--text-color-secondary);">Asset type</th>
+          <th style="padding:4px 8px;text-align:right;color:var(--text-color-secondary);">Value</th>
+          <th style="padding:4px 8px;text-align:right;color:var(--text-color-secondary);">Current %</th>
+          <th style="padding:4px 8px;text-align:right;color:var(--text-color-secondary);">Your target %</th>
+          <th style="padding:4px 8px;text-align:center;color:var(--text-color-secondary);">Status</th>
         </tr></thead>
         <tbody>${innerRows}</tbody>
       </table>
-    </details>` : '';
+    </details>`:'';
 
-    const barWidth = Math.min(100, curPct);
-    const tgtLeft  = Math.min(100, tgtPct);
-
-    accountRows += `
-    <div class="rebal-account-row">
+    assessHTML+=`
+    <div class="acct-block">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${color};flex-shrink:0;"></span>
-          <strong style="font-size:0.88rem;">${acct}</strong>
-          ${statusBadge}
+          <span style="width:12px;height:12px;border-radius:3px;background:${color};display:inline-block;flex-shrink:0;"></span>
+          <strong style="font-size:0.9rem;">${acct}</strong>${badge}
         </div>
-        <div style="display:flex;align-items:center;gap:10px;font-size:0.82rem;flex-wrap:wrap;">
-          <span style="color:var(--text-color-secondary);">Current: <strong>${fc0(curVal)}</strong> (${curPct.toFixed(1)}%)</span>
-          <span style="color:var(--text-color-secondary);">Target:</span>
-          <input type="number" class="rebal-input" min="0" max="100" step="1"
+        <div style="font-size:0.82rem;color:var(--text-color-secondary);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>Current: <strong>${rfc(curVal)}</strong> (${curPct.toFixed(1)}%)</span>
+          <span>Target:</span>
+          <input type="number" class="rinput" min="0" max="100" step="1"
             value="${tgtPct||''}" placeholder="0%"
-            onchange="window._saveRebalTarget('${acct}',this.value)">
-          <span style="color:var(--text-color-secondary);">%</span>
-          ${tgtPct>0 ? `<span style="color:var(--text-color-secondary);">= ${fc0(tgtVal)}</span>` : ''}
+            onchange="window.rebalV2SaveTarget('${acct}',this.value)">%
+          ${tgtPct?`<span>= ${rfc(tgtVal)}</span>`:''}
         </div>
       </div>
-      <div class="rebal-bar-bg">
-        <div class="rebal-bar-current" style="width:${barWidth}%;background:${color};opacity:0.75;"></div>
-        ${tgtPct>0 ? `<div class="rebal-target-line" style="left:${tgtLeft}%;"></div>` : ''}
+      <div class="bar-bg">
+        <div class="bar-fill" style="width:${Math.min(100,curPct)}%;background:${color};opacity:0.75;"></div>
+        ${tgtPct?`<div class="bar-target" style="left:${Math.min(100,tgtPct)}%;"></div>`:''}
       </div>
       ${innerTable}
     </div>`;
   });
 
-  // ── Action Plan ──
-  // Sort: tax-advantaged sells first (no cap gains), then by size
-  const sells = actions.filter(a => a.dollarGap < 0).sort((a,b) => {
-    if (a.isTaxAdv && !b.isTaxAdv) return -1;
-    if (!a.isTaxAdv && b.isTaxAdv) return 1;
-    return a.dollarGap - b.dollarGap;
+  // ══ PHASE 2 — CONTRIBUTE ══
+  const underweight=ALL_ACCOUNTS_R.map(a=>{
+    const curVal=acctValues[a]||0;
+    const tgtPct=parseFloat(targets[a]?.pct)||0;
+    const tgtVal=(tgtPct/100)*totalPortfolio;
+    return {acct:a,gap:tgtVal-curVal,tgtPct,curVal,color:ACCT_COLORS_R[a]||'#95a5a6'};
+  }).filter(a=>a.gap>50&&a.tgtPct>0);
+
+  const totalGap=underweight.reduce((s,a)=>s+a.gap,0);
+
+  let contribInputs=ALL_ACCOUNTS_R.map(a=>{
+    const saved=contribs[a]||0;
+    const color=ACCT_COLORS_R[a]||'#95a5a6';
+    const uw=underweight.find(u=>u.acct===a);
+    const hint=uw?`<span style="font-size:0.7rem;color:var(--positive-color);">↑ underweight by ${rfc(uw.gap)}</span>`:'';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+      <span style="width:10px;height:10px;border-radius:2px;background:${color};display:inline-block;flex-shrink:0;"></span>
+      <span style="font-size:0.85rem;min-width:170px;">${a}</span>
+      <span style="font-size:0.82rem;color:var(--text-color-secondary);">$</span>
+      <input type="number" class="rinput rinput-wide" min="0" step="50"
+        value="${saved||''}" placeholder="0"
+        onchange="window.rebalV2SaveContrib('${a}',this.value)">
+      <span style="font-size:0.8rem;color:var(--text-color-secondary);">/week</span>
+      ${hint}
+    </div>`;
+  }).join('');
+
+  const totalContrib=ALL_ACCOUNTS_R.reduce((s,a)=>s+(contribs[a]||0),0);
+
+  // Weeks to rebalance
+  let weeksToRebal=null;
+  if (totalContrib>0&&totalGap>50) {
+    const weeklyToUnder=ALL_ACCOUNTS_R.reduce((s,a)=>s+(underweight.find(u=>u.acct===a)?(contribs[a]||0):0),0);
+    weeksToRebal=weeklyToUnder>0?Math.ceil(totalGap/weeklyToUnder):null;
+  }
+
+  // Asset type suggestions for Brokerage + Roth IRA
+  let assetSuggestions='';
+  ['Regular Brokerage','Roth IRA'].forEach(acct=>{
+    const contrib=contribs[acct]||0;
+    if (!contrib) return;
+    const acctTotal=Object.values(acctAssets[acct]||{}).reduce((s,v)=>s+v,0);
+    if (!acctTotal) return;
+    let mostUnder=null,biggestGap=0;
+    Object.entries(acctAssets[acct]||{}).forEach(([tp,val])=>{
+      const tgt=parseFloat(targets[acct]?.types?.[tp])||0;
+      if (!tgt) return;
+      const cur=acctTotal>0?(val/acctTotal)*100:0;
+      const gap=tgt-cur;
+      if (gap>biggestGap){biggestGap=gap;mostUnder=tp;}
+    });
+    if (mostUnder) {
+      assetSuggestions+=`
+      <div class="suggest-box">
+        <strong>${acct}:</strong> This week, prioritise buying <strong>${mostUnder}</strong> — it's ${biggestGap.toFixed(1)}% below your within-account target.<br>
+        <span style="color:var(--text-color-secondary);">What to buy: ${ASSET_SUGGESTIONS[mostUnder]||'assets matching your strategy'}.</span>
+      </div>`;
+    } else {
+      assetSuggestions+=`
+      <div class="suggest-box">
+        <strong>${acct}:</strong> No within-account target set yet — expand the asset breakdown above to set targets and get specific buy suggestions.
+      </div>`;
+    }
   });
-  const buys = actions.filter(a => a.dollarGap > 0).sort((a,b) => b.dollarGap - a.dollarGap);
 
-  let remainingCash = cash;
-  let actionHTML = '';
+  // Sell option when gap is too large
+  let sellOption='';
+  if (totalGap>500&&(weeksToRebal===null||weeksToRebal>26)) {
+    const overAccts=ALL_ACCOUNTS_R.filter(a=>{
+      const curVal=acctValues[a]||0,tgtPct=parseFloat(targets[a]?.pct)||0;
+      return curVal>(tgtPct/100)*totalPortfolio+50&&tgtPct>0;
+    }).map(a=>{
+      const excess=acctValues[a]-((parseFloat(targets[a]?.pct)||0)/100)*totalPortfolio;
+      const isTaxAdv=['Roth IRA','401(k)','529 College Saving'].includes(a);
+      return {acct:a,excess,isTaxAdv,color:ACCT_COLORS_R[a]||'#95a5a6'};
+    }).sort((a,b)=>b.isTaxAdv-a.isTaxAdv);
 
-  if (actions.length > 0 || cash > 0) {
-    // Apply cash to buys first
-    const buyRows = buys.map(a => {
-      const fromCash = Math.min(remainingCash, a.dollarGap);
-      remainingCash -= fromCash;
-      const fromSell = a.dollarGap - fromCash;
-      return `<tr style="border-bottom:0.5px solid var(--border-color);">
-        <td style="padding:7px 8px;">
-          <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${ACCOUNT_COLORS[a.acct]||'#95a5a6'};margin-right:6px;"></span>
-          <strong>${a.acct}</strong>
-        </td>
-        <td style="padding:7px 8px;text-align:center;">
-          <span style="padding:2px 10px;border-radius:999px;background:rgba(39,174,96,0.12);color:var(--positive-color);font-weight:700;font-size:0.82rem;">BUY / ADD</span>
-        </td>
-        <td style="padding:7px 8px;text-align:right;color:var(--positive-color);font-weight:700;">${fc0(a.dollarGap)}</td>
-        <td style="padding:7px 8px;font-size:0.78rem;color:var(--text-color-secondary);">
-          ${fromCash>0?`${fc0(fromCash)} from new cash`:''}
-          ${fromCash>0&&fromSell>0?' + ':''}
-          ${fromSell>0?`${fc0(fromSell)} from rebalance proceeds`:''}
-        </td>
-        <td style="padding:7px 8px;text-align:right;font-size:0.78rem;color:var(--text-color-secondary);">
-          ${a.curPct.toFixed(1)}% → ${a.tgtPct.toFixed(1)}%
-        </td>
-      </tr>`;
-    }).join('');
-
-    const sellRows = sells.map(a => {
-      const taxNote = ['Roth IRA','401(k)','529 College Saving'].includes(a.acct)
-        ? '<span style="font-size:0.72rem;color:var(--positive-color);">No cap gains event ✓</span>'
-        : '<span style="font-size:0.72rem;color:var(--negative-color);">May trigger capital gains</span>';
-      return `<tr style="border-bottom:0.5px solid var(--border-color);">
-        <td style="padding:7px 8px;">
-          <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${ACCOUNT_COLORS[a.acct]||'#95a5a6'};margin-right:6px;"></span>
-          <strong>${a.acct}</strong>
-        </td>
-        <td style="padding:7px 8px;text-align:center;">
-          <span style="padding:2px 10px;border-radius:999px;background:rgba(231,76,60,0.10);color:var(--negative-color);font-weight:700;font-size:0.82rem;">SELL / REDUCE</span>
-        </td>
-        <td style="padding:7px 8px;text-align:right;color:var(--negative-color);font-weight:700;">${fc0(Math.abs(a.dollarGap))}</td>
-        <td style="padding:7px 8px;">${taxNote}</td>
-        <td style="padding:7px 8px;text-align:right;font-size:0.78rem;color:var(--text-color-secondary);">
-          ${a.curPct.toFixed(1)}% → ${a.tgtPct.toFixed(1)}%
-        </td>
-      </tr>`;
-    }).join('');
-
-    actionHTML = `
-    <div style="margin-top:24px;">
-      <h4 style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:10px;">Action Plan</h4>
-      <p style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:10px;">
-        Tax-advantaged sells (Roth IRA, 401k, 529) are listed first — no capital gains event inside those accounts.
-        ${cash>0?`Available cash of <strong>${fc0(cash)}</strong> applied to underweight accounts first.`:''}
-      </p>
-      <table class="rebal-action-table">
-        <thead><tr>
-          <th>Account</th><th style="text-align:center;">Action</th>
-          <th style="text-align:right;">Amount</th><th>Notes</th>
-          <th style="text-align:right;">Allocation shift</th>
-        </tr></thead>
-        <tbody>${sellRows}${buyRows}</tbody>
-      </table>
-    </div>`;
-  } else if (acctTargetSum === 0) {
-    actionHTML = `<div style="padding:20px;text-align:center;background:var(--bg-color);border-radius:10px;border:1px solid var(--border-color);margin-top:16px;">
-      <div style="font-size:0.9rem;color:var(--text-color-secondary);">Enter target percentages for each account above, then click <strong>Calculate</strong>.</div>
-    </div>`;
-  } else {
-    actionHTML = `<div style="padding:20px;text-align:center;background:rgba(39,174,96,0.06);border-radius:10px;border:1px solid rgba(39,174,96,0.2);margin-top:16px;">
-      <div style="font-size:1.1rem;margin-bottom:6px;">✅</div>
-      <div style="font-weight:700;color:var(--positive-color);">Portfolio is within ${drift}% of all targets</div>
-      <div style="font-size:0.8rem;color:var(--text-color-secondary);margin-top:4px;">No rebalancing needed right now. Adjust the drift threshold to see smaller deviations.</div>
-    </div>`;
+    if (overAccts.length) {
+      sellOption=`
+      <div style="margin-top:14px;padding:14px;background:rgba(243,156,18,0.06);border:1px solid rgba(243,156,18,0.25);border-radius:10px;">
+        <div style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">
+          Alternative: one-time rebalancing sell
+          <span style="font-weight:400;color:var(--text-color-secondary);">(${weeksToRebal===null?'contributions alone cannot rebalance':`gap is large — ~${weeksToRebal} weeks at current pace`})</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+          <thead><tr>
+            <th style="padding:5px 8px;color:var(--text-color-secondary);border-bottom:1px solid var(--border-color);">Sell from</th>
+            <th style="padding:5px 8px;text-align:right;color:var(--text-color-secondary);border-bottom:1px solid var(--border-color);">Amount</th>
+            <th style="padding:5px 8px;color:var(--text-color-secondary);border-bottom:1px solid var(--border-color);">Tax note</th>
+          </tr></thead>
+          <tbody>${overAccts.map(o=>`<tr>
+            <td style="padding:6px 8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${o.color};margin-right:6px;"></span><strong>${o.acct}</strong></td>
+            <td style="padding:6px 8px;text-align:right;color:var(--negative-color);font-weight:700;">${rfc(o.excess)}</td>
+            <td style="padding:6px 8px;">${o.isTaxAdv
+              ?'<span style="font-size:0.72rem;color:var(--positive-color);">No cap gains event ✓</span>'
+              :'<span style="font-size:0.72rem;color:var(--negative-color);">May trigger capital gains</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+        <p style="font-size:0.7rem;color:var(--text-color-secondary);margin-top:8px;font-style:italic;">Your choice — contributions-only is slower but avoids selling. Sell option is faster but may trigger taxes.</p>
+      </div>`;
+    }
   }
 
-  content.innerHTML = `
-  <div style="margin-bottom:6px;font-size:0.72rem;color:var(--text-color-secondary);">
-    Total portfolio: <strong>${fc0(totalWithoutCash)}</strong>
-    ${cash>0?`+ <strong>${fc0(cash)}</strong> new cash = <strong>${fc0(totalPortfolio)}</strong>`:''}
-    &nbsp;·&nbsp; Vertical line = target · Bar = current
+  const contribSummary=totalContrib>0?`
+  <div style="margin-top:14px;padding:12px 14px;background:rgba(39,174,96,0.06);border:1px solid rgba(39,174,96,0.2);border-radius:10px;">
+    <div style="font-size:0.82rem;font-weight:700;color:var(--text-color-primary);margin-bottom:8px;">
+      This week's total: <span style="color:var(--positive-color);">${rfc(totalContrib)}</span>
+      ${weeksToRebal?` · Est. <strong>${weeksToRebal} weeks</strong> to reach target at this pace`:''}
+      ${totalGap<=50?'<span style="color:var(--positive-color);"> · ✓ Already on target!</span>':''}
+    </div>
+    ${assetSuggestions}
   </div>
-  ${targetWarning}
-  ${accountRows}
-  ${actionHTML}
-  <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:16px;font-style:italic;">
-    Estimates only. Selling in taxable accounts may trigger capital gains tax. Consult a financial advisor before rebalancing.
-  </p>`;
-};
+  ${sellOption}`
+  :`<div style="margin-top:10px;padding:10px 14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;font-size:0.8rem;color:var(--text-color-secondary);">
+    Enter this week's contribution amount for each account above. You can change these every week — enter more when markets dip.
+  </div>`;
 
-// ── Save target helpers ──
-window._saveRebalTarget = function(acct, val) {
-  const t = loadTargets();
-  if (!t[acct]) t[acct] = {};
-  t[acct].pct = parseFloat(val) || 0;
-  saveTargets(t);
-};
-window._saveRebalInnerTarget = function(acct, type, val) {
-  const t = loadTargets();
-  if (!t[acct]) t[acct] = {};
-  if (!t[acct].types) t[acct].types = {};
-  t[acct].types[type] = parseFloat(val) || 0;
-  saveTargets(t);
-};
-
-// ── Open/close rebalance widget ──
-function openRebalWidget() {
-  const w = document.getElementById('rebalWidget');
-  if (!w) return;
-  const isOpen = w.style.display !== 'none';
-  w.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) {
-    // Restore saved targets into inputs (they load from localStorage on runRebalance)
-    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.runRebalance();
+  // ══ PHASE 3 — PROJECT ══
+  const scenarios=[
+    {label:'Conservative', rate:5,  note:'5%/yr'},
+    {label:'Moderate',     rate:7,  note:'7%/yr', highlight:true},
+    {label:'Optimistic',   rate:10, note:'10%/yr'},
+  ];
+  if (actualRet!==null) {
+    scenarios.push({label:'Your actual', rate:parseFloat(actualRet.toFixed(1)), note:`${actualRet.toFixed(1)}%/yr actual`, actual:true});
   }
-}
-window.openRebalWidget = openRebalWidget;
 
-// ── Inject ⚖️ Rebalance button into header toolbar ──
-function injectRebalButton() {
-  const group = document.getElementById('_enhControlsInjected');
-  if (!group || document.getElementById('_rebalBtn')) return;
-  const btn = document.createElement('span');
-  btn.id = '_rebalBtn';
-  btn.className = 'density-toggle';
-  btn.title = 'Portfolio Rebalancer';
-  btn.textContent = '⚖️ Rebalance';
-  btn.addEventListener('click', openRebalWidget);
+  function projectFV(pv, weeklyPMT, annualRate, years) {
+    const r=annualRate/100/52, n=years*52;
+    if (r===0) return pv + weeklyPMT*n;
+    return pv*Math.pow(1+r,n)+(weeklyPMT>0?weeklyPMT*(Math.pow(1+r,n)-1)/r:0);
+  }
+  function reqWeekly(pv, target, annualRate, years) {
+    const r=annualRate/100/52, n=years*52;
+    const fvFromPV=pv*Math.pow(1+r,n);
+    const need=target-fvFromPV;
+    if (need<=0) return 0;
+    return Math.pow(1+r,n)>1 ? need*r/(Math.pow(1+r,n)-1) : need/n;
+  }
+
+  // Per-account goals
+  let goalAccountsHTML=ALL_ACCOUNTS_R.map(acct=>{
+    const g=goals[acct]||{};
+    const targetAmt=parseFloat(g.target)||0;
+    const years=parseFloat(g.years)||10;
+    const curVal=acctValues[acct]||0;
+    const wContrib=contribs[acct]||0;
+    const color=ACCT_COLORS_R[acct]||'#95a5a6';
+
+    let scenHTML='';
+    if (targetAmt>0) {
+      const cards=scenarios.map(s=>{
+        const fv=projectFV(curVal,wContrib,s.rate,years);
+        const onTrack=fv>=targetAmt;
+        const gap=targetAmt-fv;
+        return `<div class="scenario-card${s.highlight?' highlight':''}">
+          <div style="font-size:0.7rem;color:var(--text-color-secondary);">${s.label} (${s.note})</div>
+          <div class="scenario-val" style="color:${onTrack?'var(--positive-color)':'var(--negative-color)'};">${rfc(fv)}</div>
+          <div style="font-size:0.7rem;color:${onTrack?'var(--positive-color)':'var(--negative-color)'};">
+            ${onTrack?'✓ On track':`Short ${rfc(Math.abs(gap))}`}
+          </div>
+        </div>`;
+      }).join('');
+      const rq=reqWeekly(curVal,targetAmt,7,years);
+      scenHTML=`<div class="scenario-grid">${cards}</div>
+      <div style="font-size:0.78rem;color:var(--text-color-secondary);">
+        To reach <strong>${rfc(targetAmt)}</strong> in <strong>${years} yrs</strong> at 7%: need <strong style="color:var(--text-color-primary);">${rfc2(rq)}/week</strong>
+        ${wContrib>0?` (you have ${rfc2(wContrib)}/week — ${rq<=wContrib?'<span style="color:var(--positive-color);">✓ enough</span>':`<span style="color:var(--negative-color);">need ${rfc2(rq-wContrib)} more/week</span>`})`:'<span style="color:var(--text-color-secondary);"> — enter a weekly amount in Phase 2 to see if it\'s enough</span>'}
+      </div>`;
+    }
+
+    return `<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:0.5px solid var(--border-color);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="width:10px;height:10px;border-radius:2px;background:${color};display:inline-block;"></span>
+        <strong style="font-size:0.88rem;">${acct}</strong>
+        <span style="font-size:0.8rem;color:var(--text-color-secondary);">Current: ${rfc(curVal)} · Contributing: ${rfc2(contribs[acct]||0)}/week</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:0.82rem;margin-bottom:${targetAmt?'10px':'0'};">
+        <span style="color:var(--text-color-secondary);">Target ($)</span>
+        <input type="number" class="rinput rinput-wide" min="0" step="1000"
+          value="${targetAmt||''}" placeholder="e.g. 500000"
+          onchange="window.rebalV2SaveGoal('${acct}','target',this.value);window.rebalV2Run();">
+        <span style="color:var(--text-color-secondary);">in</span>
+        <input type="number" class="rinput" min="1" max="50" step="1"
+          value="${years}" placeholder="10"
+          onchange="window.rebalV2SaveGoal('${acct}','years',this.value);window.rebalV2Run();">
+        <span style="color:var(--text-color-secondary);">years</span>
+      </div>
+      ${scenHTML}
+    </div>`;
+  }).join('');
+
+  // Grand total goal
+  const gGoal=goals['_grand']||{};
+  const gTarget=parseFloat(gGoal.target)||0;
+  const gYears=parseFloat(gGoal.years)||20;
+  const gCurrent=Object.values(acctValues).reduce((s,v)=>s+v,0);
+  const gWeekly=totalContrib||avgWeekly;
+
+  let grandScenHTML='';
+  if (gTarget>0) {
+    const cards=scenarios.map(s=>{
+      const fv=projectFV(gCurrent,gWeekly,s.rate,gYears);
+      const onTrack=fv>=gTarget;
+      return `<div class="scenario-card${s.highlight?' highlight':''}">
+        <div style="font-size:0.7rem;color:var(--text-color-secondary);">${s.label} (${s.note})</div>
+        <div class="scenario-val" style="color:${onTrack?'var(--positive-color)':'var(--negative-color)'};">${rfc(fv)}</div>
+        <div style="font-size:0.7rem;color:${onTrack?'var(--positive-color)':'var(--negative-color)'};">${onTrack?'✓ On track':`Short ${rfc(Math.abs(gTarget-fv))}`}</div>
+      </div>`;
+    }).join('');
+    const rq=reqWeekly(gCurrent,gTarget,7,gYears);
+    grandScenHTML=`<div class="scenario-grid" style="margin-top:12px;">${cards}</div>
+    <div style="font-size:0.78rem;color:var(--text-color-secondary);margin-top:8px;">
+      Total weekly contributions: <strong>${rfc2(gWeekly)}</strong>${gWeekly===avgWeekly&&totalContrib===0?' (avg from your history)':''}
+      · To reach ${rfc(gTarget)} at 7%: need <strong>${rfc2(rq)}/week</strong>
+      ${rq<=gWeekly?'<span style="color:var(--positive-color);"> ✓ on pace</span>':`<span style="color:var(--negative-color);"> — need ${rfc2(rq-gWeekly)} more/week</span>`}
+    </div>`;
+  }
+
+  const grandHTML=`
+  <div style="margin-top:16px;padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+    <div style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:10px;">🏆 Grand Total Goal — all accounts combined</div>
+    <div style="font-size:0.8rem;color:var(--text-color-secondary);margin-bottom:10px;">Current total: <strong style="color:var(--text-color-primary);">${rfc(gCurrent)}</strong></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:0.82rem;margin-bottom:${gTarget?'10px':'0'};">
+      <span style="color:var(--text-color-secondary);">Total target ($)</span>
+      <input type="number" class="rinput" style="width:140px;" min="0" step="10000"
+        value="${gTarget||''}" placeholder="e.g. 2000000"
+        onchange="window.rebalV2SaveGoal('_grand','target',this.value);window.rebalV2Run();">
+      <span style="color:var(--text-color-secondary);">in</span>
+      <input type="number" class="rinput" min="1" max="50" step="1"
+        value="${gYears}" placeholder="20"
+        onchange="window.rebalV2SaveGoal('_grand','years',this.value);window.rebalV2Run();">
+      <span style="color:var(--text-color-secondary);">years</span>
+    </div>
+    ${grandScenHTML}
+  </div>`;
+
+  el.innerHTML=`
+  <div>
+    <div class="phase-header">Phase 1 · Current allocation</div>
+    <p style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:12px;">Your live balances are read automatically. Set a target % for each account. Expand any account to set asset-type targets within it. Targets save as you type.</p>
+    ${tgtWarn}${assessHTML}
+  </div>
+  <div style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border-color);">
+    <div class="phase-header">Phase 2 · This week's contribution plan</div>
+    <p style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:12px;">Enter what you're investing this week in each account. Change it every week — invest more when markets dip. The tool tells you which asset type to buy and how many weeks until you're balanced.</p>
+    ${contribInputs}${contribSummary}
+  </div>
+  <div style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border-color);">
+    <div class="phase-header">Phase 3 · Goal projection</div>
+    <p style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:14px;">Set a dollar target and timeline per account. Uses your Phase 2 weekly contributions to project growth under 4 scenarios — including your actual historical return rate.</p>
+    ${goalAccountsHTML}${grandHTML}
+    <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:14px;font-style:italic;">Projections use compound growth math. Actual returns vary. Not financial advice.</p>
+  </div>`;
+}
+
+function openRebalV2() {
+  const w=document.getElementById('rebalV2');
+  if (!w) return;
+  const isOpen=w.style.display!=='none';
+  w.style.display=isOpen?'none':'block';
+  if (!isOpen){w.scrollIntoView({behavior:'smooth',block:'start'});window.rebalV2Run();}
+}
+window.openRebalWidget=openRebalV2;
+
+function injectRebalV2Button() {
+  const group=document.getElementById('_enhControlsInjected');
+  if (!group||document.getElementById('_rebalBtn')) return;
+  const btn=document.createElement('span');
+  btn.id='_rebalBtn'; btn.className='density-toggle';
+  btn.title='Portfolio Rebalancer'; btn.textContent='⚖️ Rebalance';
+  btn.addEventListener('click',openRebalV2);
   group.appendChild(btn);
 }
+setTimeout(injectRebalV2Button,2000);
+window.addEventListener('load',()=>setTimeout(injectRebalV2Button,1500));
 
-setTimeout(injectRebalButton, 2000);
-window.addEventListener('load', () => setTimeout(injectRebalButton, 1500));
 
 })();
 </script>
