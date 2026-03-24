@@ -3487,7 +3487,18 @@
         // --- Utility and Charting Functions (MODIFIED for filterChart) ---
         function formatCurrency(amount) {
             if (typeof amount !== 'number') { return '$0.00'; }
-            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+            const rate   = window._fxRate   || 1;
+            const code   = window._fxCode   || 'USD';
+            const locale = window._fxLocale || 'en-US';
+            const noDecimals = ['VND','JPY','KRW','IDR'];
+            try {
+                return new Intl.NumberFormat(locale, {
+                    style: 'currency', currency: code,
+                    maximumFractionDigits: noDecimals.includes(code) ? 0 : 2
+                }).format(amount * rate);
+            } catch(e) {
+                return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+            }
         }
         function formatPercentage(value) {
             if (typeof value !== 'number') { return '0.00%'; }
@@ -5038,10 +5049,44 @@
                 </div>
                 <div class="data-status" id="dataStatus">...</div>
                 <div class="header-right">
+                    <div id="fx-wrap-401k" style="display:flex;align-items:center;gap:6px;">
+                      <select id="currency-select-401k" title="Display currency"
+                        style="padding:5px 8px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.78rem;font-family:inherit;cursor:pointer;">
+                        <optgroup label="Major">
+                          <option value="USD|en-US">🇺🇸 USD</option>
+                          <option value="EUR|de-DE">🇪🇺 EUR</option>
+                          <option value="GBP|en-GB">🇬🇧 GBP</option>
+                          <option value="JPY|ja-JP">🇯🇵 JPY</option>
+                          <option value="CAD|en-CA">🇨🇦 CAD</option>
+                          <option value="AUD|en-AU">🇦🇺 AUD</option>
+                          <option value="CHF|de-CH">🇨🇭 CHF</option>
+                        </optgroup>
+                        <optgroup label="Asian">
+                          <option value="VND|vi-VN">🇻🇳 VND</option>
+                          <option value="CNY|zh-CN">🇨🇳 CNY</option>
+                          <option value="KRW|ko-KR">🇰🇷 KRW</option>
+                          <option value="SGD|en-SG">🇸🇬 SGD</option>
+                          <option value="HKD|zh-HK">🇭🇰 HKD</option>
+                          <option value="THB|th-TH">🇹🇭 THB</option>
+                          <option value="MYR|ms-MY">🇲🇾 MYR</option>
+                          <option value="PHP|en-PH">🇵🇭 PHP</option>
+                          <option value="IDR|id-ID">🇮🇩 IDR</option>
+                          <option value="INR|hi-IN">🇮🇳 INR</option>
+                        </optgroup>
+                        <optgroup label="Other">
+                          <option value="MXN|es-MX">🇲🇽 MXN</option>
+                          <option value="BRL|pt-BR">🇧🇷 BRL</option>
+                          <option value="NOK|nb-NO">🇳🇴 NOK</option>
+                          <option value="SEK|sv-SE">🇸🇪 SEK</option>
+                          <option value="NZD|en-NZ">🇳🇿 NZD</option>
+                          <option value="ZAR|en-ZA">🇿🇦 ZAR</option>
+                        </optgroup>
+                      </select>
+                      <span id="fx-badge-401k" style="font-size:0.68rem;color:var(--text-color-secondary);white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;"></span>
+                    </div>
                     <div class="visibility-toggle header-icon" onclick="toggleStatsVisibility()">👁️</div>
                     <div class="activity-log-toggle header-icon" onclick="openActivityLogModal()">📜</div>
-					<!-- NEW: recurring purchases -->
-  					<div class="recurring-toggle header-icon" onclick="openRecurringPurchaseModal()">🔁</div>
+					<div class="recurring-toggle header-icon" onclick="openRecurringPurchaseModal()">🔁</div>
                     <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
                 </div>
             </div>
@@ -6352,6 +6397,89 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     document.body.appendChild(modal);
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   };
+})();
+</script>
+
+<!-- ── Multi-Currency for 401k App ── -->
+<script>
+(function(){
+'use strict';
+
+window._fxRate   = window._fxRate   || 1;
+window._fxCode   = window._fxCode   || 'USD';
+window._fxLocale = window._fxLocale || 'en-US';
+
+const SAVED_KEY = 'investmentApp_currency';
+
+async function fetchFxRate401k(code) {
+    if (code === 'USD') return 1;
+    try {
+        const res = await fetch(`https://api.frankfurter.app/latest?from=USD&to=${code}`);
+        if (!res.ok) throw new Error('err');
+        const data = await res.json();
+        const rate = data?.rates?.[code];
+        if (!rate) throw new Error('no rate');
+        return rate;
+    } catch(e) {
+        const fallback = {
+            EUR:0.92,GBP:0.79,JPY:149.5,CAD:1.36,AUD:1.53,CHF:0.89,
+            VND:24850,CNY:7.24,KRW:1330,SGD:1.34,HKD:7.82,THB:35.1,
+            MYR:4.65,PHP:56.2,IDR:15600,INR:83.1,
+            MXN:17.1,BRL:4.97,NOK:10.6,SEK:10.4,NZD:1.63,ZAR:18.7
+        };
+        return fallback[code] || 1;
+    }
+}
+
+async function applyCurrency401k(code, locale) {
+    const badge = document.getElementById('fx-badge-401k');
+    if (badge) badge.textContent = code === 'USD' ? '' : '…';
+
+    const rate = await fetchFxRate401k(code);
+    window._fxRate   = rate;
+    window._fxCode   = code;
+    window._fxLocale = locale;
+
+    if (badge) {
+        const noDecimals = ['VND','JPY','KRW','IDR'];
+        badge.textContent = code === 'USD' ? '' :
+            `1 USD = ${rate.toLocaleString(locale, {maximumFractionDigits: noDecimals.includes(code)?0:4})} ${code}`;
+    }
+
+    localStorage.setItem(SAVED_KEY, JSON.stringify({code, locale}));
+
+    // Trigger full re-render so all stat cards, holdings, charts update
+    if (typeof updateDisplay === 'function') updateDisplay(false);
+}
+
+function initFx401k() {
+    const sel = document.getElementById('currency-select-401k');
+    if (!sel) return;
+
+    // Restore saved preference
+    try {
+        const saved = JSON.parse(localStorage.getItem(SAVED_KEY) || 'null');
+        if (saved?.code) {
+            const opt = Array.from(sel.options).find(o => o.value.startsWith(saved.code + '|'));
+            if (opt) sel.value = opt.value;
+        }
+    } catch(e) {}
+
+    sel.addEventListener('change', () => {
+        const [code, locale] = sel.value.split('|');
+        applyCurrency401k(code, locale);
+    });
+
+    // Apply saved on load
+    setTimeout(() => {
+        const [code, locale] = sel.value.split('|');
+        if (code !== 'USD') applyCurrency401k(code, locale);
+    }, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', initFx401k);
+window.addEventListener('load', () => setTimeout(initFx401k, 500));
+
 })();
 </script>
 
