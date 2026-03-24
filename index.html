@@ -155,7 +155,20 @@
         .btn-edit:hover { background: #F59E0B; }
         .btn-secondary { background: linear-gradient(45deg, #8B5CF6, #7C3AED); }
         .account-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; margin-left: 10px; }
-        .account-regular { background: #3498db; } .account-roth { background: #e74c3c; } .account-401k { background: #f39c12; } .account-529 { background: #9b59b6; } .account-yahoo { background: #20c997; }
+
+        /* ── Canonical account colors — single source of truth ── */
+        :root {
+            --color-account-brokerage: #3498db;
+            --color-account-roth:      #e74c3c;
+            --color-account-401k:      #f39c12;
+            --color-account-529:       #9b59b6;
+            --color-account-yahoo:     #20c997;
+        }
+        .account-regular { background: var(--color-account-brokerage); }
+        .account-roth    { background: var(--color-account-roth); }
+        .account-401k    { background: var(--color-account-401k); }
+        .account-529     { background: var(--color-account-529); }
+        .account-yahoo   { background: var(--color-account-yahoo); }
         .investment-item:not(.consolidated) .investment-details {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -167,11 +180,11 @@
         #clearAllDataBtn { background: linear-gradient(45deg, #e74c3c, #c0392b); }
         .investment-group { margin-bottom: 15px; border-radius: 10px; overflow: hidden; }
         .investment-group-header { background: var(--card-bg-color); padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px var(--shadow-color); margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: all 0.2s ease; border: 1px solid var(--border-color); }
-        .investment-group-header[data-group-type="Regular Brokerage"] { border-left: 4px solid #3498db; }
-        .investment-group-header[data-group-type="Roth IRA"] { border-left: 4px solid #e74c3c; }
-        .investment-group-header[data-group-type="401(k)"] { border-left: 4px solid #f39c12; }
-        .investment-group-header[data-group-type="529 College Saving"] { border-left: 4px solid #9b59b6; }
-        .investment-group-header[data-group-type="Yahoo Finance"] { border-left: 4px solid #20c997; }
+        .investment-group-header[data-group-type="Regular Brokerage"] { border-left: 4px solid var(--color-account-brokerage); }
+        .investment-group-header[data-group-type="Roth IRA"]          { border-left: 4px solid var(--color-account-roth); }
+        .investment-group-header[data-group-type="401(k)"]            { border-left: 4px solid var(--color-account-401k); }
+        .investment-group-header[data-group-type="529 College Saving"] { border-left: 4px solid var(--color-account-529); }
+        .investment-group-header[data-group-type="Yahoo Finance"]      { border-left: 4px solid var(--color-account-yahoo); }
         .investment-group-header:hover { transform: translateY(-2px); box-shadow: 0 4px 15px var(--shadow-color); }
         .group-summary { flex-grow: 1; } .group-title { font-size: 1.3em; font-weight: 700; color: var(--text-color-primary); margin-bottom: 5px; } .group-stats { display: flex; gap: 15px; font-size: 0.9em; flex-wrap: wrap; } .group-stat-item .detail-label { font-size: 0.75em; color: var(--text-color-secondary); } .group-stat-item .detail-value { font-weight: 600; font-size: 1.1em; color: var(--text-color-primary); } .group-stat-item .detail-value.positive { color: var(--positive-color); } .group-stat-item .detail-value.negative { color: var(--negative-color); }
         .toggle-icon { font-size: 1.5em; font-weight: bold; color: var(--accent-color-1); margin-left: 15px; transition: transform 0.2s ease; }
@@ -2644,6 +2657,30 @@
 
         // --- Settings Modal (Unchanged from uploaded file, except for sign out button) ---
         function openSettingsModal() {
+            // Populate data overview
+            const txns     = portfolioData.transactions || [];
+            const symbols  = new Set(txns.map(t => t.symbol).filter(Boolean));
+            const accounts = new Set(txns.map(t => t.accountType).filter(Boolean));
+            const logs     = (portfolioData.activityLog || []).length;
+            const recurring = (portfolioData.recurringTransactions || []).length;
+
+            const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+            set('ov-txn-count',      txns.length.toLocaleString());
+            set('ov-symbol-count',   symbols.size.toLocaleString());
+            set('ov-account-count',  accounts.size.toLocaleString());
+            set('ov-log-count',      logs.toLocaleString());
+            set('ov-recurring-count',recurring.toLocaleString());
+
+            // Last backup from activity log
+            const lastBackup = (portfolioData.activityLog || []).find(e => e.message && e.message.toLowerCase().includes('backup'));
+            set('ov-last-backup', lastBackup ? new Date(lastBackup.date).toLocaleDateString() : 'Never');
+
+            // Approx storage estimate (JSON size)
+            try {
+                const bytes = new Blob([JSON.stringify(portfolioData)]).size;
+                const kb = (bytes / 1024).toFixed(1);
+                set('ov-storage', kb + ' KB');
+            } catch(e) { set('ov-storage', '—'); }
             // Load saved age bracket — set to 50to59 if not yet configured
             const saved = localStorage.getItem('userAgeBracket') || 'under50';
             const sel = document.getElementById('ageBracketSelect');
@@ -3572,6 +3609,13 @@
 
             if(Object.keys(accountData).length > 0) {
                  const accountColors = {'Regular Brokerage': '#3498db', 'Roth IRA': '#e74c3c', '401(k)': '#f39c12', '529 College Saving': '#9b59b6', 'Yahoo Finance': '#20c997'};
+                 // Read from CSS variables so chart always matches badges and borders
+                 const _cs = getComputedStyle(document.documentElement);
+                 accountColors['Regular Brokerage'] = _cs.getPropertyValue('--color-account-brokerage').trim() || '#3498db';
+                 accountColors['Roth IRA']          = _cs.getPropertyValue('--color-account-roth').trim()      || '#e74c3c';
+                 accountColors['401(k)']            = _cs.getPropertyValue('--color-account-401k').trim()      || '#f39c12';
+                 accountColors['529 College Saving']= _cs.getPropertyValue('--color-account-529').trim()       || '#9b59b6';
+                 accountColors['Yahoo Finance']     = _cs.getPropertyValue('--color-account-yahoo').trim()     || '#20c997';
                  accountChart = safeNewChart('accountChart', { type: 'doughnut', data: { labels: Object.keys(accountData), datasets: [{ data: Object.values(accountData), backgroundColor: Object.keys(accountData).map(l => accountColors[l] || '#95a5a6'), borderWidth: 3, borderColor: currentTheme === 'dark' ? '#121212' : '#f0f2f5' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: labelColor, generateLabels: chartLegendLabelGenerator } }, tooltip: { callbacks: { label: chartTooltipCallback } } } } });
             }
            if(Object.keys(investmentData).length > 0) {
@@ -4258,6 +4302,19 @@
         //  ENHANCEMENT FEATURES
         // ══════════════════════════════════════════════════════════
 
+        // Shared account color helper — reads from CSS variables (single source of truth)
+        function getAccountColor(accountType) {
+            const cs = getComputedStyle(document.documentElement);
+            const map = {
+                'Regular Brokerage': cs.getPropertyValue('--color-account-brokerage').trim() || '#3498db',
+                'Roth IRA':          cs.getPropertyValue('--color-account-roth').trim()      || '#e74c3c',
+                '401(k)':            cs.getPropertyValue('--color-account-401k').trim()      || '#f39c12',
+                '529 College Saving':cs.getPropertyValue('--color-account-529').trim()       || '#9b59b6',
+                'Yahoo Finance':     cs.getPropertyValue('--color-account-yahoo').trim()     || '#20c997',
+            };
+            return map[accountType] || '#95a5a6';
+        }
+
         // ── 1. Account-Level Breakdown ─────────────────────────────
         function renderAccountBreakdown() {
             const grid = document.getElementById('accountBreakdownGrid');
@@ -4280,11 +4337,11 @@
 
             const totalValue = Object.values(accounts).reduce((s, a) => s + a.value, 0);
             const acctColors = {
-                'Regular Brokerage': '#3498db',
-                'Roth IRA':          '#e74c3c',
-                '401(k)':            '#f39c12',
-                '529 College Saving':'#9b59b6',
-                'Yahoo Finance':     '#20c997'
+                'Regular Brokerage': getAccountColor('Regular Brokerage'),
+                'Roth IRA':          getAccountColor('Roth IRA'),
+                '401(k)':            getAccountColor('401(k)'),
+                '529 College Saving':getAccountColor('529 College Saving'),
+                'Yahoo Finance':     getAccountColor('Yahoo Finance')
             };
 
             grid.innerHTML = Object.entries(accounts)
@@ -4371,9 +4428,9 @@
             // 401k and Roth IRA: manual entry (user updates snapshots, not individual transactions)
             // 529 and Brokerage: auto from BUY transactions
             const accounts = [
-                { key: 'Roth IRA',           limit: limits.ira,  color: '#e74c3c', note: `${limits.label} IRA limit`,     isManual: true  },
-                { key: '401(k)',              limit: limits.k401, color: '#f39c12', note: `${limits.label} 401(k) limit`,  isManual: true  },
-                { key: '529 College Saving',  limit: limits.k529, color: '#9b59b6', note: 'Annual gift tax exclusion',     isManual: false }
+                { key: 'Roth IRA',           limit: limits.ira,  color: getAccountColor('Roth IRA'),          note: `${limits.label} IRA limit`,     isManual: true  },
+                { key: '401(k)',              limit: limits.k401, color: getAccountColor('401(k)'),             note: `${limits.label} 401(k) limit`,  isManual: true  },
+                { key: '529 College Saving',  limit: limits.k529, color: getAccountColor('529 College Saving'), note: 'Annual gift tax exclusion',     isManual: false }
             ];
 
             const totalAuto   = acctTotals['529 College Saving'] || 0;
@@ -4846,6 +4903,21 @@
         <div class="modal-content">
             <button class="modal-close-btn" onclick="closeSettingsModal()">×</button>
             <h3>Settings</h3>
+
+            <!-- Data Overview -->
+            <div id="settingsDataOverview" style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:14px;margin-bottom:18px;">
+                <div style="font-size:0.72rem;font-weight:700;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Portfolio Overview</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82rem;">
+                    <div><span style="color:var(--text-color-secondary);">Total transactions:</span> <strong id="ov-txn-count">—</strong></div>
+                    <div><span style="color:var(--text-color-secondary);">Unique symbols:</span> <strong id="ov-symbol-count">—</strong></div>
+                    <div><span style="color:var(--text-color-secondary);">Account types:</span> <strong id="ov-account-count">—</strong></div>
+                    <div><span style="color:var(--text-color-secondary);">Activity log entries:</span> <strong id="ov-log-count">—</strong></div>
+                    <div><span style="color:var(--text-color-secondary);">Recurring schedules:</span> <strong id="ov-recurring-count">—</strong></div>
+                    <div><span style="color:var(--text-color-secondary);">Last backup:</span> <strong id="ov-last-backup">—</strong></div>
+                    <div style="grid-column:1/-1"><span style="color:var(--text-color-secondary);">Approx. storage used:</span> <strong id="ov-storage">—</strong></div>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label for="finnhubApiKeyInput">Finnhub API Key</label>
                 <input type="text" id="finnhubApiKeyInput" placeholder="Enter your Finnhub API Key">
@@ -4860,11 +4932,11 @@
                 <input type="text" id="alphaVantageApiKeyInput" placeholder="Enter your Alpha Vantage API Key">
             </div>
             <div class="form-group">
-                <label for="ageBracketSelect">Your Age Bracket (for IRS contribution limits)</label>
+                <label for="ageBracketSelect">Your Age Bracket (for IRS 2026 contribution limits)</label>
                 <select id="ageBracketSelect">
-                    <option value="under50">Under 50 — IRA $7,500 / 401k $23,500</option>
-                    <option value="50to59">50–59 or 64+ — IRA $8,600 / 401k $31,000</option>
-                    <option value="60to63">60–63 — IRA $8,600 / 401k $34,750 (super catch-up)</option>
+                    <option value="under50">Under 50 — 401k $24,500 / IRA $7,000</option>
+                    <option value="50to59">Age 50–59 or 64+ — 401k $32,500 / IRA $8,000</option>
+                    <option value="60to63">Age 60–63 — 401k $35,750 super catch-up / IRA $8,000</option>
                 </select>
                 <small>Used by the Annual Contribution Tracker to show correct IRS limits.</small>
             </div>
@@ -4874,13 +4946,11 @@
                 <small>Minimum 30 seconds to respect API limits.</small>
             </div>
             
-            <!-- INTEGRATED: Sign Out Other Devices Button -->
             <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 15px;">
                 <label>Security</label>
                 <button class="btn btn-danger" id="signOutOthersBtn" onclick="signOutOtherDevices()" style="width: 100%; background: #c0392b;">Sign Out All Other Devices</button>
                 <small>This will sign out all other active sessions of this app.</small>
             </div>
-            <!-- END INTEGRATED SECTION -->
             
             <div class="modal-buttons" style="margin-top: 20px;">
                 <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
