@@ -5941,6 +5941,14 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       <span class="density-toggle" id="_goalBtn" title="Goal Tracker (G)">🎯 Goal</span>
       <span class="density-toggle" id="_wiBtn"   title="What-If Simulator (W)">🔮 What-If</span>
       <span class="density-toggle" onclick="(function(){const w=document.getElementById('contribCalWidget');if(w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';}})()" title="Contribution Calendar (K)">📅 Calendar</span>
+      <span class="density-toggle" onclick="(function(){
+        const tabs=document.querySelector('.investments-list');
+        if(tabs){tabs.scrollIntoView({behavior:'smooth',block:'start'});}
+        setTimeout(()=>{
+          const taxBtn=Array.from(document.querySelectorAll('.tab-link')).find(b=>b.textContent.includes('Tax'));
+          if(taxBtn){taxBtn.click();}
+        },400);
+      })()" title="Tax Summary">🧾 Tax</span>
     `;
     rightHeader.appendChild(group);
     document.getElementById('_goalBtn').addEventListener('click', openGoalWidget);
