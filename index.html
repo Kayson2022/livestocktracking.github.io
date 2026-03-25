@@ -5505,6 +5505,20 @@
   transition:all 0.2s; user-select:none;
 }
 .density-toggle:hover { border-color:var(--accent-color-1); color:var(--accent-color-1); }
+
+/* Toolbar row containing density-toggles — full width, centered, wraps on mobile */
+#_enhControlsInjected {
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:6px;
+  padding:8px 16px 4px;
+  background:transparent;
+}
+@media (max-width:600px) {
+  #_enhControlsInjected { padding:8px 10px 6px; gap:6px; }
+  .density-toggle { font-size:0.74rem; padding:4px 10px; }
+}
 body.compact-mode .investment-header { padding:10px 14px !important; }
 body.compact-mode .investment-item .investment-details { padding:0 14px 12px !important; gap:8px !important; }
 body.compact-mode .investment-item { margin-bottom:8px !important; }
@@ -6050,11 +6064,12 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 
   /* ── Inject buttons into header ── */
   function injectHeaderControls() {
-    const rightHeader = document.querySelector('.header-right');
-    if (!rightHeader || document.getElementById('_enhControlsInjected')) return;
+    if (document.getElementById('_enhControlsInjected')) return;
+
     const group = document.createElement('div');
     group.id = '_enhControlsInjected';
-    group.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+    // Full-width toolbar row — sits between header-top-row and h1 title
+    group.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;padding:8px 16px 4px;';
     group.innerHTML = `
       <span class="density-toggle" onclick="document.body.classList.toggle('compact-mode')" title="Toggle compact view (C)">⊞ Compact</span>
       <span class="density-toggle" id="_goalBtn" title="Goal Tracker (G)">🎯 Goal</span>
@@ -6069,7 +6084,17 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
         },400);
       })()" title="Tax Summary">🧾 Tax</span>
     `;
-    rightHeader.appendChild(group);
+
+    // Insert between header-top-row and h1
+    const h1 = document.querySelector('.header h1');
+    if (h1) {
+      h1.parentNode.insertBefore(group, h1);
+    } else {
+      // Fallback — append to header
+      const header = document.querySelector('.header');
+      if (header) header.appendChild(group);
+    }
+
     document.getElementById('_goalBtn').addEventListener('click', openGoalWidget);
     document.getElementById('_wiBtn').addEventListener('click', openWhatIfWidget);
     wireGoalTargetSave();
