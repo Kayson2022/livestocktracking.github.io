@@ -6345,12 +6345,9 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     </div>`;
   }
 
-  // Support year switching
+  // Tax year state
   window._taxYear = new Date().getFullYear();
   window.addEventListener('load', () => { setTimeout(injectHeaderControls, 800); setTimeout(initWidgets, 2000); });
-
-
-  // Support year switching
 
   /* ── Today's G/L diagnostic breakdown modal ── */
   window.showGLDiagnostic = function() {
@@ -7049,24 +7046,37 @@ function _rebalV2Build(el) {
     if (!contrib) return;
     const acctTotal=Object.values(acctAssets[acct]||{}).reduce((s,v)=>s+v,0);
     if (!acctTotal) return;
-    let mostUnder=null,biggestGap=0;
-    Object.entries(acctAssets[acct]||{}).forEach(([tp,val])=>{
-      const tgt=parseFloat(targets[acct]?.types?.[tp])||0;
-      if (!tgt) return;
-      const cur=acctTotal>0?(val/acctTotal)*100:0;
-      const gap=tgt-cur;
-      if (gap>biggestGap){biggestGap=gap;mostUnder=tp;}
-    });
+
+    // Find most underweight asset type (targets set) OR most underrepresented (no targets)
+    let mostUnder=null, biggestGap=0, suggestionNote='';
+    const hasInnerTargets = Object.values(targets[acct]?.types||{}).some(v=>v>0);
+
+    if (hasInnerTargets) {
+      // Use target-based suggestion
+      Object.entries(acctAssets[acct]||{}).forEach(([tp,val])=>{
+        const tgt=parseFloat(targets[acct]?.types?.[tp])||0;
+        if (!tgt) return;
+        const cur=acctTotal>0?(val/acctTotal)*100:0;
+        const gap=tgt-cur;
+        if (gap>biggestGap){biggestGap=gap;mostUnder=tp;}
+      });
+      if (mostUnder) suggestionNote = `it's ${biggestGap.toFixed(1)}% below your within-account target`;
+    } else {
+      // Auto-suggest: find smallest % of portfolio (most underrepresented)
+      const entries = Object.entries(acctAssets[acct]||{}).sort((a,b)=>a[1]-b[1]);
+      if (entries.length) {
+        mostUnder = entries[0][0];
+        const pct = acctTotal>0?(entries[0][1]/acctTotal)*100:0;
+        suggestionNote = `it's your smallest position at ${pct.toFixed(1)}% of this account`;
+      }
+    }
+
     if (mostUnder) {
       assetSuggestions+=`
       <div class="suggest-box">
-        <strong>${acct}:</strong> This week, prioritise buying <strong>${mostUnder}</strong> — it's ${biggestGap.toFixed(1)}% below your within-account target.<br>
+        <strong>${acct}:</strong> This week, consider buying <strong>${mostUnder}</strong> — ${suggestionNote}.<br>
         <span style="color:var(--text-color-secondary);">What to buy: ${ASSET_SUGGESTIONS[mostUnder]||'assets matching your strategy'}.</span>
-      </div>`;
-    } else {
-      assetSuggestions+=`
-      <div class="suggest-box">
-        <strong>${acct}:</strong> No within-account target set yet — expand the asset breakdown above to set targets and get specific buy suggestions.
+        ${!hasInnerTargets?`<span style="color:var(--text-color-secondary);font-style:italic;"> Set within-account targets for more precise suggestions.</span>`:''}
       </div>`;
     }
   });
