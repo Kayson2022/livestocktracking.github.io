@@ -5840,6 +5840,84 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div id="cbResults"></div>
 </div>
 
+<!-- Withdrawal Planner Widget -->
+<div id="withdrawalWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="margin-bottom:6px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">🏖️ Withdrawal Planner</h3>
+    <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:4px 0 0;">Model how long your portfolio lasts in retirement. Uses tax-efficient drawdown order: taxable → 401(k) → Roth IRA last.</p>
+  </div>
+
+  <!-- Inputs grid -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin:16px 0 14px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Current Age</label>
+      <input id="wpCurrentAge" type="number" min="18" max="100" value="45"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Retirement Age</label>
+      <input id="wpRetireAge" type="number" min="40" max="100" value="65"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Annual Spending Need</label>
+      <input id="wpAnnualSpend" type="number" min="0" step="1000" value="80000"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Expected Return %</label>
+      <input id="wpReturnRate" type="number" min="0" max="30" step="0.1" value="6"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Inflation Rate %</label>
+      <input id="wpInflation" type="number" min="0" max="20" step="0.1" value="2.5"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Annual Contribution ($)</label>
+      <input id="wpAnnualContrib" type="number" min="0" step="500" value="30000"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+  </div>
+
+  <!-- Current balances (auto-filled, editable) -->
+  <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:14px;margin-bottom:14px;">
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-color-secondary);margin-bottom:10px;">
+      Current Balances <span style="font-weight:400;text-transform:none;letter-spacing:0;">(auto-filled from your portfolio — editable)</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:0.72rem;color:var(--text-color-secondary);">💼 401(k)</label>
+        <input id="wpBal401k" type="number" min="0" step="1000"
+          style="padding:6px 10px;border-radius:7px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:0.72rem;color:var(--text-color-secondary);">🏦 Roth IRA</label>
+        <input id="wpBalRoth" type="number" min="0" step="1000"
+          style="padding:6px 10px;border-radius:7px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:0.72rem;color:var(--text-color-secondary);">📈 Brokerage</label>
+        <input id="wpBalBrokerage" type="number" min="0" step="1000"
+          style="padding:6px 10px;border-radius:7px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:0.72rem;color:var(--text-color-secondary);">Social Security ($/yr, optional)</label>
+        <input id="wpSocialSecurity" type="number" min="0" step="500" value="0"
+          style="padding:6px 10px;border-radius:7px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;">
+      </div>
+    </div>
+  </div>
+
+  <button onclick="window.runWithdrawalPlanner()"
+    style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1,#3498db),var(--accent-color-2,#2980b9));color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:16px;">
+    📊 Run Projection
+  </button>
+
+  <div id="wpResults"></div>
+</div>
+
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
@@ -5851,6 +5929,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div class="k401row"><span>Contrib. calendar</span><kbd>K</kbd></div>
   <div class="k401row"><span>Performance timeline</span><kbd>T</kbd></div>
   <div class="k401row"><span>Tax optimizer</span><kbd>B</kbd></div>
+  <div class="k401row"><span>Withdrawal planner</span><kbd>P</kbd></div>
   <div class="k401row"><span>This panel</span><kbd>?</kbd></div>
 </div>
 
@@ -6255,6 +6334,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     else if (k === 'k') { const w = document.getElementById('contribCalWidget'); if (w) { if (w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';} } }
     else if (k === 't') { if (typeof window.openTimelineWidget === 'function') window.openTimelineWidget(); }
     else if (k === 'b') { if (typeof window.openCostBasisWidget === 'function') window.openCostBasisWidget(); }
+    else if (k === 'p') { if (typeof window.openWithdrawalWidget === 'function') window.openWithdrawalWidget(); }
     else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
@@ -8286,6 +8366,263 @@ function injectCostBasisButton() {
 }
 setTimeout(injectCostBasisButton, 2400);
 window.addEventListener('load', () => setTimeout(injectCostBasisButton, 1700));
+
+// ═══════════════════════════════════════════════
+//  FEATURE #10 — WITHDRAWAL PLANNER
+// ═══════════════════════════════════════════════
+
+function _wpGetAccountBalances() {
+  // Read live balances from calculateHoldingsAndCash, grouped by account type
+  const balances = { '401(k)': 0, 'Roth IRA': 0, 'Regular Brokerage': 0 };
+  try {
+    const holdings = (typeof calculateHoldingsAndCash === 'function')
+      ? calculateHoldingsAndCash() : [];
+    holdings.forEach(h => {
+      const acct = h.accountType;
+      if (!balances.hasOwnProperty(acct)) return;
+      const cached = (window.priceCache || {})[h.symbol] || {};
+      const price = cached.manualPrice > 0 ? cached.manualPrice
+                  : cached.currentPrice > 0 ? cached.currentPrice
+                  : h.averagePurchasePrice || 0;
+      balances[acct] += (h.totalShares || 0) * price;
+    });
+  } catch(e) { console.warn('_wpGetAccountBalances:', e); }
+  return balances;
+}
+
+function _wpAutoFillBalances() {
+  const bal = _wpGetAccountBalances();
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val > 0) el.value = Math.round(val);
+  };
+  set('wpBal401k',     bal['401(k)']);
+  set('wpBalRoth',     bal['Roth IRA']);
+  set('wpBalBrokerage',bal['Regular Brokerage']);
+}
+
+window.runWithdrawalPlanner = function runWithdrawalPlanner() {
+  const el = document.getElementById('wpResults');
+  if (!el) return;
+
+  // Read inputs
+  const currentAge   = parseInt(document.getElementById('wpCurrentAge')?.value)  || 45;
+  const retireAge    = parseInt(document.getElementById('wpRetireAge')?.value)    || 65;
+  const annualSpend  = parseFloat(document.getElementById('wpAnnualSpend')?.value)  || 80000;
+  const returnRate   = parseFloat(document.getElementById('wpReturnRate')?.value)   / 100 || 0.06;
+  const inflRate     = parseFloat(document.getElementById('wpInflation')?.value)    / 100 || 0.025;
+  const annualContrib= parseFloat(document.getElementById('wpAnnualContrib')?.value)|| 0;
+  const bal401k      = parseFloat(document.getElementById('wpBal401k')?.value)      || 0;
+  const balRoth      = parseFloat(document.getElementById('wpBalRoth')?.value)      || 0;
+  const balBrokerage = parseFloat(document.getElementById('wpBalBrokerage')?.value) || 0;
+  const socialSec    = parseFloat(document.getElementById('wpSocialSecurity')?.value)|| 0;
+
+  const yearsToRetire  = Math.max(0, retireAge - currentAge);
+  const projectionYears = 35; // Show 35 years into retirement
+
+  const fc  = n => {
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+    if (abs >= 1e6) return sign + '$' + (abs/1e6).toFixed(2) + 'M';
+    if (abs >= 1e3) return sign + '$' + (abs/1e3).toFixed(1) + 'K';
+    return sign + '$' + abs.toFixed(0);
+  };
+  const fcFull = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+
+  // ── Phase 1: Grow balances to retirement ──
+  function grow(balance, years, rate, annContrib) {
+    let v = balance;
+    for (let i = 0; i < years; i++) {
+      v = v * (1 + rate) + annContrib;
+    }
+    return Math.max(0, v);
+  }
+
+  const ret401k      = grow(bal401k,     yearsToRetire, returnRate, annualContrib * 0.6);
+  const retRoth      = grow(balRoth,     yearsToRetire, returnRate, annualContrib * 0.3);
+  const retBrokerage = grow(balBrokerage,yearsToRetire, returnRate, annualContrib * 0.1);
+  const retTotal     = ret401k + retRoth + retBrokerage;
+
+  // ── 4% Rule check ──
+  const safeWithdrawal4pct = retTotal * 0.04;
+  const effectiveSpend     = annualSpend - socialSec;
+  const fourPctOk          = safeWithdrawal4pct >= effectiveSpend;
+
+  // ── Phase 2: Drawdown simulation ──
+  // Tax-efficient order: Brokerage → 401(k) → Roth
+  // RMDs kick in at age 73 (SECURE 2.0)
+  const RMD_AGE = 73;
+  const RMD_DIVISORS = {
+    73:26.5,74:25.5,75:24.6,76:23.7,77:22.9,78:22.0,79:21.1,
+    80:20.2,81:19.4,82:18.5,83:17.7,84:16.8,85:16.0,86:15.2,
+    87:14.4,88:13.7,89:12.9,90:12.2
+  };
+
+  let b401k = ret401k, bRoth = retRoth, bBroke = retBrokerage;
+  const rows = [];
+  let depleted = null;
+
+  for (let yr = 0; yr < projectionYears; yr++) {
+    const age          = retireAge + yr;
+    const inflFactor   = Math.pow(1 + inflRate, yr);
+    const spend        = effectiveSpend * inflFactor;
+
+    // Grow all accounts
+    b401k  = b401k  * (1 + returnRate);
+    bRoth  = bRoth  * (1 + returnRate);
+    bBroke = bBroke * (1 + returnRate);
+
+    // RMD check — forced withdrawal from 401k
+    let rmd = 0;
+    if (age >= RMD_AGE && b401k > 0) {
+      const div = RMD_DIVISORS[age] || RMD_DIVISORS[90];
+      rmd = b401k / div;
+      b401k = Math.max(0, b401k - rmd);
+    }
+
+    // Withdraw in order: RMD first (already taken), then brokerage, then 401k, then Roth
+    let needed = Math.max(0, spend - rmd); // rmd counts toward spend
+    const fromBroke = Math.min(needed, bBroke); bBroke -= fromBroke; needed -= fromBroke;
+    const from401k  = Math.min(needed, b401k);  b401k  -= from401k;  needed -= from401k;
+    const fromRoth  = Math.min(needed, bRoth);   bRoth  -= fromRoth;  needed -= fromRoth;
+    const shortfall = needed; // anything still needed after all accounts exhausted
+
+    const total = b401k + bRoth + bBroke;
+    if (total <= 0 && depleted === null) depleted = age;
+
+    rows.push({
+      yr, age,
+      spend: spend,
+      rmd,
+      from401k: from401k + rmd,
+      fromRoth,
+      fromBroke,
+      shortfall,
+      b401k: Math.max(0,b401k),
+      bRoth: Math.max(0,bRoth),
+      bBroke: Math.max(0,bBroke),
+      total: Math.max(0,total),
+    });
+  }
+
+  // ── Summary stat pills ──
+  const survives30 = !depleted || depleted > retireAge + 30;
+  const portfolioAtPeak = rows.reduce((mx,r) => Math.max(mx,r.total), retTotal);
+
+  const statPill = (label, val, color) => `
+    <div style="display:flex;flex-direction:column;gap:2px;padding:10px 16px;
+      background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;min-width:110px;">
+      <div style="font-size:0.68rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">${label}</div>
+      <div style="font-size:1rem;font-weight:800;color:${color};">${val}</div>
+    </div>`;
+
+  const pills = [
+    statPill('At Retirement', fc(retTotal), 'var(--text-color-primary)'),
+    statPill('4% Rule', fourPctOk ? '✓ Funded' : '✗ Short', fourPctOk ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)'),
+    statPill('Safe Withdrawal', fc(safeWithdrawal4pct)+'/yr', fourPctOk ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)'),
+    statPill('Survives 30yrs', survives30 ? '✓ Yes' : '✗ No', survives30 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)'),
+    depleted ? statPill('Depletes at Age', String(depleted), 'var(--negative-color,#e74c3c)') : statPill('Balance at 95', fc(rows[Math.min(rows.length-1, 95-retireAge)]?.total||0), 'var(--positive-color,#27ae60)'),
+  ].join('');
+
+  // ── Accumulation summary ──
+  const accumHTML = yearsToRetire > 0 ? `
+    <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:14px;margin-bottom:18px;">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-color-secondary);margin-bottom:10px;">
+        Projected Balances at Retirement (Age ${retireAge})
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:0.85rem;">
+        <div><span style="color:var(--text-color-secondary);">💼 401(k):</span> <strong>${fcFull(ret401k)}</strong></div>
+        <div><span style="color:var(--text-color-secondary);">🏦 Roth IRA:</span> <strong>${fcFull(retRoth)}</strong></div>
+        <div><span style="color:var(--text-color-secondary);">📈 Brokerage:</span> <strong>${fcFull(retBrokerage)}</strong></div>
+        <div><span style="color:var(--text-color-secondary);">Total:</span> <strong style="font-size:1rem;">${fcFull(retTotal)}</strong></div>
+      </div>
+    </div>` : '';
+
+  // ── Drawdown order explanation ──
+  const orderHTML = `
+    <div style="background:rgba(52,152,219,0.07);border:1px solid rgba(52,152,219,0.25);border-radius:10px;padding:12px 16px;margin-bottom:18px;font-size:0.8rem;color:var(--text-color-secondary);">
+      <strong style="color:var(--text-color-primary);">💡 Tax-efficient drawdown order used:</strong>
+      <span style="margin-left:8px;">① Taxable Brokerage (realize LT gains at 0–20%)</span>
+      <span style="margin-left:8px;">② 401(k) (ordinary income, RMDs forced at age ${RMD_AGE})</span>
+      <span style="margin-left:8px;">③ Roth IRA (tax-free, no RMDs — spend last)</span>
+      ${socialSec > 0 ? `<span style="margin-left:8px;">④ Social Security: ${fc(socialSec)}/yr reduces draws</span>` : ''}
+    </div>`;
+
+  // ── Year-by-year table (show every year up to 35) ──
+  const tableRows = rows.map(r => {
+    const isRMD      = r.rmd > 0;
+    const isDepleted = r.total <= 0;
+    const isWarning  = r.total > 0 && r.total < r.spend * 5;
+    const rowBg = isDepleted ? 'background:rgba(231,76,60,0.08);'
+                : isWarning  ? 'background:rgba(243,156,18,0.07);'
+                : '';
+    return `<tr style="border-bottom:0.5px solid var(--border-color);${rowBg}font-size:0.78rem;">
+      <td style="padding:5px 8px;font-weight:600;">${r.age}</td>
+      <td style="padding:5px 8px;text-align:right;color:var(--negative-color);">${fc(r.spend)}</td>
+      ${isRMD ? `<td style="padding:5px 8px;text-align:right;color:#f39c12;font-weight:700;">${fc(r.rmd)} ⚡</td>` : `<td style="padding:5px 8px;text-align:right;color:var(--text-color-secondary);">—</td>`}
+      <td style="padding:5px 8px;text-align:right;">${r.bBroke>0||r.fromBroke>0?fc(r.b401k+r.bRoth+r.bBroke>0?r.b401k:0):'—'}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(r.b401k)}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(r.bRoth)}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(r.bBroke)}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:700;color:${isDepleted?'var(--negative-color)':isWarning?'#f39c12':'var(--positive-color)'};">
+        ${isDepleted ? '⚠ $0' : fc(r.total)}
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;">${pills}</div>
+    ${accumHTML}
+    ${orderHTML}
+    <h4 style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:8px;">
+      Year-by-Year Retirement Projection
+      <span style="font-weight:400;font-size:0.75rem;color:var(--text-color-secondary);margin-left:8px;">⚡ = RMD required &nbsp;🟡 = <5× annual spend remaining</span>
+    </h4>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:2px solid var(--border-color);font-size:0.72rem;color:var(--text-color-secondary);">
+          <th style="padding:5px 8px;text-align:left;">Age</th>
+          <th style="padding:5px 8px;text-align:right;">Spend (infl.)</th>
+          <th style="padding:5px 8px;text-align:right;">RMD</th>
+          <th style="padding:5px 8px;text-align:right;">401(k) Bal.</th>
+          <th style="padding:5px 8px;text-align:right;">401(k) Bal.</th>
+          <th style="padding:5px 8px;text-align:right;">Roth Bal.</th>
+          <th style="padding:5px 8px;text-align:right;">Brokerage Bal.</th>
+          <th style="padding:5px 8px;text-align:right;">Total</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:12px;">
+      Projections assume constant real returns and inflation. Actual results will vary.
+      RMD divisors based on IRS Uniform Lifetime Table (SECURE 2.0). Not financial advice.
+    </p>`;
+};
+
+function openWithdrawalWidget() {
+  const w = document.getElementById('withdrawalWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    _wpAutoFillBalances();
+    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+window.openWithdrawalWidget = openWithdrawalWidget;
+
+function injectWithdrawalButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_wpBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_wpBtn'; btn.className = 'density-toggle';
+  btn.title = 'Withdrawal Planner (P)';
+  btn.textContent = '🏖️ Withdrawal';
+  btn.addEventListener('click', openWithdrawalWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectWithdrawalButton, 2600);
+window.addEventListener('load', () => setTimeout(injectWithdrawalButton, 1800));
 
 
 })();
