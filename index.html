@@ -5796,6 +5796,50 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   </p>
 </div>
 
+<!-- Cost Basis Optimizer Widget -->
+<div id="costBasisWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
+    <div>
+      <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">⚖️ Cost Basis Optimizer</h3>
+      <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:4px 0 0;">Model the tax impact of selling shares using FIFO, LIFO, Highest-Cost, or Lowest-Cost methods. Taxable accounts only.</p>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:16px 0 12px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Position</label>
+      <select id="cbSymbolSelect" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;min-width:160px;">
+        <option value="">Select a holding…</option>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Shares to Sell</label>
+      <input id="cbSharesToSell" type="number" min="0" step="any" placeholder="e.g. 10"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;width:110px;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Sale Price / Share</label>
+      <input id="cbSalePrice" type="number" min="0" step="any" placeholder="Current price"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;width:130px;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Tax Bracket</label>
+      <select id="cbTaxBracket" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.85rem;font-family:inherit;">
+        <option value="0.22|0.15">22% ST / 15% LT</option>
+        <option value="0.12|0.0">12% ST / 0% LT</option>
+        <option value="0.24|0.15">24% ST / 15% LT</option>
+        <option value="0.32|0.15">32% ST / 15% LT</option>
+        <option value="0.35|0.20">35% ST / 20% LT</option>
+        <option value="0.37|0.20">37% ST / 20% LT</option>
+      </select>
+    </div>
+    <button onclick="window.runCostBasisOptimizer()"
+      style="padding:7px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent-color-1,#3498db),var(--accent-color-2,#2980b9));color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;align-self:flex-end;">
+      Calculate
+    </button>
+  </div>
+  <div id="cbResults"></div>
+</div>
+
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
@@ -5806,6 +5850,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div class="k401row"><span>What-If tool</span><kbd>W</kbd></div>
   <div class="k401row"><span>Contrib. calendar</span><kbd>K</kbd></div>
   <div class="k401row"><span>Performance timeline</span><kbd>T</kbd></div>
+  <div class="k401row"><span>Tax optimizer</span><kbd>B</kbd></div>
   <div class="k401row"><span>This panel</span><kbd>?</kbd></div>
 </div>
 
@@ -6209,6 +6254,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     else if (k === 'w') { openWhatIfWidget(); }
     else if (k === 'k') { const w = document.getElementById('contribCalWidget'); if (w) { if (w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';} } }
     else if (k === 't') { if (typeof window.openTimelineWidget === 'function') window.openTimelineWidget(); }
+    else if (k === 'b') { if (typeof window.openCostBasisWidget === 'function') window.openCostBasisWidget(); }
     else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
@@ -7980,6 +8026,266 @@ function injectTimelineButton() {
 }
 setTimeout(injectTimelineButton, 2200);
 window.addEventListener('load', () => setTimeout(injectTimelineButton, 1600));
+
+// ═══════════════════════════════════════════════
+//  FEATURE #9 — COST BASIS OPTIMIZER
+// ═══════════════════════════════════════════════
+
+const TAXABLE_ACCOUNTS = ['Regular Brokerage'];  // Only taxable gains matter here
+const CB_METHODS = ['FIFO', 'LIFO', 'Highest Cost', 'Lowest Cost'];
+
+// Build open lots for a given symbol+account key using a specified method ordering
+function _cbBuildLots(txns, symbol, account) {
+  const key = `${symbol}|||${account}`;
+  const sorted = [...txns].sort((a,b) => new Date(a.date)-new Date(b.date));
+  const lots = [];
+  sorted.forEach(t => {
+    const type   = (t.transactionType||'').toUpperCase();
+    const sh     = parseFloat(t.shares);
+    const pr     = parseFloat(t.price);
+    if (!t.symbol || isNaN(sh) || isNaN(pr)) return;
+    const tKey = `${t.symbol}|||${t.accountType}`;
+    if (tKey !== key) return;
+    if (type === 'BUY') {
+      lots.push({ shares: sh, price: pr, date: t.date, id: `${t.date}_${pr}` });
+    } else if (type === 'SELL') {
+      // FIFO consume to track remaining lots accurately
+      let toSell = sh;
+      for (let i = 0; i < lots.length && toSell > 0.0001; i++) {
+        const consume = Math.min(toSell, lots[i].shares);
+        lots[i].shares -= consume;
+        toSell -= consume;
+      }
+    }
+  });
+  return lots.filter(l => l.shares > 0.0001);
+}
+
+function _cbSimulateSell(openLots, sharesToSell, salePrice, method, today) {
+  // Sort lots by method
+  let ordered = [...openLots];
+  if (method === 'FIFO')         ordered.sort((a,b) => new Date(a.date)-new Date(b.date));
+  else if (method === 'LIFO')    ordered.sort((a,b) => new Date(b.date)-new Date(a.date));
+  else if (method === 'Highest Cost') ordered.sort((a,b) => b.price-a.price);
+  else if (method === 'Lowest Cost')  ordered.sort((a,b) => a.price-b.price);
+
+  let remaining = sharesToSell;
+  let totalProceeds = 0, totalCost = 0, stGain = 0, ltGain = 0;
+  const lotsUsed = [];
+
+  for (const lot of ordered) {
+    if (remaining <= 0.0001) break;
+    const use = Math.min(remaining, lot.shares);
+    const proceeds  = use * salePrice;
+    const cost      = use * lot.price;
+    const gain      = proceeds - cost;
+    const buyDate   = new Date(lot.date); buyDate.setHours(0,0,0,0);
+    const daysHeld  = Math.floor((today - buyDate) / (1000*60*60*24));
+    const isLT      = daysHeld > 365;
+    if (isLT) ltGain += gain; else stGain += gain;
+    totalProceeds += proceeds;
+    totalCost     += cost;
+    lotsUsed.push({ date: lot.date, price: lot.price, shares: use, gain, isLT, daysHeld });
+    remaining -= use;
+  }
+
+  const canFill = remaining <= 0.0001;
+  return { totalProceeds, totalCost, stGain, ltGain, netGain: stGain+ltGain, lotsUsed, canFill };
+}
+
+window.runCostBasisOptimizer = function runCostBasisOptimizer() {
+  const el = document.getElementById('cbResults');
+  if (!el) return;
+
+  const symbolKey = document.getElementById('cbSymbolSelect')?.value || '';
+  const sharesToSell = parseFloat(document.getElementById('cbSharesToSell')?.value);
+  const salePrice    = parseFloat(document.getElementById('cbSalePrice')?.value);
+  const bracketVal   = document.getElementById('cbTaxBracket')?.value || '0.22|0.15';
+  const [stRate, ltRate] = bracketVal.split('|').map(Number);
+
+  if (!symbolKey) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">Please select a position.</p>'; return; }
+  if (isNaN(sharesToSell) || sharesToSell <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">Please enter a valid number of shares.</p>'; return; }
+  if (isNaN(salePrice) || salePrice <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">Please enter a valid sale price.</p>'; return; }
+
+  const [symbol, account] = symbolKey.split('|||');
+  const txns = (window.portfolioData && window.portfolioData.transactions) || [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const openLots = _cbBuildLots(txns, symbol, account);
+
+  if (!openLots.length) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">No open lots found for this position.</p>'; return; }
+
+  const totalAvailable = openLots.reduce((s,l)=>s+l.shares,0);
+  if (sharesToSell > totalAvailable + 0.0001) {
+    el.innerHTML = `<p style="color:var(--negative-color);padding:10px;">You only have ${totalAvailable.toFixed(4)} shares available.</p>`;
+    return;
+  }
+
+  const fc = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+  const pct = n => (n*100).toFixed(0)+'%';
+  const colorN = n => n >= 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)';
+
+  // Run all 4 methods
+  const results = CB_METHODS.map(method => {
+    const sim = _cbSimulateSell(openLots, sharesToSell, salePrice, method, today);
+    const taxEst = Math.max(0, sim.stGain) * stRate + Math.max(0, sim.ltGain) * ltRate;
+    const afterTax = sim.totalProceeds - taxEst;
+    return { method, ...sim, taxEst, afterTax };
+  });
+
+  // Best = lowest tax (ties broken by most LT gain = lowest LT rate applied)
+  const best = [...results].sort((a,b) => a.taxEst - b.taxEst || b.ltGain - a.ltGain)[0];
+
+  // Build comparison cards
+  const cards = results.map(r => {
+    const isBest = r.method === best.method;
+    const border = isBest ? '2px solid var(--positive-color,#27ae60)' : '1px solid var(--border-color)';
+    const badge  = isBest ? `<span style="font-size:0.68rem;font-weight:700;background:rgba(39,174,96,0.15);color:var(--positive-color);padding:2px 8px;border-radius:999px;margin-left:6px;">★ Optimal</span>` : '';
+    const stStr  = r.stGain !== 0 ? `<div style="font-size:0.75rem;color:var(--text-color-secondary);">ST gain: <strong style="color:${colorN(r.stGain)}">${fc(r.stGain)}</strong> @ ${pct(stRate)}</div>` : '';
+    const ltStr  = r.ltGain !== 0 ? `<div style="font-size:0.75rem;color:var(--text-color-secondary);">LT gain: <strong style="color:${colorN(r.ltGain)}">${fc(r.ltGain)}</strong> @ ${pct(ltRate)}</div>` : '';
+    return `
+      <div style="background:var(--bg-color);border:${border};border-radius:10px;padding:14px;${isBest?'box-shadow:0 0 0 3px rgba(39,174,96,0.12);':''}">
+        <div style="display:flex;align-items:center;margin-bottom:10px;">
+          <span style="font-weight:700;font-size:0.9rem;color:var(--text-color-primary);">${r.method}</span>${badge}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.82rem;">
+          <div><span style="color:var(--text-color-secondary);">Net Gain/Loss</span><br><strong style="color:${colorN(r.netGain)};font-size:1rem;">${fc(r.netGain)}</strong></div>
+          <div><span style="color:var(--text-color-secondary);">Est. Tax</span><br><strong style="color:var(--negative-color,#e74c3c);font-size:1rem;">${fc(r.taxEst)}</strong></div>
+          <div><span style="color:var(--text-color-secondary);">After-Tax Proceeds</span><br><strong style="font-size:0.95rem;">${fc(r.afterTax)}</strong></div>
+          <div><span style="color:var(--text-color-secondary);">Cost Basis Used</span><br><strong>${fc(r.totalCost)}</strong></div>
+        </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);">${stStr}${ltStr}</div>
+      </div>`;
+  }).join('');
+
+  // Lot detail table for optimal method
+  const bestSim = results.find(r => r.method === best.method);
+  const lotRows = bestSim.lotsUsed.map(l => `
+    <tr style="border-bottom:0.5px solid var(--border-color);font-size:0.8rem;">
+      <td style="padding:5px 8px;">${l.date}</td>
+      <td style="padding:5px 8px;text-align:right;">${l.shares.toFixed(4)}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(l.price)}</td>
+      <td style="padding:5px 8px;text-align:right;">${l.daysHeld}d</td>
+      <td style="padding:5px 8px;text-align:center;">
+        <span style="padding:1px 7px;border-radius:999px;font-size:0.7rem;font-weight:700;
+          background:${l.isLT?'rgba(39,174,96,0.12)':'rgba(231,76,60,0.1)'};
+          color:${l.isLT?'var(--positive-color)':'var(--negative-color)'};">
+          ${l.isLT?'Long-Term':'Short-Term'}
+        </span>
+      </td>
+      <td style="padding:5px 8px;text-align:right;font-weight:700;color:${colorN(l.gain)};">${fc(l.gain)}</td>
+    </tr>`).join('');
+
+  const savings = results.reduce((max, r) => Math.max(max, r.taxEst), 0) - best.taxEst;
+
+  el.innerHTML = `
+    <div style="margin-bottom:20px;">
+      <div style="font-size:0.78rem;color:var(--text-color-secondary);margin-bottom:12px;">
+        Selling <strong>${sharesToSell}</strong> shares of <strong>${symbol}</strong> (${account}) at <strong>${fc(salePrice)}/sh</strong>
+        · Proceeds: <strong>${fc(sharesToSell * salePrice)}</strong>
+        ${savings > 0.01 ? `· <span style="color:var(--positive-color);font-weight:700;">Best method saves ${fc(savings)} in taxes vs worst</span>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;">
+        ${cards}
+      </div>
+      <h4 style="font-size:0.85rem;font-weight:700;color:var(--text-color-primary);margin-bottom:8px;">
+        Lots consumed under <strong>${best.method}</strong> (optimal)
+      </h4>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="border-bottom:2px solid var(--border-color);font-size:0.75rem;color:var(--text-color-secondary);">
+            <th style="padding:5px 8px;text-align:left;">Buy Date</th>
+            <th style="padding:5px 8px;text-align:right;">Shares</th>
+            <th style="padding:5px 8px;text-align:right;">Cost/Sh</th>
+            <th style="padding:5px 8px;text-align:right;">Held</th>
+            <th style="padding:5px 8px;text-align:center;">Term</th>
+            <th style="padding:5px 8px;text-align:right;">Gain/Loss</th>
+          </tr></thead>
+          <tbody>${lotRows}</tbody>
+        </table>
+      </div>
+      <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:12px;">
+        Estimates only. Consult a tax professional. Tax savings depend on your full income picture.
+        Specific lot identification must be confirmed with your broker before selling.
+      </p>
+    </div>`;
+};
+
+// Populate symbol dropdown when widget opens
+function _cbPopulateSymbols() {
+  const sel = document.getElementById('cbSymbolSelect');
+  if (!sel) return;
+  const txns = (window.portfolioData && window.portfolioData.transactions) || [];
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Build open positions grouped by symbol+account
+  const posMap = {};
+  const sorted = [...txns].sort((a,b) => new Date(a.date)-new Date(b.date));
+  sorted.forEach(t => {
+    const type = (t.transactionType||'').toUpperCase();
+    const sh   = parseFloat(t.shares)||0;
+    const pr   = parseFloat(t.price)||0;
+    if (!t.symbol || !t.accountType) return;
+    const key = `${t.symbol}|||${t.accountType}`;
+    if (!posMap[key]) posMap[key] = { symbol: t.symbol, account: t.accountType, shares: 0 };
+    if (type === 'BUY')  posMap[key].shares += sh;
+    if (type === 'SELL') posMap[key].shares -= sh;
+  });
+
+  const openPositions = Object.entries(posMap)
+    .filter(([,v]) => v.shares > 0.0001)
+    .sort(([,a],[,b]) => a.symbol.localeCompare(b.symbol));
+
+  // Keep current selection if still valid
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Select a holding…</option>';
+  openPositions.forEach(([key, pos]) => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = `${pos.symbol} — ${pos.account} (${pos.shares.toFixed(3)} sh)`;
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+
+  // Auto-fill sale price from priceCache when symbol changes
+  sel.onchange = () => {
+    const [sym] = (sel.value||'').split('|||');
+    if (!sym) return;
+    const cached = window.priceCache && window.priceCache[sym];
+    const price  = cached?.manualPrice > 0 ? cached.manualPrice
+                 : cached?.currentPrice > 0 ? cached.currentPrice : null;
+    const priceInput = document.getElementById('cbSalePrice');
+    if (priceInput && price) priceInput.value = price.toFixed(4);
+    document.getElementById('cbResults').innerHTML = '';
+  };
+}
+
+function openCostBasisWidget() {
+  const w = document.getElementById('costBasisWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    _cbPopulateSymbols();
+    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+window.openCostBasisWidget = openCostBasisWidget;
+
+function injectCostBasisButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_cbBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_cbBtn'; btn.className = 'density-toggle';
+  btn.title = 'Cost Basis Optimizer (B)';
+  btn.textContent = '⚖️ Tax Optimizer';
+  btn.addEventListener('click', openCostBasisWidget);
+  // Insert before Rebalance button
+  const rebalBtn = document.getElementById('_rebalBtn');
+  if (rebalBtn) group.insertBefore(btn, rebalBtn);
+  else group.appendChild(btn);
+}
+setTimeout(injectCostBasisButton, 2400);
+window.addEventListener('load', () => setTimeout(injectCostBasisButton, 1700));
 
 
 })();
