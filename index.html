@@ -3825,6 +3825,7 @@
 
                     history = await buildPortfolioHistoryFromTransactions();
                     cachedMainHistory = history;
+                    window._tlFullHistory = history;
                     isHistoricalDataLoaded = true;
 
                     // Now also compute volatility with fresh data
@@ -3835,6 +3836,7 @@
                 }
             } else {
                 cachedMainHistory = history;
+                window._tlFullHistory = history;
                 isHistoricalDataLoaded = true;
             }
 
@@ -5605,6 +5607,24 @@
 }
 .density-toggle:hover { border-color:var(--accent-color-1); color:var(--accent-color-1); }
 
+/* Timeline widget buttons */
+.tl-range-btn, .tl-mode-btn {
+  padding:3px 10px;font-size:0.74rem;font-weight:600;border-radius:999px;
+  border:1px solid var(--border-color);background:transparent;
+  color:var(--text-color-secondary);cursor:pointer;transition:all 0.15s;font-family:inherit;
+}
+.tl-range-btn:hover, .tl-mode-btn:hover { border-color:var(--accent-color-1); color:var(--accent-color-1); }
+.tl-range-active, .tl-mode-active {
+  background:var(--accent-color-1);color:#fff!important;border-color:var(--accent-color-1)!important;
+}
+.tl-stat-pill {
+  display:flex;flex-direction:column;gap:2px;padding:8px 14px;
+  background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;
+  min-width:90px;
+}
+.tl-stat-label { font-size:0.68rem;color:var(--text-color-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.4px; }
+.tl-stat-value { font-size:0.92rem;font-weight:700;color:var(--text-color-primary); }
+
 /* Toolbar row containing density-toggles — full width, centered, wraps on mobile */
 #_enhControlsInjected {
   display:flex;
@@ -5747,6 +5767,31 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   </div>
 </div>
 
+<!-- Portfolio Performance Timeline Widget -->
+<div id="timelineWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">📈 Portfolio Performance Timeline</h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <span style="font-size:0.72rem;color:var(--text-color-secondary);margin-right:4px;">View:</span>
+      <button class="tl-range-btn" data-range="3M">3M</button>
+      <button class="tl-range-btn" data-range="6M">6M</button>
+      <button class="tl-range-btn tl-range-active" data-range="1Y">1Y</button>
+      <button class="tl-range-btn" data-range="3Y">3Y</button>
+      <button class="tl-range-btn" data-range="All">All</button>
+      <span style="width:1px;height:18px;background:var(--border-color);margin:0 4px;"></span>
+      <button class="tl-mode-btn tl-mode-active" data-mode="total" title="Total portfolio value vs cost basis">Total</button>
+      <button class="tl-mode-btn" data-mode="accounts" title="Value split by account type">By Account</button>
+    </div>
+  </div>
+  <div id="tlStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;"></div>
+  <div style="position:relative;height:280px;">
+    <canvas id="timelineChart"></canvas>
+  </div>
+  <p style="font-size:0.7rem;color:var(--text-color-secondary);margin-top:10px;text-align:right;">
+    Based on transaction history. Historical prices from Yahoo Finance. Not financial advice.
+  </p>
+</div>
+
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
@@ -5756,6 +5801,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div class="k401row"><span>Goal tracker</span><kbd>G</kbd></div>
   <div class="k401row"><span>What-If tool</span><kbd>W</kbd></div>
   <div class="k401row"><span>Contrib. calendar</span><kbd>K</kbd></div>
+  <div class="k401row"><span>Performance timeline</span><kbd>T</kbd></div>
   <div class="k401row"><span>This panel</span><kbd>?</kbd></div>
 </div>
 
@@ -6158,6 +6204,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     else if (k === 'g') { openGoalWidget(); }
     else if (k === 'w') { openWhatIfWidget(); }
     else if (k === 'k') { const w = document.getElementById('contribCalWidget'); if (w) { if (w.style.display==='none'){w.style.display='block';buildContribCalendar();}else{w.style.display='none';} } }
+    else if (k === 't') { if (typeof window.openTimelineWidget === 'function') window.openTimelineWidget(); }
     else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
@@ -7420,6 +7467,337 @@ function injectRebalV2Button() {
 }
 setTimeout(injectRebalV2Button,2000);
 window.addEventListener('load',()=>setTimeout(injectRebalV2Button,1500));
+
+// ═══════════════════════════════════════════════
+//  FEATURE #7 — PORTFOLIO PERFORMANCE TIMELINE
+// ═══════════════════════════════════════════════
+
+let _tlChart = null;
+let _tlRange = '1Y';
+let _tlMode  = 'total';
+
+const TL_ACCOUNT_COLORS = {
+  'Regular Brokerage': '#3498db',
+  'Roth IRA':          '#e74c3c',
+  '401(k)':            '#f39c12',
+  '529 College Saving':'#9b59b6',
+};
+
+function _tlGetHistory() {
+  // Use cachedMainHistory if available, otherwise fall back to priceCache-based estimate
+  if (window._tlFullHistory && window._tlFullHistory.length > 0) return window._tlFullHistory;
+  return [];
+}
+
+// Build cumulative cost basis series from transactions
+function _tlBuildCostBasis(txns, dates) {
+  const sorted = [...txns].sort((a,b) => new Date(a.date)-new Date(b.date));
+  const result = [];
+  let cumCost = 0;
+  let txIdx = 0;
+  for (const dateStr of dates) {
+    while (txIdx < sorted.length && sorted[txIdx].date <= dateStr) {
+      const t = sorted[txIdx];
+      const type = (t.transactionType||'').toUpperCase();
+      const shares = parseFloat(t.shares)||0;
+      const price  = parseFloat(t.price)||0;
+      if (type === 'BUY')  cumCost += shares * price;
+      if (type === 'SELL') cumCost -= shares * price;
+      txIdx++;
+    }
+    result.push(Math.max(0, cumCost));
+  }
+  return result;
+}
+
+// Build per-account value series — walks through transactions per account
+function _tlBuildByAccount(txns, fullHistory) {
+  const accounts = [...new Set(txns.map(t=>t.accountType).filter(Boolean))];
+  const dates = fullHistory.map(p=>p.date);
+  const datasets = [];
+  for (const acct of accounts) {
+    const acctTxns = txns.filter(t=>t.accountType===acct);
+    // Estimate account share of total: use cost-proportion on each date
+    const totalCostSeries = _tlBuildCostBasis(txns, dates);
+    const acctCostSeries  = _tlBuildCostBasis(acctTxns, dates);
+    const values = fullHistory.map((p,i) => {
+      const total = totalCostSeries[i] || 0;
+      const share = total > 0 ? acctCostSeries[i] / total : 0;
+      return p.value * share;
+    });
+    const color = TL_ACCOUNT_COLORS[acct] || '#95a5a6';
+    datasets.push({
+      label: acct,
+      data: values,
+      borderColor: color,
+      backgroundColor: color.replace(')',',0.15)').replace('rgb','rgba'),
+      fill: true,
+      tension: 0.3,
+      pointRadius: 0,
+      borderWidth: 2,
+    });
+  }
+  return datasets;
+}
+
+function _tlFilterByRange(history, range) {
+  if (!history.length) return [];
+  const now = new Date();
+  let cutoff;
+  if (range === '3M') cutoff = new Date(now.setMonth(now.getMonth()-3));
+  else if (range === '6M') cutoff = new Date(new Date().setMonth(new Date().getMonth()-6));
+  else if (range === '1Y') cutoff = new Date(new Date().setFullYear(new Date().getFullYear()-1));
+  else if (range === '3Y') cutoff = new Date(new Date().setFullYear(new Date().getFullYear()-3));
+  else cutoff = new Date(0);
+  return history.filter(p => new Date(p.date) >= cutoff);
+}
+
+// Thin data to at most N points for chart performance
+function _tlThin(arr, maxPts) {
+  if (arr.length <= maxPts) return arr;
+  const step = Math.ceil(arr.length / maxPts);
+  return arr.filter((_,i) => i % step === 0 || i === arr.length-1);
+}
+
+function _tlCalcStats(history) {
+  if (!history.length) return {};
+  const first = history[0].value, last = history[history.length-1].value;
+  const totalReturn  = last - first;
+  const totalReturnPct = first > 0 ? (totalReturn/first)*100 : 0;
+
+  // Monthly returns for best/worst
+  const monthly = {};
+  history.forEach(p => {
+    const key = p.date.slice(0,7);
+    if (!monthly[key]) monthly[key] = { first: p.value, last: p.value };
+    monthly[key].last = p.value;
+  });
+  const monthlyReturns = Object.values(monthly).map(m => m.last - m.first);
+  const best  = monthlyReturns.length ? Math.max(...monthlyReturns) : 0;
+  const worst = monthlyReturns.length ? Math.min(...monthlyReturns) : 0;
+
+  // CAGR
+  const years = (new Date(history[history.length-1].date) - new Date(history[0].date)) / (365.25*24*3600*1000);
+  const cagr = (years >= 0.08 && first > 0) ? (Math.pow(last/first, 1/years)-1)*100 : null;
+
+  return { totalReturn, totalReturnPct, best, worst, cagr };
+}
+
+function _tlRenderStats(stats) {
+  const el = document.getElementById('tlStats');
+  if (!el) return;
+  const fmt = v => {
+    const abs = Math.abs(v);
+    const sign = v >= 0 ? '+' : '-';
+    if (abs >= 1e6) return sign+'$'+(abs/1e6).toFixed(2)+'M';
+    if (abs >= 1e3) return sign+'$'+(abs/1e3).toFixed(1)+'K';
+    return sign+'$'+abs.toFixed(0);
+  };
+  const color = v => v >= 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)';
+  el.innerHTML = [
+    ['Total Return',   `<span style="color:${color(stats.totalReturn||0)}">${fmt(stats.totalReturn||0)}</span>`],
+    ['Return %',       `<span style="color:${color(stats.totalReturnPct||0)}">${(stats.totalReturnPct||0)>=0?'+':''}${(stats.totalReturnPct||0).toFixed(1)}%</span>`],
+    ['Best Month',     `<span style="color:var(--positive-color,#27ae60)">${fmt(stats.best||0)}</span>`],
+    ['Worst Month',    `<span style="color:var(--negative-color,#e74c3c)">${fmt(stats.worst||0)}</span>`],
+    ...(stats.cagr != null ? [['CAGR', `<span style="color:${color(stats.cagr)}">${stats.cagr>=0?'+':''}${stats.cagr.toFixed(1)}%</span>`]] : []),
+  ].map(([label,val]) =>
+    `<div class="tl-stat-pill"><div class="tl-stat-label">${label}</div><div class="tl-stat-value">${val}</div></div>`
+  ).join('');
+}
+
+window.buildPerformanceTimeline = function buildPerformanceTimeline() {
+  const w = document.getElementById('timelineWidget');
+  if (!w || w.style.display === 'none') return;
+
+  // Source history: prefer window._tlFullHistory (set by hook), fallback to cachedMainHistory
+  const fullHist = window._tlFullHistory || [];
+  if (!fullHist.length) {
+    document.getElementById('tlStats').innerHTML =
+      '<p style="font-size:0.82rem;color:var(--text-color-secondary);">No historical data yet — click a time period on the main chart first to load price history, then re-open Timeline.</p>';
+    if (_tlChart) { _tlChart.destroy(); _tlChart = null; }
+    return;
+  }
+
+  const filtered = _tlThin(_tlFilterByRange(fullHist, _tlRange), 300);
+  if (!filtered.length) return;
+
+  const dates  = filtered.map(p => p.date);
+  const labels = filtered.map(p => {
+    const d = new Date(p.date);
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric', year: filtered.length > 365 ? '2-digit' : undefined});
+  });
+
+  const txns = (window.portfolioData && window.portfolioData.transactions) || [];
+  const stats = _tlCalcStats(filtered);
+  _tlRenderStats(stats);
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+  const labelColor = isDark ? '#f5f5f5' : '#333';
+
+  let datasets;
+  if (_tlMode === 'accounts') {
+    datasets = _tlBuildByAccount(txns, filtered);
+  } else {
+    const costBasis = _tlBuildCostBasis(txns, dates);
+    datasets = [
+      {
+        label: 'Portfolio Value',
+        data: filtered.map(p=>p.value),
+        borderColor: 'var(--accent-color-1,#6d28d9)',
+        backgroundColor: isDark ? 'rgba(109,40,217,0.12)' : 'rgba(109,40,217,0.08)',
+        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
+        order: 1,
+      },
+      {
+        label: 'Cost Basis',
+        data: costBasis,
+        borderColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)',
+        borderDash: [5,4],
+        backgroundColor: 'transparent',
+        fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+        order: 2,
+      },
+    ];
+  }
+
+  // Destroy old chart safely
+  const existing = Chart.getChart('timelineChart');
+  if (existing) existing.destroy();
+  _tlChart = null;
+
+  const canvas = document.getElementById('timelineChart');
+  if (!canvas) return;
+  _tlChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: labelColor, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: gridColor } },
+        y: {
+          stacked: _tlMode === 'accounts',
+          ticks: { color: labelColor, callback: v => {
+            if (v >= 1e6) return '$'+(v/1e6).toFixed(1)+'M';
+            if (v >= 1e3) return '$'+(v/1e3).toFixed(0)+'K';
+            return '$'+v.toFixed(0);
+          }},
+          grid: { color: gridColor },
+        },
+      },
+      plugins: {
+        legend: { display: _tlMode === 'accounts', labels: { color: labelColor, boxWidth: 14, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              if (v >= 1e6) return ` ${ctx.dataset.label}: $${(v/1e6).toFixed(3)}M`;
+              if (v >= 1e3) return ` ${ctx.dataset.label}: $${(v/1e3).toFixed(2)}K`;
+              return ` ${ctx.dataset.label}: $${v.toFixed(2)}`;
+            }
+          }
+        }
+      },
+    },
+  });
+};
+
+// Hook into filterChart to capture full history whenever it's loaded
+(function() {
+  const origFilter = window.filterChart;
+  if (origFilter) {
+    window.filterChart = async function(period, history) {
+      const result = await origFilter.apply(this, arguments);
+      // After the filter runs, grab cachedMainHistory via the global
+      setTimeout(() => {
+        if (window._cachedMainHistory && window._cachedMainHistory.length > 0) {
+          window._tlFullHistory = window._cachedMainHistory;
+        } else {
+          // Try to read cachedMainHistory from closure via a sentinel
+          const sentinel = document.getElementById('timelineWidget');
+          if (sentinel && sentinel._lastHistory) window._tlFullHistory = sentinel._lastHistory;
+        }
+        if (document.getElementById('timelineWidget')?.style.display !== 'none') {
+          window.buildPerformanceTimeline();
+        }
+      }, 400);
+      return result;
+    };
+  }
+})();
+
+// Expose cachedMainHistory to window so timeline can access it
+// Patch updateCharts to capture history
+(function() {
+  const origUpdate = window.updateCharts;
+  // updateCharts is defined in the main script — we intercept via a MutationObserver timing trick
+  // Instead, expose _tlFullHistory whenever the historicalChart canvas gets drawn
+  const canvas = document.getElementById('timelineChart');
+  // We'll update _tlFullHistory from filterChart calls above.
+  // Also, if the main chart already has data at load time, grab it now.
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      if (window._tlFullHistory) return; // already set
+      // Try reading from the historicalChart dataset if it exists
+      const hc = Chart.getChart('historicalChart');
+      if (hc && hc.data && hc.data.datasets && hc.data.datasets[0]) {
+        const labels = hc.data.labels || [];
+        const vals   = hc.data.datasets[0].data || [];
+        if (vals.length > 0) {
+          window._tlFullHistory = labels.map((l, i) => ({ date: new Date(l).toISOString().split('T')[0], value: vals[i] }));
+        }
+      }
+    }, 3000);
+  });
+})();
+
+function openTimelineWidget() {
+  const w = document.getElementById('timelineWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.buildPerformanceTimeline();
+  }
+}
+window.openTimelineWidget = openTimelineWidget;
+
+// Wire up range + mode buttons via event delegation once DOM is ready
+document.addEventListener('click', function(e) {
+  const rangeBtn = e.target.closest('.tl-range-btn');
+  if (rangeBtn) {
+    _tlRange = rangeBtn.dataset.range;
+    document.querySelectorAll('.tl-range-btn').forEach(b => b.classList.remove('tl-range-active'));
+    rangeBtn.classList.add('tl-range-active');
+    window.buildPerformanceTimeline();
+    return;
+  }
+  const modeBtn = e.target.closest('.tl-mode-btn');
+  if (modeBtn) {
+    _tlMode = modeBtn.dataset.mode;
+    document.querySelectorAll('.tl-mode-btn').forEach(b => b.classList.remove('tl-mode-active'));
+    modeBtn.classList.add('tl-mode-active');
+    window.buildPerformanceTimeline();
+  }
+});
+
+function injectTimelineButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_tlBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_tlBtn'; btn.className = 'density-toggle';
+  btn.title = 'Portfolio Performance Timeline (T)';
+  btn.textContent = '📈 Timeline';
+  btn.addEventListener('click', openTimelineWidget);
+  // Insert before Rebalance button if it exists, otherwise append
+  const rebalBtn = document.getElementById('_rebalBtn');
+  if (rebalBtn) group.insertBefore(btn, rebalBtn);
+  else group.appendChild(btn);
+}
+setTimeout(injectTimelineButton, 2200);
+window.addEventListener('load', () => setTimeout(injectTimelineButton, 1600));
 
 
 })();
