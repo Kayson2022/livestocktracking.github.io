@@ -1597,13 +1597,15 @@
                     }
                     
                     if (priceForDate === undefined || priceForDate === null || priceForDate <= 0) {
-                        if (dateString === today.toISOString().split('T')[0] && priceCache[symbol]?.currentPrice) {
-                            priceForDate = priceCache[symbol].currentPrice;
-                        } 
-                        else if (priceCache[symbol]?.currentPrice) {
-                            priceForDate = priceCache[symbol].currentPrice;
-                        }
-                        else if (holding.totalShares > 0) { 
+                        const _cached = priceCache[symbol] || {};
+                        // Prefer manual price (used for 401k/529 holdings) over auto-fetched price,
+                        // then fall back to auto-fetched currentPrice, then cost basis as last resort.
+                        const _bestPrice = (_cached.manualPrice != null && _cached.manualPrice > 0)
+                            ? _cached.manualPrice
+                            : (_cached.currentPrice && _cached.currentPrice > 0 ? _cached.currentPrice : null);
+                        if (_bestPrice) {
+                            priceForDate = _bestPrice;
+                        } else if (holding.totalShares > 0) {
                             priceForDate = (holding.totalCost / holding.totalShares) || 0;
                         } else {
                             priceForDate = 0;
@@ -1689,13 +1691,15 @@
                     }
                     
                     if (priceForDate === undefined || priceForDate === null || priceForDate <= 0) {
-                        if (dateString === today.toISOString().split('T')[0] && priceCache[symbol]?.currentPrice) {
-                            priceForDate = priceCache[symbol].currentPrice;
-                        } 
-                        else if (priceCache[symbol]?.currentPrice) {
-                            priceForDate = priceCache[symbol].currentPrice;
-                        }
-                        else if (holding.totalShares > 0) { 
+                        const _cached = priceCache[symbol] || {};
+                        // Prefer manual price (used for 401k/529 holdings) over auto-fetched price,
+                        // then fall back to auto-fetched currentPrice, then cost basis as last resort.
+                        const _bestPrice = (_cached.manualPrice != null && _cached.manualPrice > 0)
+                            ? _cached.manualPrice
+                            : (_cached.currentPrice && _cached.currentPrice > 0 ? _cached.currentPrice : null);
+                        if (_bestPrice) {
+                            priceForDate = _bestPrice;
+                        } else if (holding.totalShares > 0) {
                             priceForDate = (holding.totalCost / holding.totalShares) || 0;
                         } else {
                             priceForDate = 0;
@@ -6469,7 +6473,15 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
             Roth IRA &amp; 401(k) gains are tax-advantaged and shown for reference only.
           </p>
         </div>
-        <div style="display:flex;gap:6px;">${yearBtns}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${yearBtns}
+          <button onclick="window.exportScheduleD(${selectedYear})"
+            style="padding:5px 14px;border-radius:999px;border:1px solid var(--accent-color-1);
+            background:var(--accent-color-1);color:#fff;font-size:0.78rem;font-weight:700;
+            cursor:pointer;white-space:nowrap;margin-left:4px;">
+            ⬇ Export Schedule D CSV
+          </button>
+        </div>
       </div>
 
       ${cards}
@@ -6515,6 +6527,176 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       </div>
     </div>`;
   }
+
+  // ── Schedule D CSV Export ──────────────────────────────────────────────
+  window.exportScheduleD = function exportScheduleD(exportYear) {
+    const txns = (window.portfolioData && window.portfolioData.transactions)
+      ? [...window.portfolioData.transactions] : [];
+    const year = exportYear || new Date().getFullYear();
+
+    // Rebuild FIFO lots (same logic as _buildTaxSummary)
+    const isLongTerm = (buyDate, sellDate) => {
+      const b = new Date(buyDate); b.setHours(0,0,0,0);
+      const s = new Date(sellDate); s.setHours(0,0,0,0);
+      return (s - b) > 365 * 24 * 60 * 60 * 1000;
+    };
+
+    const sorted = [...txns].sort((a,b) => new Date(a.date) - new Date(b.date));
+    const lots = {};
+    const rows = [];
+
+    sorted.forEach(t => {
+      const type   = (t.transactionType||'').toUpperCase();
+      const shares = parseFloat(t.shares);
+      const price  = parseFloat(t.price);
+      if (!t.symbol || isNaN(shares) || isNaN(price)) return;
+      const key = `${t.symbol}|||${t.accountType}`;
+
+      if (type === 'BUY') {
+        if (!lots[key]) lots[key] = [];
+        lots[key].push({ shares, price, date: t.date });
+      } else if (type === 'SELL') {
+        if (!lots[key]) lots[key] = [];
+        let toSell = shares;
+        while (toSell > 0.0001 && lots[key].length > 0) {
+          const lot = lots[key][0];
+          const used = Math.min(toSell, lot.shares);
+          const sellYear = new Date(t.date).getFullYear();
+          if (sellYear === year) {
+            const longTerm = isLongTerm(lot.date, t.date);
+            const proceeds  = used * price;
+            const costBasis = used * lot.price;
+            const gainLoss  = proceeds - costBasis;
+            rows.push({
+              description: `${used.toFixed(4)} sh ${t.symbol}`,
+              account:     t.accountType || '',
+              acquiredDate: lot.date,
+              soldDate:     t.date,
+              proceeds:     proceeds,
+              costBasis:    costBasis,
+              adjustment:   '',           // wash sale adj — left blank, user fills in
+              gainLoss:     gainLoss,
+              term:         longTerm ? 'Long-Term' : 'Short-Term',
+              symbol:       t.symbol,
+              sharesQty:    used,
+              buyPrice:     lot.price,
+              sellPrice:    price,
+            });
+          }
+          lot.shares -= used;
+          toSell -= used;
+          if (lot.shares < 0.0001) lots[key].shift();
+        }
+      }
+    });
+
+    if (!rows.length) {
+      alert(`No realized gains or losses found for ${year}.`);
+      return;
+    }
+
+    // Sort: Short-Term first, then Long-Term; within each group by sell date
+    rows.sort((a,b) => {
+      if (a.term !== b.term) return a.term === 'Short-Term' ? -1 : 1;
+      return new Date(a.soldDate) - new Date(b.soldDate);
+    });
+
+    // Build Schedule D style CSV
+    // Part I = Short-Term (held ≤1 year), Part II = Long-Term (held >1 year)
+    const fmtDate = d => {
+      if (!d) return '';
+      const dt = new Date(d + 'T00:00:00');
+      return `${dt.getMonth()+1}/${dt.getDate()}/${dt.getFullYear()}`;
+    };
+    const fmtNum = n => typeof n === 'number' ? n.toFixed(2) : '';
+
+    const csvRows = [];
+
+    // Header metadata
+    csvRows.push([`Schedule D (Form 1040) — Capital Gains and Losses — Tax Year ${year}`]);
+    csvRows.push([`Generated: ${new Date().toLocaleDateString()}`, '', '', '', '', '', '', 'Estimates only. Consult a tax professional.']);
+    csvRows.push([]);
+
+    const writePart = (label, partRows) => {
+      if (!partRows.length) return;
+      csvRows.push([label]);
+      csvRows.push([
+        '(a) Description of Property',
+        '(b) Date Acquired',
+        '(c) Date Sold',
+        '(d) Proceeds ($)',
+        '(e) Cost Basis ($)',
+        '(f) Adjustment ($)',
+        '(h) Gain or Loss ($)',
+        'Account',
+        'Symbol',
+        'Shares',
+        'Buy Price/Sh',
+        'Sell Price/Sh',
+      ]);
+      let totProceeds = 0, totCost = 0, totGL = 0;
+      partRows.forEach(r => {
+        csvRows.push([
+          r.description,
+          fmtDate(r.acquiredDate),
+          fmtDate(r.soldDate),
+          fmtNum(r.proceeds),
+          fmtNum(r.costBasis),
+          r.adjustment,
+          fmtNum(r.gainLoss),
+          r.account,
+          r.symbol,
+          r.sharesQty.toFixed(4),
+          fmtNum(r.buyPrice),
+          fmtNum(r.sellPrice),
+        ]);
+        totProceeds += r.proceeds;
+        totCost     += r.costBasis;
+        totGL       += r.gainLoss;
+      });
+      csvRows.push([
+        `TOTALS (${partRows.length} transaction${partRows.length>1?'s':''})`,
+        '', '',
+        fmtNum(totProceeds),
+        fmtNum(totCost),
+        '',
+        fmtNum(totGL),
+      ]);
+      csvRows.push([]);
+    };
+
+    writePart('PART I — Short-Term Capital Gains and Losses (Assets Held One Year or Less)',
+      rows.filter(r => r.term === 'Short-Term'));
+    writePart('PART II — Long-Term Capital Gains and Losses (Assets Held More Than One Year)',
+      rows.filter(r => r.term === 'Long-Term'));
+
+    // Grand total
+    const totalGL = rows.reduce((s,r) => s + r.gainLoss, 0);
+    const stGL    = rows.filter(r=>r.term==='Short-Term').reduce((s,r)=>s+r.gainLoss,0);
+    const ltGL    = rows.filter(r=>r.term==='Long-Term').reduce((s,r)=>s+r.gainLoss,0);
+    csvRows.push(['SUMMARY']);
+    csvRows.push(['Short-Term Net Gain/Loss', fmtNum(stGL)]);
+    csvRows.push(['Long-Term Net Gain/Loss',  fmtNum(ltGL)]);
+    csvRows.push(['Net Capital Gain/Loss',    fmtNum(totalGL)]);
+
+    // Escape and join
+    const escape = val => {
+      const s = String(val ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n')
+        ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csvString = csvRows.map(r => r.map(escape).join(',')).join('\n');
+
+    // Trigger download
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `Schedule_D_${year}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  };
 
   // Tax year state
   window._taxYear = new Date().getFullYear();
