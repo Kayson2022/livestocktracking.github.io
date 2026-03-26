@@ -5918,6 +5918,51 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div id="wpResults"></div>
 </div>
 
+<!-- Roth Conversion Analyzer Widget -->
+<div id="rothWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="margin-bottom:6px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">🔄 Roth Conversion Analyzer</h3>
+    <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:4px 0 0;">Should you convert your traditional 401(k) or IRA to Roth now? Model the break-even age and lifetime tax savings.</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin:16px 0 14px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Balance to Convert ($)</label>
+      <input id="rothBalance" type="number" min="0" step="1000" placeholder="e.g. 200000"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Current Age</label>
+      <input id="rothCurrentAge" type="number" min="18" max="80" value="50"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Current Tax Rate %</label>
+      <input id="rothCurrentRate" type="number" min="0" max="50" value="22"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Retirement Tax Rate %</label>
+      <input id="rothRetireRate" type="number" min="0" max="50" value="25"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Retirement Age</label>
+      <input id="rothRetireAge" type="number" min="40" max="85" value="65"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:0.4px;">Expected Return %</label>
+      <input id="rothReturnRate" type="number" min="1" max="20" step="0.1" value="7"
+        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;font-family:inherit;">
+    </div>
+  </div>
+  <button onclick="window.runRothAnalyzer()"
+    style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:16px;">
+    🔄 Run Analysis
+  </button>
+  <div id="rothResults"></div>
+</div>
+
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
@@ -5930,6 +5975,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div class="k401row"><span>Performance timeline</span><kbd>T</kbd></div>
   <div class="k401row"><span>Tax optimizer</span><kbd>B</kbd></div>
   <div class="k401row"><span>Withdrawal planner</span><kbd>P</kbd></div>
+  <div class="k401row"><span>Roth converter</span><kbd>R</kbd></div>
   <div class="k401row"><span>This panel</span><kbd>?</kbd></div>
 </div>
 
@@ -6335,6 +6381,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     else if (k === 't') { if (typeof window.openTimelineWidget === 'function') window.openTimelineWidget(); }
     else if (k === 'b') { if (typeof window.openCostBasisWidget === 'function') window.openCostBasisWidget(); }
     else if (k === 'p') { if (typeof window.openWithdrawalWidget === 'function') window.openWithdrawalWidget(); }
+    else if (k === 'r') { if (typeof window.openRothWidget === 'function') window.openRothWidget(); }
     else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
@@ -8596,8 +8643,114 @@ window.runWithdrawalPlanner = function runWithdrawalPlanner() {
     <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:12px;">
       Projections assume constant real returns and inflation. Actual results will vary.
       RMD divisors based on IRS Uniform Lifetime Table (SECURE 2.0). Not financial advice.
-    </p>`;
+    </p>
+    ${_wpBuildStressTest(ret401k, retRoth, retBrokerage, effectiveSpend, returnRate, inflRate, retireAge, RMD_AGE, RMD_DIVISORS)}`;
 };
+
+
+// ══════════════════════════════════════════════
+//  FEATURE 4 — SEQUENCE-OF-RETURNS RISK
+// ══════════════════════════════════════════════
+function _wpBuildStressTest(ret401k, retRoth, retBrokerage, annualSpend, returnRate, inflRate, retireAge, RMD_AGE, RMD_DIVISORS) {
+  // Three scenarios for first 5 years of retirement:
+  // Stress: -15%/yr for 5 years, then returnRate  (bad sequence)
+  // Base:    returnRate throughout  (already shown above)
+  // Boom:   +25%/yr for 5 years, then returnRate  (good sequence)
+
+  const SCENARIOS = [
+    { label: 'Bear Market Start', emoji: '🐻', color: '#e74c3c', earlyReturn: -0.15, years: 5 },
+    { label: 'Base Case',         emoji: '📊', color: '#3498db', earlyReturn: returnRate, years: 0 },
+    { label: 'Bull Market Start', emoji: '🐂', color: '#27ae60', earlyReturn: 0.25, years: 5 },
+  ];
+
+  const projectionYears = 30;
+  const fc = n => {
+    const abs = Math.abs(n), sign = n < 0 ? '-' : '';
+    if (abs >= 1e6) return sign + '$' + (abs/1e6).toFixed(2) + 'M';
+    if (abs >= 1e3) return sign + '$' + (abs/1e3).toFixed(1) + 'K';
+    return sign + '$' + abs.toFixed(0);
+  };
+
+  function simulate(earlyReturn, earlyYears) {
+    let b401k = ret401k, bRoth = retRoth, bBroke = retBrokerage;
+    let depleted = null;
+    for (let yr = 0; yr < projectionYears; yr++) {
+      const age = retireAge + yr;
+      const r   = yr < earlyYears ? earlyReturn : returnRate;
+      const inflFactor = Math.pow(1 + inflRate, yr);
+      const spend = annualSpend * inflFactor;
+
+      b401k  = b401k  * (1 + r);
+      bRoth  = bRoth  * (1 + r);
+      bBroke = bBroke * (1 + r);
+
+      let rmd = 0;
+      if (age >= RMD_AGE && b401k > 0) {
+        const div = RMD_DIVISORS[age] || RMD_DIVISORS[90];
+        rmd = b401k / div;
+        b401k = Math.max(0, b401k - rmd);
+      }
+
+      let needed = Math.max(0, spend - rmd);
+      const fromBroke = Math.min(needed, bBroke); bBroke -= fromBroke; needed -= fromBroke;
+      const from401k  = Math.min(needed, b401k);  b401k  -= from401k;  needed -= from401k;
+      const fromRoth  = Math.min(needed, bRoth);   bRoth  -= fromRoth;  needed -= fromRoth;
+
+      const total = Math.max(0, b401k + bRoth + bBroke);
+      if (total <= 0 && depleted === null) depleted = age;
+    }
+    const finalTotal = Math.max(0, b401k + bRoth + bBroke);
+    return { finalTotal, depleted, survives: !depleted };
+  }
+
+  const results = SCENARIOS.map(s => ({
+    ...s,
+    ...simulate(s.earlyReturn, s.years),
+  }));
+
+  const rows = results.map(r => `
+    <tr style="border-bottom:0.5px solid var(--border-color);font-size:0.8rem;">
+      <td style="padding:6px 8px;">${r.emoji} ${r.label}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:0.72rem;color:var(--text-color-secondary);">
+        ${r.years > 0 ? `${r.earlyReturn > 0 ? '+' : ''}${(r.earlyReturn*100).toFixed(0)}%/yr × ${r.years}y, then ${(returnRate*100).toFixed(0)}%` : `${(returnRate*100).toFixed(0)}% constant`}
+      </td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:${r.survives ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)'};">
+        ${r.survives ? '✓ Survives' : '✗ Depletes age ' + r.depleted}
+      </td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:${r.finalTotal > 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)'};">
+        ${r.finalTotal > 0 ? fc(r.finalTotal) : '—'}
+      </td>
+    </tr>`).join('');
+
+  const bearResult = results[0];
+  const insight = bearResult.survives
+    ? `Even with a severe bear market in the first 5 retirement years, your portfolio survives 30 years — finishing at <strong>${fc(bearResult.finalTotal)}</strong>. Your plan is resilient to sequence-of-returns risk.`
+    : `⚠ A bear market in the first 5 retirement years depletes your portfolio at age <strong>${bearResult.depleted}</strong>. Consider keeping 2–3 years of spending in cash/short bonds so you don't have to sell equities at depressed prices in early retirement.`;
+
+  return `
+    <div style="margin-top:24px;padding-top:20px;border-top:2px solid var(--border-color);">
+      <h4 style="font-size:0.88rem;font-weight:700;color:var(--text-color-primary);margin-bottom:6px;">
+        🎲 Sequence-of-Returns Risk Analysis
+      </h4>
+      <p style="font-size:0.75rem;color:var(--text-color-secondary);margin-bottom:12px;">
+        The biggest retirement risk isn't average returns — it's <em>when</em> bad years hit. A market crash in year 1 of retirement is far more damaging than the same crash in year 15, because you're selling shares at their lowest to fund spending.
+      </p>
+      <div style="overflow-x:auto;margin-bottom:14px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="border-bottom:2px solid var(--border-color);font-size:0.72rem;color:var(--text-color-secondary);">
+            <th style="padding:6px 8px;text-align:left;">Scenario</th>
+            <th style="padding:6px 8px;text-align:center;">Return Profile</th>
+            <th style="padding:6px 8px;text-align:right;">30-Year Survival</th>
+            <th style="padding:6px 8px;text-align:right;">Balance at 30 Years</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:9px;padding:11px 14px;font-size:0.82rem;line-height:1.6;">
+        💡 ${insight}
+      </div>
+    </div>`;
+}
 
 function openWithdrawalWidget() {
   const w = document.getElementById('withdrawalWidget');
@@ -8624,6 +8777,167 @@ function injectWithdrawalButton() {
 setTimeout(injectWithdrawalButton, 2600);
 window.addEventListener('load', () => setTimeout(injectWithdrawalButton, 1800));
 
+// ══════════════════════════════════════════════
+//  FEATURE 3 — ROTH CONVERSION ANALYZER
+// ══════════════════════════════════════════════
+
+window.runRothAnalyzer = function runRothAnalyzer() {
+  const el = document.getElementById('rothResults');
+  if (!el) return;
+
+  const balance     = parseFloat(document.getElementById('rothBalance')?.value)     || 0;
+  const currentAge  = parseInt(document.getElementById('rothCurrentAge')?.value)    || 50;
+  const currentRate = parseFloat(document.getElementById('rothCurrentRate')?.value) / 100 || 0.22;
+  const retireRate  = parseFloat(document.getElementById('rothRetireRate')?.value)  / 100 || 0.25;
+  const retireAge   = parseInt(document.getElementById('rothRetireAge')?.value)     || 65;
+  const returnRate  = parseFloat(document.getElementById('rothReturnRate')?.value)  / 100 || 0.07;
+
+  if (balance <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">Please enter a balance to convert.</p>'; return; }
+
+  const yearsToRetire = Math.max(1, retireAge - currentAge);
+  const fc = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+  const pct = n => (n*100).toFixed(0)+'%';
+
+  // ── Scenario A: Keep Traditional (don't convert) ──
+  // Pay taxes at retirement rate when withdrawing
+  const traditionalAtRetire = balance * Math.pow(1 + returnRate, yearsToRetire);
+  const traditionalAfterTax = traditionalAtRetire * (1 - retireRate);
+
+  // ── Scenario B: Convert to Roth Now ──
+  // Pay taxes now at current rate, then grow tax-free
+  const conversionTaxCost   = balance * currentRate;       // tax bill this year
+  const rothBalance         = balance - conversionTaxCost; // after-tax amount invested in Roth
+  const rothAtRetire        = rothBalance * Math.pow(1 + returnRate, yearsToRetire);
+  // Roth qualified withdrawals = 100% tax-free
+
+  // Net advantage of converting
+  const netAdvantage = rothAtRetire - traditionalAfterTax;
+  const converting   = netAdvantage > 0;
+
+  // Break-even age: at what age does the Roth advantage kick in?
+  // Roth after-tax value exceeds Traditional after-tax value at age X
+  let breakEvenAge = null;
+  for (let age = currentAge; age <= 100; age++) {
+    const yrs = age - currentAge;
+    const tradVal  = balance  * Math.pow(1 + returnRate, yrs) * (1 - retireRate);
+    const rothVal  = rothBalance * Math.pow(1 + returnRate, yrs);
+    if (rothVal >= tradVal) { breakEvenAge = age; break; }
+  }
+
+  // Year-by-year table (show every 5 years from now to 90)
+  const rows = [];
+  for (let age = currentAge; age <= Math.min(90, currentAge + 45); age += 5) {
+    const yrs     = age - currentAge;
+    const tradVal = balance   * Math.pow(1 + returnRate, yrs) * (1 - retireRate);
+    const rothVal = rothBalance * Math.pow(1 + returnRate, yrs);
+    const diff    = rothVal - tradVal;
+    const isBreak = breakEvenAge !== null && age >= breakEvenAge && (age - 5) < breakEvenAge;
+    rows.push({ age, yrs, tradVal, rothVal, diff, isBreak });
+  }
+
+  // Lifetime RMD savings: Roth has no RMDs, Traditional does (rough estimate)
+  const rmdSavings = traditionalAfterTax * 0.035; // ~3.5% annual RMDs past 73
+
+  const colorPos = n => n >= 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)';
+  const verdict  = converting
+    ? `<span style="color:var(--positive-color,#27ae60);font-weight:800;">✓ Converting makes sense</span> — your retirement tax rate (${pct(retireRate)}) is higher than today's rate (${pct(currentRate)}), so paying taxes now is cheaper.`
+    : `<span style="color:var(--negative-color,#e74c3c);font-weight:800;">✗ Consider keeping Traditional</span> — your current tax rate (${pct(currentRate)}) is higher than your expected retirement rate (${pct(retireRate)}), so deferring taxes saves money.`;
+
+  const tableRows = rows.map(r => `
+    <tr style="border-bottom:0.5px solid var(--border-color);${r.isBreak?'background:rgba(39,174,96,0.06);':''}font-size:0.78rem;">
+      <td style="padding:5px 8px;font-weight:${r.isBreak?'700':'400'};">${r.age}${r.isBreak?' ← break-even':''}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(r.tradVal)}</td>
+      <td style="padding:5px 8px;text-align:right;">${fc(r.rothVal)}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:700;color:${colorPos(r.diff)};">${r.diff>=0?'+':''}${fc(r.diff)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <!-- Summary cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
+      <div style="padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:5px;">Conversion Tax Bill (now)</div>
+        <div style="font-size:1.2rem;font-weight:800;color:var(--negative-color,#e74c3c);">${fc(conversionTaxCost)}</div>
+        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:3px;">Pay ${pct(currentRate)} on ${fc(balance)} today</div>
+      </div>
+      <div style="padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:5px;">Traditional at Retirement</div>
+        <div style="font-size:1.2rem;font-weight:800;">${fc(traditionalAfterTax)}</div>
+        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:3px;">After ${pct(retireRate)} withdrawal tax</div>
+      </div>
+      <div style="padding:14px;background:var(--bg-color);border:${converting?'2px solid var(--positive-color,#27ae60)':'1px solid var(--border-color)'};border-radius:10px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:5px;">Roth at Retirement</div>
+        <div style="font-size:1.2rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc(rothAtRetire)}</div>
+        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:3px;">100% tax-free growth</div>
+      </div>
+      <div style="padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:5px;">Net Roth Advantage</div>
+        <div style="font-size:1.2rem;font-weight:800;color:${colorPos(netAdvantage)};">${netAdvantage>=0?'+':''}${fc(netAdvantage)}</div>
+        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:3px;">At age ${retireAge} · Break-even: age ${breakEvenAge ?? '—'}</div>
+      </div>
+    </div>
+
+    <!-- Verdict -->
+    <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:10px;padding:12px 16px;margin-bottom:18px;font-size:0.85rem;line-height:1.6;">
+      ${verdict}
+      ${breakEvenAge ? `<br>Break-even age: <strong>${breakEvenAge}</strong> — Roth wins at every age after that.` : ''}
+      ${converting ? `<br>No RMDs on Roth IRA — additional flexibility in retirement worth roughly <strong>${fc(rmdSavings)}/yr</strong> in avoided forced distributions.` : ''}
+    </div>
+
+    <!-- Year-by-year table -->
+    <h4 style="font-size:0.85rem;font-weight:700;color:var(--text-color-primary);margin-bottom:8px;">After-Tax Value by Age</h4>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:2px solid var(--border-color);font-size:0.72rem;color:var(--text-color-secondary);">
+          <th style="padding:5px 8px;text-align:left;">Age</th>
+          <th style="padding:5px 8px;text-align:right;">Traditional (after tax)</th>
+          <th style="padding:5px 8px;text-align:right;">Roth (tax-free)</th>
+          <th style="padding:5px 8px;text-align:right;">Roth Advantage</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:10px;">
+      Assumes lump-sum conversion, flat tax rates, constant ${pct(returnRate)} annual return. Partial conversions (spreading over multiple years to stay in lower brackets) often reduce the conversion tax cost. Consult a tax advisor.
+    </p>`;
+};
+
+function openRothWidget() {
+  const w = document.getElementById('rothWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    // Auto-fill balance from live 401k balance
+    try {
+      const holdings = (typeof calculateHoldingsAndCash === 'function') ? calculateHoldingsAndCash() : [];
+      let bal401k = 0;
+      holdings.forEach(h => {
+        if (h.accountType === '401(k)' || h.accountType === 'Roth IRA') {
+          const cached = (window.priceCache || {})[h.symbol] || {};
+          const price = cached.manualPrice > 0 ? cached.manualPrice : cached.currentPrice > 0 ? cached.currentPrice : 0;
+          if (h.accountType === '401(k)') bal401k += (h.totalShares || 0) * price;
+        }
+      });
+      const balInput = document.getElementById('rothBalance');
+      if (balInput && bal401k > 0 && !balInput.value) balInput.value = Math.round(bal401k);
+    } catch(e) {}
+    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+window.openRothWidget = openRothWidget;
+
+function injectRothButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_rothBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_rothBtn'; btn.className = 'density-toggle';
+  btn.title = 'Roth Conversion Analyzer (R)';
+  btn.textContent = '🔄 Roth Converter';
+  btn.addEventListener('click', openRothWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectRothButton, 2800);
+window.addEventListener('load', () => setTimeout(injectRothButton, 1900));
 
 })();
 </script>
