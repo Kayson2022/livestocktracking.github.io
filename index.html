@@ -477,6 +477,38 @@
         [data-theme="dark"] .collapse-group-btn:hover { background: #374151; }
     
 
+        
+/* ══ FEATURE 11: MOBILE POLISH (401K) ══════════════════════════════ */
+@media (max-width: 480px) {
+  /* Enhancement toolbar wraps nicely */
+  #_enhControlsInjected { gap: 4px !important; padding: 6px 8px !important; flex-wrap: wrap !important; }
+  .density-toggle { font-size: 0.72rem !important; padding: 4px 8px !important; }
+  /* Widgets full-width, tighter padding */
+  #widget529, #taxPlanWidget, #paycheckWidget,
+  #rothWidget, #timelineWidget, #costBasisWidget,
+  #withdrawalWidget, #contribCalWidget { margin: 0 8px 20px !important; padding: 16px !important; }
+  /* Stat cards 2-col */
+  .stats-grid, div[style*="grid-template-columns"][style*="repeat"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Larger touch targets for buttons */
+  .btn, .btn-confirm, .btn-edit, .btn-danger {
+    min-height: 40px !important; font-size: 0.85rem !important;
+  }
+  /* Modals full width */
+  .modal-content { width: 96vw !important; max-width: 96vw !important; padding: 14px !important; }
+  /* Log transaction form full width */
+  .form-group { width: 100% !important; }
+  /* Tab bar scrollable */
+  .tab-links { overflow-x: auto !important; flex-wrap: nowrap !important; }
+  .tab-link { white-space: nowrap !important; font-size: 0.8rem !important; }
+}
+@media (min-width: 481px) and (max-width: 768px) {
+  #_enhControlsInjected { flex-wrap: wrap !important; }
+  .density-toggle { font-size: 0.75rem !important; }
+  .modal-content { width: 92vw !important; max-width: 92vw !important; }
+}
+
         /* Auto Backup styles */
         .backup-status {
             display: inline-flex; align-items: center; gap: 6px;
@@ -5963,6 +5995,136 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div id="rothResults"></div>
 </div>
 
+<!-- 529 College Projector Widget -->
+<div id="widget529" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">🎓 529 College Savings Projector</h3>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 14px;">Project if your 529 is on track for college costs. Auto-fills your current 529 balance.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Current 529 Balance ($)</label>
+      <input id="c529Balance" type="number" min="0" step="100" placeholder="e.g. 45000" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Child's Current Age</label>
+      <input id="c529ChildAge" type="number" min="0" max="17" value="8" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">College Start Age</label>
+      <input id="c529CollegeAge" type="number" min="17" max="22" value="18" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Annual Contribution ($)</label>
+      <input id="c529Annual" type="number" min="0" step="500" value="5000" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Expected Return %</label>
+      <input id="c529Return" type="number" min="1" max="15" step="0.1" value="6" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Annual Tuition ($)</label>
+      <input id="c529Tuition" type="number" min="5000" step="1000" value="35000" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Tuition Inflation %</label>
+      <input id="c529Inflation" type="number" min="1" max="10" step="0.1" value="5" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+  </div>
+  <button onclick="window.run529Projector()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#9b59b6,#6c3483);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">🎓 Run Projection</button>
+  <div id="c529Results"></div>
+</div>
+
+<!-- Year-End Tax Planning Widget -->
+<div id="taxPlanWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">📋 Year-End Tax Planning</h3>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 14px;">Live checklist based on your realized gains/losses YTD — with tax-loss harvesting candidates and action items.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Your Tax Bracket</label>
+      <select id="taxPlanBracket" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+        <option value="0.10">10% / 0% LT</option>
+        <option value="0.22" selected>22% / 15% LT</option>
+        <option value="0.24">24% / 15% LT</option>
+        <option value="0.32">32% / 15% LT</option>
+        <option value="0.37">37% / 20% LT</option>
+      </select>
+    </div>
+    <button onclick="window.runTaxPlan()" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">📋 Refresh</button>
+  </div>
+  <div id="taxPlanResults"></div>
+</div>
+
+<!-- Paycheck Contribution Calculator Widget -->
+<div id="paycheckWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">💵 Paycheck Contribution Calculator</h3>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 14px;">See exactly how much comes out each paycheck and whether you'll hit the IRS limit before year end.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Annual Gross Salary ($)</label>
+      <input id="pcSalary" type="number" min="0" step="1000" placeholder="e.g. 120000" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">401(k) Contribution %</label>
+      <input id="pcRate" type="number" min="1" max="100" step="0.5" value="10" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Pay Frequency</label>
+      <select id="pcFreq" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+        <option value="52">Weekly (52/yr)</option>
+        <option value="26" selected>Bi-Weekly (26/yr)</option>
+        <option value="24">Semi-Monthly (24/yr)</option>
+        <option value="12">Monthly (12/yr)</option>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Employer Match %</label>
+      <input id="pcMatch" type="number" min="0" max="100" step="0.5" value="3" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Already Contributed ($)</label>
+      <input id="pcContributed" type="number" min="0" step="100" value="0" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+  </div>
+  <button onclick="window.runPaycheckCalc()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#27ae60,#1e8449);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">💵 Calculate</button>
+  <div id="paycheckResults"></div>
+</div>
+
+<!-- HSA Tracker Widget -->
+<div id="hsaWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">🏥 HSA Stealth Retirement Tracker</h3>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 14px;">The triple tax advantage: contributions pre-tax, growth tax-free, withdrawals tax-free for medical. Invest and don't spend — it becomes a second Roth IRA at 65.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Current HSA Balance ($)</label>
+      <input id="hsaBalance" type="number" min="0" step="100" placeholder="e.g. 18000" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Annual Contribution ($)</label>
+      <input id="hsaAnnualContrib" type="number" min="0" step="100" value="4300" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Current Age</label>
+      <input id="hsaCurrentAge" type="number" min="18" max="64" value="40" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Expected Return %</label>
+      <input id="hsaReturn" type="number" min="1" max="15" step="0.1" value="7" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Tax Bracket %</label>
+      <input id="hsaTaxRate" type="number" min="10" max="37" value="22" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Coverage Type</label>
+      <select id="hsaCoverage" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+        <option value="individual">Individual (limit: $4,300)</option>
+        <option value="family">Family (limit: $8,550)</option>
+      </select>
+    </div>
+  </div>
+  <button onclick="window.runHSATracker()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#16a085,#1abc9c);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">🏥 Calculate</button>
+  <div id="hsaResults"></div>
+</div>
+
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
@@ -5976,6 +6138,10 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div class="k401row"><span>Tax optimizer</span><kbd>B</kbd></div>
   <div class="k401row"><span>Withdrawal planner</span><kbd>P</kbd></div>
   <div class="k401row"><span>Roth converter</span><kbd>R</kbd></div>
+  <div class="k401row"><span>529 projector</span><kbd>E</kbd></div>
+  <div class="k401row"><span>Tax planning</span><kbd>Y</kbd></div>
+  <div class="k401row"><span>Paycheck calc</span><kbd>C</kbd></div>
+  <div class="k401row"><span>HSA tracker</span><kbd>H</kbd></div>
   <div class="k401row"><span>This panel</span><kbd>?</kbd></div>
 </div>
 
@@ -6382,6 +6548,10 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
     else if (k === 'b') { if (typeof window.openCostBasisWidget === 'function') window.openCostBasisWidget(); }
     else if (k === 'p') { if (typeof window.openWithdrawalWidget === 'function') window.openWithdrawalWidget(); }
     else if (k === 'r') { if (typeof window.openRothWidget === 'function') window.openRothWidget(); }
+    else if (k === 'e') { if (typeof window.open529Widget === 'function') window.open529Widget(); }
+    else if (k === 'y') { if (typeof window.openTaxPlanWidget === 'function') window.openTaxPlanWidget(); }
+    else if (k === 'c') { if (typeof window.openPaycheckWidget === 'function') window.openPaycheckWidget(); }
+    else if (k === 'h') { if (typeof window.openHSAWidget === 'function') window.openHSAWidget(); }
     else if (k === '?') { if (kbd401Panel) kbd401Panel.style.display = kbd401Panel.style.display==='block'?'none':'block'; }
   });
 
@@ -8938,6 +9108,512 @@ function injectRothButton() {
 }
 setTimeout(injectRothButton, 2800);
 window.addEventListener('load', () => setTimeout(injectRothButton, 1900));
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 6 — 529 COLLEGE SAVINGS PROJECTOR
+// ══════════════════════════════════════════════
+window.run529Projector = function() {
+  const el = document.getElementById('c529Results');
+  if (!el) return;
+  const balance    = parseFloat(document.getElementById('c529Balance')?.value) || 0;
+  const childAge   = parseInt(document.getElementById('c529ChildAge')?.value) || 8;
+  const collegeAge = parseInt(document.getElementById('c529CollegeAge')?.value) || 18;
+  const annual     = parseFloat(document.getElementById('c529Annual')?.value) || 5000;
+  const ret        = parseFloat(document.getElementById('c529Return')?.value) / 100 || 0.06;
+  const tuition    = parseFloat(document.getElementById('c529Tuition')?.value) || 35000;
+  const inflation  = parseFloat(document.getElementById('c529Inflation')?.value) / 100 || 0.05;
+  const years      = Math.max(1, collegeAge - childAge);
+  const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+  const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+
+  let projected = balance;
+  for (let y = 0; y < years; y++) projected = (projected + annual) * (1 + ret);
+
+  let totalCost = 0;
+  for (let y = 0; y < 4; y++) totalCost += tuition * Math.pow(1 + inflation, years + y);
+
+  const shortfall  = totalCost - projected;
+  const onTrack    = shortfall <= 0;
+  const coversPct  = Math.min(100, (projected / totalCost * 100));
+  const colorPos   = n => n >= 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)';
+
+  const tableRows = [];
+  let bal = balance;
+  for (let y = 0; y <= years; y++) {
+    tableRows.push({ age: childAge + y, balance: bal });
+    if (y < years) bal = (bal + annual) * (1 + ret);
+  }
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px;">
+      <div style="padding:12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:4px;">Projected at Age ${collegeAge}</div>
+        <div style="font-size:1.2rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc(projected)}</div>
+      </div>
+      <div style="padding:12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:4px;">4-Year Cost (infl.)</div>
+        <div style="font-size:1.2rem;font-weight:800;">${fc(totalCost)}</div>
+      </div>
+      <div style="padding:12px;background:var(--bg-color);border:${onTrack ? '2px solid var(--positive-color,#27ae60)' : '1px solid var(--border-color)'};border-radius:10px;">
+        <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:4px;">${onTrack ? 'Surplus' : 'Shortfall'}</div>
+        <div style="font-size:1.2rem;font-weight:800;color:${colorPos(-shortfall)};">${fc(Math.abs(shortfall))}</div>
+      </div>
+      <div style="padding:12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;">
+        <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:4px;">Coverage</div>
+        <div style="font-size:1.2rem;font-weight:800;color:${coversPct>=100?'var(--positive-color,#27ae60)':'var(--negative-color,#e74c3c)'};">${coversPct.toFixed(0)}%</div>
+        <div style="margin-top:4px;background:var(--border-color);border-radius:999px;height:4px;"><div style="width:${coversPct}%;height:100%;background:${coversPct>=100?'var(--positive-color,#27ae60)':'var(--negative-color,#e74c3c)'};border-radius:999px;"></div></div>
+      </div>
+    </div>
+    <div style="background:rgba(155,89,182,0.07);border:1px solid rgba(155,89,182,0.25);border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;">
+      ${onTrack
+        ? '<strong>✓ On track.</strong> Your 529 is projected to cover all 4 years with a ' + fc(-shortfall) + ' surplus.'
+        : '<strong>⚠ ' + fc(shortfall) + ' shortfall.</strong> To close this gap, increase annual contributions or front-load up to $90,000 (5-year gift tax averaging, IRS 2026 rules).'}
+    </div>
+    <h4 style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">Year-by-Year Balance</h4>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <thead><tr style="border-bottom:2px solid var(--border-color);color:var(--text-color-secondary);">
+          <th style="padding:5px 8px;text-align:left;">Child Age</th>
+          <th style="padding:5px 8px;text-align:right;">529 Balance</th>
+        </tr></thead>
+        <tbody>${tableRows.map(r =>
+          '<tr style="border-bottom:0.5px solid var(--border-color);"><td style="padding:4px 8px;">' + r.age + (r.age === collegeAge ? ' 🎓' : '') + '</td><td style="padding:4px 8px;text-align:right;font-weight:700;color:var(--positive-color,#27ae60);">' + fc(r.balance) + '</td></tr>'
+        ).join('')}</tbody>
+      </table>
+    </div>
+    <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:10px;">Assumes ${(ret*100).toFixed(1)}% return, ${(inflation*100).toFixed(1)}% tuition inflation from $${tuition.toLocaleString()}/yr. 529 gains are tax-free when used for qualified education expenses.</p>`;
+};
+
+function open529Widget() {
+  const w = document.getElementById('widget529');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    try {
+      const txns = (window.portfolioData?.transactions || []);
+      const bought = txns.filter(t => t.accountType === '529 College Saving' && t.type === 'BUY')
+                         .reduce((s,t) => s + (parseFloat(t.shares)*parseFloat(t.price)||0), 0);
+      const sold   = txns.filter(t => t.accountType === '529 College Saving' && t.type === 'SELL')
+                         .reduce((s,t) => s + (parseFloat(t.shares)*parseFloat(t.price)||0), 0);
+      const inp = document.getElementById('c529Balance');
+      if (inp && !inp.value && bought > 0) inp.value = Math.round(bought - sold);
+    } catch(e) {}
+    w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+window.open529Widget = open529Widget;
+
+function inject529Button() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_529Btn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_529Btn'; btn.className = 'density-toggle';
+  btn.title = '529 College Projector (E)'; btn.textContent = '🎓 529 Projector';
+  btn.addEventListener('click', open529Widget);
+  group.appendChild(btn);
+}
+setTimeout(inject529Button, 3000);
+window.addEventListener('load', () => setTimeout(inject529Button, 2000));
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 8 — YEAR-END TAX PLANNING
+// ══════════════════════════════════════════════
+window.runTaxPlan = function() {
+  const el = document.getElementById('taxPlanResults');
+  if (!el) return;
+  const stRate = parseFloat(document.getElementById('taxPlanBracket')?.value) || 0.22;
+  const ltRate = stRate <= 0.12 ? 0 : stRate <= 0.35 ? 0.15 : 0.20;
+  const txns   = (window.portfolioData?.transactions || []);
+  const year   = new Date().getFullYear();
+  const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+  const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+  const colorPL = n => n >= 0 ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)';
+
+  // FIFO realized gains YTD
+  const lotsMap = {};
+  txns.filter(t => t.type === 'BUY').sort((a,b) => new Date(a.date)-new Date(b.date)).forEach(t => {
+    const k = t.symbol + '|' + t.accountType;
+    if (!lotsMap[k]) lotsMap[k] = [];
+    lotsMap[k].push({ date: t.date, price: parseFloat(t.price)||0, rem: parseFloat(t.shares)||0 });
+  });
+  let stGain = 0, ltGain = 0;
+  txns.filter(t => t.type === 'SELL' && new Date(t.date).getFullYear() === year).forEach(sell => {
+    const lots = (lotsMap[sell.symbol + '|' + sell.accountType] || []);
+    let need = parseFloat(sell.shares)||0, cost = 0, oldestDate = null;
+    for (const lot of lots) {
+      if (need <= 0) break;
+      const u = Math.min(need, lot.rem);
+      cost += u * lot.price;
+      if (!oldestDate) oldestDate = lot.date;
+      lot.rem -= u; need -= u;
+    }
+    const proceeds  = (parseFloat(sell.shares)||0) * (parseFloat(sell.price)||0);
+    const holdDays  = oldestDate ? Math.round((new Date(sell.date) - new Date(oldestDate)) / 86400000) : 0;
+    if (holdDays >= 365) ltGain += proceeds - cost; else stGain += proceeds - cost;
+  });
+
+  // Unrealized loss candidates for harvesting
+  const holdingsMap = {};
+  txns.forEach(t => {
+    const k = t.symbol + '|' + t.accountType;
+    if (!holdingsMap[k]) holdingsMap[k] = { symbol: t.symbol, account: t.accountType, shares: 0, cost: 0 };
+    const h = holdingsMap[k];
+    if (t.type === 'BUY')  { h.shares += parseFloat(t.shares)||0; h.cost += (parseFloat(t.shares)||0)*(parseFloat(t.price)||0); }
+    if (t.type === 'SELL') { const avg = h.shares > 0 ? h.cost/h.shares : 0; h.shares -= parseFloat(t.shares)||0; h.cost -= (parseFloat(t.shares)||0)*avg; }
+  });
+  const candidates = Object.values(holdingsMap).filter(h => {
+    if (h.shares <= 0.001) return false;
+    const cached = (window.priceCache || {})[h.symbol] || {};
+    const price = cached.manualPrice > 0 ? cached.manualPrice : cached.currentPrice > 0 ? cached.currentPrice : 0;
+    if (!price) return false;
+    h.currentPrice = price;
+    h.unrealizedPL = h.shares * price - h.cost;
+    return h.unrealizedPL < -500;
+  }).sort((a,b) => a.unrealizedPL - b.unrealizedPL);
+
+  const estTax    = Math.max(0, stGain) * stRate + Math.max(0, ltGain) * ltRate;
+  const harvTotal = candidates.reduce((s,c) => s + Math.abs(c.unrealizedPL), 0);
+  const harvestSaving = Math.min(harvTotal, Math.max(0, stGain + ltGain)) * stRate;
+
+  const checklist = [
+    { ok: stGain <= 0, label: 'Short-term gains', note: stGain > 0 ? fc2(stGain) + ' ST gains — ~' + fc(stGain*stRate) + ' tax at ' + (stRate*100).toFixed(0) + '%' : 'No short-term gains YTD' },
+    { ok: ltGain <= 0, label: 'Long-term gains',  note: ltGain > 0 ? fc2(ltGain) + ' LT gains — ~' + fc(ltGain*ltRate) + ' tax at ' + (ltRate*100).toFixed(0) + '%' : 'No long-term gains YTD' },
+    { ok: candidates.length === 0, label: 'Tax-loss harvesting', note: candidates.length > 0 ? candidates.length + ' position' + (candidates.length>1?'s':'')+' with harvestable losses — could save ~' + fc(harvestSaving) : 'No significant loss positions' },
+    { ok: true, label: '529 contributions', note: 'IRS 2026: $18,000/yr per beneficiary (or $90,000 via 5-yr averaging)' },
+    { ok: true, label: 'IRA contribution deadline', note: 'April 15, ' + (year+1) + ' for Traditional/Roth IRA' },
+    { ok: true, label: 'Wash sale rule', note: 'Wait 30+ days before re-buying a harvested position' },
+  ];
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:16px;">
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">ST Realized ${year}</div>
+        <div style="font-size:1rem;font-weight:800;color:${colorPL(stGain)};">${fc2(stGain)}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">LT Realized ${year}</div>
+        <div style="font-size:1rem;font-weight:800;color:${colorPL(ltGain)};">${fc2(ltGain)}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Est. Tax Bill</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--negative-color,#e74c3c);">${fc(estTax)}</div>
+      </div>
+      ${harvestSaving > 100 ? '<div style="padding:10px 12px;background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.3);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Harvestable Savings</div><div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">~' + fc(harvestSaving) + '</div></div>' : ''}
+    </div>
+    <div style="margin-bottom:16px;">${checklist.map(c =>
+      '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--border-color);">' +
+      '<span style="font-size:1rem;flex-shrink:0;">' + (c.ok ? '✅' : '⚠️') + '</span>' +
+      '<div><div style="font-size:0.82rem;font-weight:700;color:var(--text-color-primary);">' + c.label + '</div>' +
+      '<div style="font-size:0.75rem;color:var(--text-color-secondary);">' + c.note + '</div></div></div>'
+    ).join('')}</div>
+    ${candidates.length ? '<h4 style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">💡 Tax-Loss Harvesting Candidates</h4><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:2px solid var(--border-color);font-size:0.7rem;color:var(--text-color-secondary);"><th style="padding:5px 8px;text-align:left;">Symbol</th><th style="padding:5px 8px;text-align:left;">Account</th><th style="padding:5px 8px;text-align:right;">Price</th><th style="padding:5px 8px;text-align:right;">Unrealized Loss</th><th style="padding:5px 8px;text-align:right;">Est. Saved</th></tr></thead><tbody>' +
+      candidates.slice(0,8).map(c =>
+        '<tr style="border-bottom:0.5px solid var(--border-color);font-size:0.78rem;"><td style="padding:5px 8px;font-weight:700;">' + c.symbol + '</td><td style="padding:5px 8px;color:var(--text-color-secondary);">' + c.account + '</td><td style="padding:5px 8px;text-align:right;">' + fc2(c.currentPrice) + '</td><td style="padding:5px 8px;text-align:right;font-weight:700;color:var(--negative-color,#e74c3c);">' + fc2(c.unrealizedPL) + '</td><td style="padding:5px 8px;text-align:right;color:var(--positive-color,#27ae60);">~' + fc(Math.abs(c.unrealizedPL)*stRate) + '</td></tr>'
+      ).join('') + '</tbody></table></div><p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:6px;">⚠ Wash sale: wait 30+ days before re-buying. Not tax advice.</p>' : ''}`;
+};
+
+function openTaxPlanWidget() {
+  const w = document.getElementById('taxPlanWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) { window.runTaxPlan(); w.scrollIntoView({ behavior:'smooth', block:'start' }); }
+}
+window.openTaxPlanWidget = openTaxPlanWidget;
+
+function injectTaxPlanButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_taxPlanBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_taxPlanBtn'; btn.className = 'density-toggle';
+  btn.title = 'Year-End Tax Planning (Y)'; btn.textContent = '📋 Tax Planning';
+  btn.addEventListener('click', openTaxPlanWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectTaxPlanButton, 3200);
+window.addEventListener('load', () => setTimeout(injectTaxPlanButton, 2100));
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 9 — PAYCHECK CONTRIBUTION CALC
+// ══════════════════════════════════════════════
+window.runPaycheckCalc = function() {
+  const el = document.getElementById('paycheckResults');
+  if (!el) return;
+  const salary  = parseFloat(document.getElementById('pcSalary')?.value) || 0;
+  const rate    = parseFloat(document.getElementById('pcRate')?.value) / 100 || 0.10;
+  const freq    = parseInt(document.getElementById('pcFreq')?.value) || 26;
+  const match   = parseFloat(document.getElementById('pcMatch')?.value) / 100 || 0.03;
+  const already = parseFloat(document.getElementById('pcContributed')?.value) || 0;
+  const ageBracket = localStorage.getItem('userAgeBracket') || 'under50';
+  const limit   = ageBracket === '60to63' ? 35750 : ageBracket === '50to59' ? 32500 : 24500;
+  const year    = new Date().getFullYear();
+  const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+  const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
+
+  if (salary <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:8px;">Enter your annual salary above.</p>'; return; }
+
+  const paycheck     = salary / freq;
+  const perPaycheck  = paycheck * rate;
+  const matchPerPC   = paycheck * Math.min(match, rate);
+  const annualContrib= perPaycheck * freq;
+  const annualMatch  = matchPerPC * freq;
+  const remaining    = Math.max(0, limit - already);
+  const paychecksToLimit = remaining > 0 && perPaycheck > 0 ? Math.ceil(remaining / perPaycheck) : 0;
+  const maxPct       = Math.min(100, (limit / salary) * 100);
+  const leavingOnTable = rate < match ? (match - rate) * salary : 0;
+  const hitsLimit    = annualContrib >= limit;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:16px;">
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Per Paycheck (Yours)</div>
+        <div style="font-size:1rem;font-weight:800;">${fc2(perPaycheck)}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Employer Match/PC</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc2(matchPerPC)}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Your Annual Total</div>
+        <div style="font-size:1rem;font-weight:800;color:${hitsLimit?'var(--positive-color,#27ae60)':'var(--text-color-primary)'};">${fc(annualContrib)}</div>
+      </div>
+      <div style="padding:10px 12px;background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.3);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">You + Match / yr</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc(annualContrib + annualMatch)}</div>
+      </div>
+      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
+        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">IRS Limit ${year}</div>
+        <div style="font-size:1rem;font-weight:800;">${fc(limit)}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-color-secondary);margin-bottom:4px;">
+        <span>Contributed YTD</span><span style="font-weight:700;">${fc(already)} / ${fc(limit)}</span>
+      </div>
+      <div style="background:var(--border-color);border-radius:999px;height:8px;overflow:hidden;">
+        <div style="width:${Math.min(100,already/limit*100).toFixed(1)}%;height:100%;background:var(--accent-color-1,#3498db);border-radius:999px;"></div>
+      </div>
+    </div>
+    ${paychecksToLimit > 0 && paychecksToLimit <= freq
+      ? '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">✅ At ' + (rate*100).toFixed(1) + '% you will hit the IRS limit in <strong>~' + paychecksToLimit + ' more paychecks</strong> (' + fc(remaining) + ' remaining).</div>'
+      : !hitsLimit
+        ? '<div style="background:rgba(243,156,18,0.07);border:1px solid rgba(243,156,18,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">⚠ At ' + (rate*100).toFixed(1) + '% you will contribute ' + fc(annualContrib) + '/yr — <strong>' + fc(limit - annualContrib) + ' under the IRS limit</strong>. To max out, increase to <strong>' + maxPct.toFixed(1) + '%</strong>.</div>'
+        : '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">✅ You are on track to max out your 401(k) for ' + year + '.</div>'
+    }
+    ${leavingOnTable > 0
+      ? '<div style="background:rgba(231,76,60,0.07);border:1px solid rgba(231,76,60,0.2);border-radius:9px;padding:10px 14px;font-size:0.82rem;">⚠ You are leaving <strong>' + fc(leavingOnTable) + '/yr in free employer match</strong> on the table. Increase contribution to at least ' + (match*100).toFixed(1) + '% to capture the full match.</div>'
+      : '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;font-size:0.82rem;">✅ You are capturing the full employer match of ' + (match*100).toFixed(1) + '%.</div>'
+    }`;
+};
+
+function openPaycheckWidget() {
+  const w = document.getElementById('paycheckWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+window.openPaycheckWidget = openPaycheckWidget;
+
+function injectPaycheckButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_pcBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_pcBtn'; btn.className = 'density-toggle';
+  btn.title = 'Paycheck Contribution Calculator (C)'; btn.textContent = '💵 Paycheck Calc';
+  btn.addEventListener('click', openPaycheckWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectPaycheckButton, 3400);
+window.addEventListener('load', () => setTimeout(injectPaycheckButton, 2200));
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 10 — DARK MODE SYNC TO FIRESTORE
+// ══════════════════════════════════════════════
+(function patch401kDarkModeFirestore() {
+  function tryPatch() {
+    if (typeof toggleTheme !== 'function' || typeof db === 'undefined') {
+      setTimeout(tryPatch, 800); return;
+    }
+    const origToggle = window.toggleTheme;
+    window.toggleTheme = async function() {
+      if (origToggle) await origToggle();
+      try {
+        const newTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        if (!userId || !db) return;
+        const userDocRef = doc(db, 'users', userId);
+        await setDoc(userDocRef, { prefs: { theme: newTheme } }, { merge: true });
+      } catch(e) { /* localStorage fallback still active */ }
+    };
+    // Load Firestore theme preference on startup
+    setTimeout(async () => {
+      try {
+        if (!userId || !db) return;
+        const snap = await getDoc(doc(db, 'users', userId));
+        if (snap.exists()) {
+          const fsTheme = snap.data()?.prefs?.theme;
+          if (fsTheme && fsTheme !== (document.documentElement.getAttribute('data-theme') || 'light')) {
+            if (typeof applyTheme === 'function') applyTheme(fsTheme);
+            localStorage.setItem('myPortfolioTheme_v4', fsTheme);
+          }
+        }
+      } catch(e) {}
+    }, 2500);
+  }
+  tryPatch();
+})();
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 12 — STALE PRICE INDICATOR (401K)
+// ══════════════════════════════════════════════
+(function init401kStalePrices() {
+  window._k401LastRefresh = Date.now(); // baseline
+  const STALE_MS = 5 * 60 * 1000;
+
+  function checkAndShowStaleBanner() {
+    const age = Date.now() - (window._k401LastRefresh || 0);
+    let banner = document.getElementById('k401-stale-banner');
+    if (age > STALE_MS && window._k401LastRefresh) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'k401-stale-banner';
+        banner.style.cssText = 'background:rgba(243,156,18,0.1);border:1px solid rgba(243,156,18,0.4);border-radius:8px;padding:7px 14px;margin:0 20px 10px;font-size:0.78rem;color:#e67e22;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        banner.innerHTML = '⏱ Prices may be stale (last refresh: <span id="k401-stale-time"></span>)' +
+          '<button onclick="window.refreshAllPrices?.(true);this.textContent=\'Refreshing...\';setTimeout(()=>this.textContent=\'Refresh Now\',3000)" ' +
+          'style="margin-left:auto;padding:3px 10px;border-radius:5px;border:none;background:#e67e22;color:#fff;font-size:0.72rem;cursor:pointer;font-weight:700;">Refresh Now</button>';
+        const investmentsTab = document.getElementById('investmentsTab');
+        if (investmentsTab) investmentsTab.prepend(banner);
+      }
+      const timeEl = document.getElementById('k401-stale-time');
+      if (timeEl) timeEl.textContent = new Date(window._k401LastRefresh).toLocaleTimeString();
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+
+  const origRefresh = window.refreshAllPrices;
+  if (origRefresh) {
+    window.refreshAllPrices = async function(...args) {
+      const result = await origRefresh(...args);
+      window._k401LastRefresh = Date.now();
+      checkAndShowStaleBanner();
+      return result;
+    };
+  }
+
+  setInterval(checkAndShowStaleBanner, 60000);
+  setTimeout(checkAndShowStaleBanner, 6000);
+})();
+
+
+
+// ══════════════════════════════════════════════
+//  NEW FEATURE 7 — HSA STEALTH RETIREMENT TRACKER
+// ══════════════════════════════════════════════
+window.runHSATracker = function() {
+  const el = document.getElementById('hsaResults');
+  if (!el) return;
+  const balance  = parseFloat(document.getElementById('hsaBalance')?.value) || 0;
+  const annual   = parseFloat(document.getElementById('hsaAnnualContrib')?.value) || 4300;
+  const age      = parseInt(document.getElementById('hsaCurrentAge')?.value) || 40;
+  const ret      = parseFloat(document.getElementById('hsaReturn')?.value) / 100 || 0.07;
+  const taxRate  = parseFloat(document.getElementById('hsaTaxRate')?.value) / 100 || 0.22;
+  const coverage = document.getElementById('hsaCoverage')?.value || 'individual';
+  const limit    = coverage === 'family' ? 8550 : 4300;
+  const yearsTo65= Math.max(1, 65 - age);
+  const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
+
+  // Project HSA at 65 — invest everything, spend nothing
+  let bal = balance;
+  for (let y = 0; y < yearsTo65; y++) bal = (bal + annual) * (1 + ret);
+  const hsaAt65 = bal;
+
+  // Tax savings from contributions (pre-tax value)
+  const totalContribs    = annual * yearsTo65;
+  const taxSavingsContrib = totalContribs * taxRate;
+  const taxSavingsGrowth  = (hsaAt65 - balance - totalContribs) * taxRate; // avoided capital gains
+  const totalTaxSavings   = taxSavingsContrib + taxSavingsGrowth;
+
+  // Compare: same money in taxable brokerage
+  let taxableBal = balance;
+  const afterTaxContrib = annual * (1 - taxRate);
+  for (let y = 0; y < yearsTo65; y++) taxableBal = (taxableBal + afterTaxContrib) * (1 + ret * (1 - 0.15));
+  const hsaAdvantage = hsaAt65 - taxableBal;
+
+  // 2026 IRS limits
+  const catchUp   = age >= 55 ? 1000 : 0;
+  const fullLimit = limit + catchUp;
+  const underContrib = Math.max(0, fullLimit - annual);
+
+  const card = (l, v, c='') => `<div style="padding:12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:9px;">
+    <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:4px;">${l}</div>
+    <div style="font-size:1rem;font-weight:800;color:${c||'var(--text-color-primary)'};">${v}</div>
+  </div>`;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px;">
+      ${card('HSA Balance at 65', fc(hsaAt65), 'var(--positive-color,#27ae60)')}
+      ${card('vs Taxable Account', fc(taxableBal))}
+      ${card('HSA Advantage', fc(hsaAdvantage), 'var(--positive-color,#27ae60)')}
+      ${card('Total Tax Savings', fc(totalTaxSavings), 'var(--positive-color,#27ae60)')}
+      ${card('IRS Limit ${new Date().getFullYear()}', fc(fullLimit) + (catchUp ? ' (+$1K catch-up)' : ''))}
+      ${card('You Contribute', fc(annual), annual >= fullLimit ? 'var(--positive-color,#27ae60)' : 'var(--negative-color,#e74c3c)')}
+    </div>
+    ${underContrib > 0 ? `<div style="background:rgba(231,76,60,0.07);border:1px solid rgba(231,76,60,0.2);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;">
+      ⚠ You're leaving <strong>${fc(underContrib)}/yr</strong> of tax-free HSA space unused. Maxing out adds ~${fc(underContrib * taxRate)} in annual tax savings.
+    </div>` : `<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;">
+      ✅ You're maxing out your HSA. The triple tax advantage is fully in play.
+    </div>`}
+    <div style="background:rgba(22,160,133,0.07);border:1px solid rgba(22,160,133,0.2);border-radius:9px;padding:12px 14px;margin-bottom:14px;font-size:0.82rem;line-height:1.7;">
+      <strong>Triple Tax Advantage:</strong><br>
+      ① <strong>Contributions</strong> reduce taxable income (save ${(taxRate*100).toFixed(0)}% now)<br>
+      ② <strong>Growth</strong> is completely tax-free (no capital gains, no dividends tax)<br>
+      ③ <strong>Withdrawals</strong> are tax-free for qualified medical expenses<br>
+      ④ After age 65, non-medical withdrawals taxed as ordinary income — <em>exactly like a Traditional IRA</em><br>
+      → Keep receipts for past medical expenses — you can reimburse yourself years later with no deadline.
+    </div>
+    <h4 style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">HSA vs Taxable Brokerage Comparison</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div style="padding:12px;background:rgba(22,160,133,0.07);border:1px solid rgba(22,160,133,0.25);border-radius:9px;font-size:0.8rem;">
+        <div style="font-weight:700;color:var(--positive-color,#27ae60);margin-bottom:6px;">HSA (invest, don't spend)</div>
+        <div>Annual contribution: ${fc(annual)}</div>
+        <div>Tax saved upfront: ${fc(annual * taxRate)}/yr</div>
+        <div>Balance at 65: <strong>${fc(hsaAt65)}</strong></div>
+        <div>Withdrawals: Tax-free for medical</div>
+      </div>
+      <div style="padding:12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:9px;font-size:0.8rem;">
+        <div style="font-weight:700;margin-bottom:6px;">Taxable Brokerage (same money)</div>
+        <div>After-tax contribution: ${fc(afterTaxContrib)}/yr</div>
+        <div>Tax saved upfront: $0</div>
+        <div>Balance at 65: <strong>${fc(taxableBal)}</strong></div>
+        <div>Withdrawals: LT capital gains tax</div>
+      </div>
+    </div>
+    <p style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:10px;">IRS 2026 HSA limits: $4,300 individual / $8,550 family. Age 55+ catch-up: +$1,000. Must be enrolled in an HDHP (High-Deductible Health Plan) to contribute. Not financial advice.</p>`;
+};
+
+function openHSAWidget() {
+  const w = document.getElementById('hsaWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+window.openHSAWidget = openHSAWidget;
+
+function injectHSAButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_hsaBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_hsaBtn'; btn.className = 'density-toggle';
+  btn.title = 'HSA Stealth Retirement Tracker (H)'; btn.textContent = '🏥 HSA Tracker';
+  btn.addEventListener('click', openHSAWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectHSAButton, 3600);
+window.addEventListener('load', () => setTimeout(injectHSAButton, 2300));
+
 
 })();
 </script>
