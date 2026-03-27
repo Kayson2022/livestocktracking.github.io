@@ -1833,8 +1833,9 @@
             // Roth IRA catch-up (50+):        $1,000  → total $8,000
             // 529 annual gift tax exclusion:  $19,000
             const bracket = localStorage.getItem('userAgeBracket') || 'under50';
-            if (bracket === '60to63') return { ira: 8000, k401: 35750, k529: 19000, label: 'Age 60–63 (super catch-up)' };
-            if (bracket === '50to59') return { ira: 8000, k401: 32500, k529: 19000, label: 'Age 50–59 / 64+' };
+            // IRS 2026: $24,500 base + $8,000 catch-up (age 50+) or $11,250 super catch-up (age 60-63, SECURE 2.0)
+            if (bracket === '60to63') return { ira: 8000, k401: 35750, k529: 19000, label: 'Age 60-63 (super catch-up +$11,250)' };
+            if (bracket === '50to59') return { ira: 8000, k401: 32500, k529: 19000, label: 'Age 50-59 or 64+ (catch-up +$8,000)' };
             return { ira: 7000, k401: 24500, k529: 19000, label: 'Under 50' };
         }
 
@@ -5087,8 +5088,8 @@
                 <label for="ageBracketSelect">Your Age Bracket (for IRS 2026 contribution limits)</label>
                 <select id="ageBracketSelect">
                     <option value="under50">Under 50 — 401k $24,500 / IRA $7,000</option>
-                    <option value="50to59">Age 50–59 or 64+ — 401k $32,500 / IRA $8,000</option>
-                    <option value="60to63">Age 60–63 — 401k $35,750 super catch-up / IRA $8,000</option>
+                    <option value="50to59">Age 50-59 or 64+ — 401k $32,500 (+$8,000 catch-up) / IRA $8,000</option>
+                    <option value="60to63">Age 60-63 — 401k $35,750 (+$11,250 super catch-up) / IRA $8,000</option>
                 </select>
                 <small>Used by the Annual Contribution Tracker to show correct IRS limits.</small>
             </div>
@@ -6083,8 +6084,29 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Already Contributed ($)</label>
       <input id="pcContributed" type="number" min="0" step="100" value="0" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
     </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Your Tax Bracket</label>
+      <select id="pcTaxBracket" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+        <option value="0.10">10%</option>
+        <option value="0.12">12%</option>
+        <option value="0.22" selected>22%</option>
+        <option value="0.24">24%</option>
+        <option value="0.32">32%</option>
+        <option value="0.35">35%</option>
+        <option value="0.37">37%</option>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:0.72rem;font-weight:600;color:var(--text-color-secondary);text-transform:uppercase;">Roth 401(k) Split %</label>
+      <input id="pcRothPct" type="number" min="0" max="100" step="5" value="0" placeholder="0 = all Traditional" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.88rem;">
+      <span style="font-size:0.65rem;color:var(--text-color-secondary);">0% = all Traditional | 100% = all Roth</span>
+    </div>
   </div>
+  <div id="pcRothGuidance" style="display:none;font-size:0.78rem;padding:8px 12px;border-radius:8px;margin-bottom:12px;line-height:1.6;"></div>
   <button onclick="window.runPaycheckCalc()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#27ae60,#1e8449);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">💵 Calculate</button>
+  <div id="pcBracketNote" style="font-size:0.72rem;color:var(--text-color-secondary);padding:6px 10px;background:rgba(39,174,96,0.06);border-radius:6px;margin-bottom:10px;display:none;">
+    Using IRS 2026 limit for <strong id="pcBracketLabel"></strong>. Change your age bracket in ⚙️ Settings.
+  </div>
   <div id="paycheckResults"></div>
 </div>
 
@@ -9340,73 +9362,101 @@ window.addEventListener('load', () => setTimeout(injectTaxPlanButton, 2100));
 window.runPaycheckCalc = function() {
   const el = document.getElementById('paycheckResults');
   if (!el) return;
-  const salary  = parseFloat(document.getElementById('pcSalary')?.value) || 0;
-  const rate    = parseFloat(document.getElementById('pcRate')?.value) / 100 || 0.10;
-  const freq    = parseInt(document.getElementById('pcFreq')?.value) || 26;
-  const match   = parseFloat(document.getElementById('pcMatch')?.value) / 100 || 0.03;
-  const already = parseFloat(document.getElementById('pcContributed')?.value) || 0;
+  const salary     = parseFloat(document.getElementById('pcSalary')?.value) || 0;
+  const rate       = parseFloat(document.getElementById('pcRate')?.value) / 100 || 0.10;
+  const freq       = parseInt(document.getElementById('pcFreq')?.value) || 26;
+  const match      = parseFloat(document.getElementById('pcMatch')?.value) / 100 || 0.03;
+  const already    = parseFloat(document.getElementById('pcContributed')?.value) || 0;
+  const taxRate    = parseFloat(document.getElementById('pcTaxBracket')?.value) || 0.22;
+  const rothPct    = Math.min(100, Math.max(0, parseFloat(document.getElementById('pcRothPct')?.value) || 0)) / 100;
+  const tradPct    = 1 - rothPct;
   const ageBracket = localStorage.getItem('userAgeBracket') || 'under50';
-  const limit   = ageBracket === '60to63' ? 35750 : ageBracket === '50to59' ? 32500 : 24500;
-  const year    = new Date().getFullYear();
+
+  // IRS 2026: $24,500 base + $8,000 catch-up (50+) or $11,250 super catch-up (60-63)
+  const BASE_LIMIT = 24500;
+  const catchUpAmt = ageBracket === '60to63' ? 11250 : ageBracket === '50to59' ? 8000 : 0;
+  const limit      = BASE_LIMIT + catchUpAmt;
+  const bracketLbl = ageBracket === '60to63' ? 'Age 60-63 (super catch-up +$11,250)'
+                   : ageBracket === '50to59' ? 'Age 50-59 or 64+ (catch-up +$8,000)'
+                   : 'Under 50';
+  const year = new Date().getFullYear();
   const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
   const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
 
-  if (salary <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:8px;">Enter your annual salary above.</p>'; return; }
+  const noteEl = document.getElementById('pcBracketNote');
+  const lblEl  = document.getElementById('pcBracketLabel');
+  if (noteEl) noteEl.style.display = 'block';
+  if (lblEl)  lblEl.textContent = bracketLbl + ' - limit ' + fc(limit);
 
-  const paycheck     = salary / freq;
-  const perPaycheck  = paycheck * rate;
-  const matchPerPC   = paycheck * Math.min(match, rate);
-  const annualContrib= perPaycheck * freq;
-  const annualMatch  = matchPerPC * freq;
-  const remaining    = Math.max(0, limit - already);
+  if (salary <= 0) {
+    el.innerHTML = '<p style="color:var(--text-color-secondary);padding:8px;">Enter your annual salary above.</p>';
+    return;
+  }
+
+  const paycheck      = salary / freq;
+  const perPaycheck   = paycheck * rate;
+  const rothPerPC     = perPaycheck * rothPct;
+  const tradPerPC     = perPaycheck * tradPct;
+  const matchPerPC    = paycheck * Math.min(match, rate);
+  const annualContrib = perPaycheck * freq;
+  const annualMatch   = matchPerPC * freq;
+  const annualRoth    = rothPerPC * freq;
+  const annualTrad    = tradPerPC * freq;
+  const remaining     = Math.max(0, limit - already);
   const paychecksToLimit = remaining > 0 && perPaycheck > 0 ? Math.ceil(remaining / perPaycheck) : 0;
-  const maxPct       = Math.min(100, (limit / salary) * 100);
-  const leavingOnTable = rate < match ? (match - rate) * salary : 0;
-  const hitsLimit    = annualContrib >= limit;
+  const maxPct        = Math.min(100, (limit / salary) * 100);
+  const leavingOnTable= rate < match ? (match - rate) * salary : 0;
+  const hitsLimit     = annualContrib >= limit;
+  const annualTaxSavings = annualTrad * taxRate;
 
-  el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:16px;">
-      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
-        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Per Paycheck (Yours)</div>
-        <div style="font-size:1rem;font-weight:800;">${fc2(perPaycheck)}</div>
-      </div>
-      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
-        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Employer Match/PC</div>
-        <div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc2(matchPerPC)}</div>
-      </div>
-      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
-        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Your Annual Total</div>
-        <div style="font-size:1rem;font-weight:800;color:${hitsLimit?'var(--positive-color,#27ae60)':'var(--text-color-primary)'};">${fc(annualContrib)}</div>
-      </div>
-      <div style="padding:10px 12px;background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.3);border-radius:8px;">
-        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">You + Match / yr</div>
-        <div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">${fc(annualContrib + annualMatch)}</div>
-      </div>
-      <div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;">
-        <div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">IRS Limit ${year}</div>
-        <div style="font-size:1rem;font-weight:800;">${fc(limit)}</div>
-      </div>
-    </div>
-    <div style="margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-color-secondary);margin-bottom:4px;">
-        <span>Contributed YTD</span><span style="font-weight:700;">${fc(already)} / ${fc(limit)}</span>
-      </div>
-      <div style="background:var(--border-color);border-radius:999px;height:8px;overflow:hidden;">
-        <div style="width:${Math.min(100,already/limit*100).toFixed(1)}%;height:100%;background:var(--accent-color-1,#3498db);border-radius:999px;"></div>
-      </div>
-    </div>
-    ${paychecksToLimit > 0 && paychecksToLimit <= freq
-      ? '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">✅ At ' + (rate*100).toFixed(1) + '% you will hit the IRS limit in <strong>~' + paychecksToLimit + ' more paychecks</strong> (' + fc(remaining) + ' remaining).</div>'
-      : !hitsLimit
-        ? '<div style="background:rgba(243,156,18,0.07);border:1px solid rgba(243,156,18,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">⚠ At ' + (rate*100).toFixed(1) + '% you will contribute ' + fc(annualContrib) + '/yr — <strong>' + fc(limit - annualContrib) + ' under the IRS limit</strong>. To max out, increase to <strong>' + maxPct.toFixed(1) + '%</strong>.</div>'
-        : '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">✅ You are on track to max out your 401(k) for ' + year + '.</div>'
-    }
-    ${leavingOnTable > 0
-      ? '<div style="background:rgba(231,76,60,0.07);border:1px solid rgba(231,76,60,0.2);border-radius:9px;padding:10px 14px;font-size:0.82rem;">⚠ You are leaving <strong>' + fc(leavingOnTable) + '/yr in free employer match</strong> on the table. Increase contribution to at least ' + (match*100).toFixed(1) + '% to capture the full match.</div>'
-      : '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;font-size:0.82rem;">✅ You are capturing the full employer match of ' + (match*100).toFixed(1) + '%.</div>'
-    }`;
+  // Roth vs Traditional guidance based on tax bracket
+  const guidanceEl = document.getElementById('pcRothGuidance');
+  let rothMsg, bgC, bdC;
+  if (taxRate <= 0.12) {
+    rothMsg = '<strong>Roth 401(k) recommended</strong> - At the ' + (taxRate*100).toFixed(0) + '% bracket you are in a historically low tax rate. Paying taxes now and growing tax-free is the better deal. Consider 100% Roth.';
+    bgC = 'rgba(39,174,96,0.07)'; bdC = 'rgba(39,174,96,0.25)';
+  } else if (taxRate === 0.22 || taxRate === 0.24) {
+    rothMsg = '<strong>Consider a 50/50 split (Roth + Traditional)</strong> - At the ' + (taxRate*100).toFixed(0) + '% bracket, future rates are uncertain. Splitting diversifies your tax exposure: draw from Roth in high-income years in retirement, Traditional in low-income years.';
+    bgC = 'rgba(243,156,18,0.07)'; bdC = 'rgba(243,156,18,0.25)';
+  } else {
+    rothMsg = '<strong>Traditional 401(k) recommended</strong> - At the ' + (taxRate*100).toFixed(0) + '% bracket, the deduction saves ' + fc(annualTrad * taxRate) + '/yr today. You would need to retire in a higher bracket for Roth to win. Consider 100% Traditional.';
+    bgC = 'rgba(52,152,219,0.07)'; bdC = 'rgba(52,152,219,0.25)';
+  }
+  if (salary > 150000 && rothPct > 0) {
+    rothMsg += ' Note: At $' + (salary/1000).toFixed(0) + 'K income verify Roth IRA eligibility ($150K-$165K single / $236K-$246K MFJ for 2026). Roth 401(k) has no income limit.';
+  }
+  if (guidanceEl) {
+    guidanceEl.style.display = 'block';
+    guidanceEl.style.background = bgC;
+    guidanceEl.style.border = '1px solid ' + bdC;
+    guidanceEl.innerHTML = rothMsg;
+  }
+
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px;">';
+  html += '<div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Per Paycheck (Total)</div><div style="font-size:1rem;font-weight:800;">' + fc2(perPaycheck) + '</div>' + (rothPct > 0 && rothPct < 1 ? '<div style="font-size:0.65rem;color:var(--text-color-secondary);margin-top:2px;">Roth: ' + fc2(rothPerPC) + ' / Trad: ' + fc2(tradPerPC) + '</div>' : '') + '</div>';
+  html += '<div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Employer Match/PC</div><div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">' + fc2(matchPerPC) + '</div><div style="font-size:0.65rem;color:var(--text-color-secondary);margin-top:2px;">Goes to Traditional</div></div>';
+  html += '<div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Your Annual Total</div><div style="font-size:1rem;font-weight:800;color:' + (hitsLimit ? 'var(--positive-color,#27ae60)' : 'var(--text-color-primary)') + ';">' + fc(annualContrib) + '</div>' + (rothPct > 0 ? '<div style="font-size:0.65rem;color:var(--text-color-secondary);margin-top:2px;">Roth: ' + fc(annualRoth) + ' / Trad: ' + fc(annualTrad) + '</div>' : '') + '</div>';
+  html += '<div style="padding:10px 12px;background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.3);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">You + Match / yr</div><div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">' + fc(annualContrib + annualMatch) + '</div></div>';
+  if (annualTrad > 0) {
+    html += '<div style="padding:10px 12px;background:rgba(52,152,219,0.07);border:1px solid rgba(52,152,219,0.2);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">Tax Saved (Traditional)</div><div style="font-size:1rem;font-weight:800;color:var(--positive-color,#27ae60);">' + fc(annualTaxSavings) + '/yr</div><div style="font-size:0.65rem;color:var(--text-color-secondary);margin-top:2px;">' + fc(annualTrad) + ' x ' + (taxRate*100).toFixed(0) + '%</div></div>';
+  }
+  html += '<div style="padding:10px 12px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;"><div style="font-size:0.63rem;color:var(--text-color-secondary);text-transform:uppercase;font-weight:600;margin-bottom:3px;">IRS 2026 Limit - ' + bracketLbl + '</div><div style="font-size:1rem;font-weight:800;">' + fc(limit) + '</div><div style="font-size:0.65rem;color:var(--text-color-secondary);margin-top:2px;">' + fc(BASE_LIMIT) + ' base' + (catchUpAmt > 0 ? ' + ' + fc(catchUpAmt) + ' catch-up' : '') + '</div></div>';
+  html += '</div>';
+  html += '<div style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-color-secondary);margin-bottom:4px;"><span>Contributed YTD</span><span style="font-weight:700;">' + fc(already) + ' / ' + fc(limit) + '</span></div><div style="background:var(--border-color);border-radius:999px;height:8px;overflow:hidden;"><div style="width:' + Math.min(100,already/limit*100).toFixed(1) + '%;height:100%;background:var(--accent-color-1,#3498db);border-radius:999px;"></div></div></div>';
+  if (paychecksToLimit > 0 && paychecksToLimit <= freq) {
+    html += '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">At ' + (rate*100).toFixed(1) + '% you will hit the IRS limit in <strong>~' + paychecksToLimit + ' more paychecks</strong> (' + fc(remaining) + ' remaining).</div>';
+  } else if (!hitsLimit) {
+    html += '<div style="background:rgba(243,156,18,0.07);border:1px solid rgba(243,156,18,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">At ' + (rate*100).toFixed(1) + '% you will contribute ' + fc(annualContrib) + '/yr - <strong>' + fc(limit - annualContrib) + ' under the IRS limit</strong>. To max out, increase to <strong>' + maxPct.toFixed(1) + '%</strong>.</div>';
+  } else {
+    html += '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;margin-bottom:10px;font-size:0.82rem;">You are on track to max out your 401(k) for ' + year + '.</div>';
+  }
+  if (leavingOnTable > 0) {
+    html += '<div style="background:rgba(231,76,60,0.07);border:1px solid rgba(231,76,60,0.2);border-radius:9px;padding:10px 14px;font-size:0.82rem;">You are leaving <strong>' + fc(leavingOnTable) + '/yr in free employer match</strong> on the table. Increase contribution to at least ' + (match*100).toFixed(1) + '% to capture the full match.</div>';
+  } else {
+    html += '<div style="background:rgba(39,174,96,0.07);border:1px solid rgba(39,174,96,0.25);border-radius:9px;padding:10px 14px;font-size:0.82rem;">You are capturing the full employer match of ' + (match*100).toFixed(1) + '%.</div>';
+  }
+  el.innerHTML = html;
 };
-
 function openPaycheckWidget() {
   const w = document.getElementById('paycheckWidget');
   if (!w) return;
