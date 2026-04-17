@@ -802,7 +802,13 @@
                         signInBtn.style.display = 'none';
                         userInfoDiv.style.display = 'flex';
                         document.getElementById('userName').textContent = user.displayName || 'User';
-                        document.getElementById('userPhoto').src = user.photoURL || 'https://placehold.co/30x30/6D28D9/FFFFFF?text=U';
+                        const photoEl = document.getElementById('userPhoto');
+                        if (user.photoURL) {
+                            photoEl.src = user.photoURL;
+                            photoEl.style.display = 'block';
+                        } else {
+                            photoEl.style.display = 'none';
+                        }
                         
                         // Token sync is handled by the onSnapshot session listener in setupFirestoreListeners.
                         // No blocking getDoc needed here — removes one extra round-trip on login.
