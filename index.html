@@ -9805,10 +9805,11 @@ window.syncToNetWorthTimeline = async function() {
     // Get current net worth — read from totalValue element (main portfolio stat card)
     let totalNetWorth = 0;
 
-    // Try element ID first
+    // Read from totalValue element
     const totalEl = document.getElementById('totalValue');
     if (totalEl) {
-        totalNetWorth = parseFloat(totalEl.textContent.replace(/[$,]/g,'')) || 0;
+        const raw = totalEl.textContent.trim().replace(/[^0-9.]/g, '');
+        totalNetWorth = parseFloat(raw) || 0;
     }
 
     // Try window._enhPortfolioValue (set by the enhanced portfolio render)
