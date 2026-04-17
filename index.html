@@ -9802,27 +9802,28 @@ window.syncToNetWorthTimeline = async function() {
         return;
     }
 
-    // Get current net worth from the page
-    const totalEl = document.getElementById('combined-total-value') ||
-                    document.getElementById('total-value') ||
-                    document.querySelector('.summary-value');
+    // Get current net worth — read from totalValue element (main portfolio stat card)
     let totalNetWorth = 0;
 
+    // Try element ID first
+    const totalEl = document.getElementById('totalValue');
     if (totalEl) {
         totalNetWorth = parseFloat(totalEl.textContent.replace(/[$,]/g,'')) || 0;
     }
 
-    if (totalNetWorth <= 0) {
-        // Try reading from portfolioData global
+    // Try window._enhPortfolioValue (set by the enhanced portfolio render)
+    if (totalNetWorth <= 0 && window._enhPortfolioValue) {
+        totalNetWorth = Math.round(window._enhPortfolioValue);
+    }
+
+    // Try portfolioData holdings as last resort
+    if (totalNetWorth <= 0 && window.portfolioData) {
         const pd = window.portfolioData;
-        if (pd) {
-            let brokerage = 0;
-            (pd.holdings || []).forEach(h => {
-                brokerage += (parseFloat(h.currentPrice)||0) * (parseFloat(h.totalShares)||0);
-            });
-            const k401 = parseFloat(pd.private401k || 0);
-            totalNetWorth = Math.round(brokerage + k401);
-        }
+        let brokerage = 0;
+        (pd.holdings || []).forEach(h => {
+            brokerage += (parseFloat(h.currentPrice)||0) * (parseFloat(h.totalShares)||0);
+        });
+        totalNetWorth = Math.round(brokerage);
     }
 
     if (totalNetWorth <= 0) {
