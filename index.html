@@ -5250,7 +5250,7 @@
                     <div id="auth-container">
                         <button id="signInBtn" class="btn" style="width:auto; display:none;">Sign in with Google</button>
                         <div id="user-info" style="display:none;">
-                            <img id="userPhoto" src="" alt="User photo">
+                            <img id="userPhoto" src="" alt="User photo" style="display:none;" onerror="this.style.display='none'" onload="this.style.display=this.src?'block':'none'">
                             <span id="userName"></span>
                             <button id="signOutBtn" class="btn btn-danger">Sign Out</button>
                         </div>
