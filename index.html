@@ -5264,6 +5264,11 @@
                     </div>
                 </div>
                 <div class="data-status" id="dataStatus">...</div>
+                    <button onclick="syncToNetWorthTimeline()" title="Sync to $3M Timeline"
+                      style="background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:6px;
+                      padding:4px 8px;font-size:0.75rem;cursor:pointer;white-space:nowrap;">
+                      📈 $3M
+                    </button>
                 <div class="header-right">
                     <div id="fx-wrap-401k" style="display:flex;align-items:center;gap:6px;">
                       <select id="currency-select-401k" title="Display currency"
@@ -5361,7 +5366,7 @@
             <button type="button" class="btn" id="refreshNowBtn" onclick="refreshAllPrices(true)">Refresh Now</button>
             <button type="button" class="btn" onclick="hardClearCacheAndRefresh()" style="background:linear-gradient(135deg,#e67e22,#f39c12);color:#fff;border:none;" title="Wipes all cached prices and fetches fresh from scratch">🗑️ Clear Cache &amp; Refresh</button>
             <button type="button" class="btn" onclick="openPortfolioSnapshot()" style="background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;">📊 Portfolio Snapshot</button>
-            <button type="button" class="btn" onclick="syncToNetWorthTimeline()" style="background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;border:none;">📈 Sync to $3M Timeline</button>
+
             <button type="button" class="btn" onclick="openAlertsModal()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;border:none;">🔔 Price Alerts</button>
         </div>
         <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
