@@ -9897,9 +9897,15 @@ function renderDRIP() {
         annualIncome = parseFloat(annualIncomeEl.textContent.replace(/[^0-9.]/g, '')) || 0;
     }
 
-    const yieldPct = portfolioValue > 0 && annualIncome > 0
-        ? (annualIncome / portfolioValue * 100).toFixed(2)
-        : 0;
+    // Calculate yield from actual income and portfolio value
+    let yieldPct = 0;
+    if (portfolioValue > 0 && annualIncome > 0) {
+        yieldPct = (annualIncome / portfolioValue * 100).toFixed(2);
+    }
+    // Fallback: try portfolioYieldOnCost from stats (already a decimal like 0.035 = 3.5%)
+    if (parseFloat(yieldPct) < 0.1 && window._lastStats && window._lastStats.portfolioYieldOnCost > 0) {
+        yieldPct = (window._lastStats.portfolioYieldOnCost * 100).toFixed(2);
+    }
 
     // Pre-fill inputs
     if (portfolioValue > 0) document.getElementById('dripStartValue').value = Math.round(portfolioValue);
@@ -9968,7 +9974,9 @@ function runDRIP() {
     }
 
     // Show results
-    document.getElementById('dripResults').style.display = 'block';
+    const resultsDiv = document.getElementById('dripResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.style.opacity = '1';
 
     // Milestone cards
     const lastRow = rows[rows.length - 1];
