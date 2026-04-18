@@ -5240,16 +5240,34 @@
                     <span style="font-size:0.85rem;">Lock app after inactivity</span>
                 </div>
                 <select id="autoLockTimeout"
-                    onchange="localStorage.setItem('autolock_timeout', this.value); window._resetLockTimer && window._resetLockTimer();"
+                    onchange="
+                        if(this.value==='custom'){
+                            document.getElementById('autoLockCustom').style.display='flex';
+                        } else {
+                            document.getElementById('autoLockCustom').style.display='none';
+                            localStorage.setItem('autolock_timeout', this.value);
+                            window._resetLockTimer && window._resetLockTimer();
+                        }"
                     style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-bottom:6px;">
                     <option value="5">5 minutes</option>
                     <option value="10">10 minutes</option>
                     <option value="15">15 minutes</option>
                     <option value="30">30 minutes</option>
+                    <option value="custom">Custom...</option>
                 </select>
+                <div id="autoLockCustom" style="display:none;gap:8px;align-items:center;margin-bottom:6px;">
+                    <input type="number" id="autoLockCustomVal" min="0.1" step="0.5" placeholder="e.g. 1"
+                        style="flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);">
+                    <select id="autoLockCustomUnit"
+                        style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);">
+                        <option value="seconds">seconds</option>
+                        <option value="minutes" selected>minutes</option>
+                    </select>
+                    <button onclick="setAutoLockCustom()" style="padding:7px 14px;background:var(--primary-color,#3498db);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Set</button>
+                </div>
                 <small>Blurs app and requires a 4-digit PIN after inactivity. PIN is set on first lock.</small>
                 <div style="margin-top:8px;">
-                    <button class="btn btn-danger" onclick="if(confirm('Reset your PIN?')){localStorage.removeItem('autolock_pin');alert('PIN reset. You will set a new one next time the app locks.');}" style="width:100%;background:#e67e22;margin-top:6px;">🔑 Reset PIN</button>
+                    <button class="btn btn-danger" onclick="resetAutoLockPin()" style="width:100%;background:#e67e22;margin-top:6px;">🔑 Reset PIN</button>
                 </div>
             </div>
 
@@ -10254,7 +10272,7 @@ window.syncToNetWorthTimeline = async function() {
   let isLocked    = false;
 
   function getTimeoutMs() {
-    const mins = parseInt(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS);
+    const mins = parseFloat(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS);
     return mins * 60 * 1000;
   }
 
@@ -10339,37 +10357,35 @@ window.syncToNetWorthTimeline = async function() {
   style.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}';
   document.head.appendChild(style);
 
-  // Add settings to the settings modal
-  function injectLockSettings() {
-    const autoRefreshInput = document.getElementById('autoRefreshIntervalInput');
-    if (!autoRefreshInput) return;
-    const container = autoRefreshInput.closest('.form-group')?.parentElement;
-    if (!container || document.getElementById('autoLockSettings')) return;
-
-    const div = document.createElement('div');
-    div.id = 'autoLockSettings';
-    div.innerHTML = `
-      <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:15px;margin-top:15px;">
-        <label style="display:flex;align-items:center;justify-content:space-between;">
-          <span>Auto-Lock (idle timeout)</span>
-          <input type="checkbox" id="autoLockEnabled" ${isEnabled() ? 'checked' : ''}
-            onchange="localStorage.setItem('autolock_enabled', this.checked); this.checked ? window._resetLockTimer() : clearTimeout(window._lockTimer);">
-        </label>
-        <select id="autoLockTimeout" onchange="localStorage.setItem('autolock_timeout', this.value); window._resetLockTimer();"
-          style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-top:8px;">
-          <option value="5"  ${localStorage.getItem('autolock_timeout')==='5'?'selected':''}>5 minutes</option>
-          <option value="10" ${!localStorage.getItem('autolock_timeout')||localStorage.getItem('autolock_timeout')==='10'?'selected':''}>10 minutes</option>
-          <option value="15" ${localStorage.getItem('autolock_timeout')==='15'?'selected':''}>15 minutes</option>
-          <option value="30" ${localStorage.getItem('autolock_timeout')==='30'?'selected':''}>30 minutes</option>
-        </select>
-        <small>App blurs and requires PIN after inactivity. PIN is set on first lock.</small>
-        ${getPin() ? '<div style="margin-top:6px;"><a onclick="if(confirm('Reset PIN?'))localStorage.removeItem('autolock_pin');" style="font-size:0.75rem;color:#e74c3c;cursor:pointer;">Reset PIN</a></div>' : ''}
-      </div>`;
-    container.appendChild(div);
-  }
-
   // Expose for settings modal
   window._resetLockTimer = resetTimer;
+
+  window.setAutoLockCustom = function() {
+    const val  = parseFloat(document.getElementById('autoLockCustomVal').value);
+    const unit = document.getElementById('autoLockCustomUnit').value;
+    if (!val || val <= 0) { alert('Enter a valid number'); return; }
+    const mins = unit === 'seconds' ? val / 60 : val;
+    localStorage.setItem('autolock_timeout', mins);
+    window._resetLockTimer && window._resetLockTimer();
+    alert('Auto-lock set to ' + val + ' ' + unit + '!');
+  };
+
+  window.resetAutoLockPin = function() {
+    if (confirm('Reset your PIN?')) {
+      localStorage.removeItem('autolock_pin');
+      alert('PIN reset. You will set a new one next time the app locks.');
+    }
+  };
+
+  window.handleAutoLockChange = function(val) {
+    if (val === 'custom') {
+      document.getElementById('autoLockCustom').style.display = 'flex';
+    } else {
+      document.getElementById('autoLockCustom').style.display = 'none';
+      localStorage.setItem('autolock_timeout', val);
+      window._resetLockTimer && window._resetLockTimer();
+    }
+  };
   window._lockTimer = lockTimer;
 
   // Listen for activity
