@@ -9882,6 +9882,10 @@ window.addEventListener('load', () => setTimeout(injectHSAButton, 2300));
 
 <script>
 // ── DRIP PROJECTOR ───────────────────────────────────────────────
+function dripFmt(n) {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+}
+
 function renderDRIP() {
     // Pre-populate with current portfolio data
     const totalValueEl = document.getElementById('totalValue');
@@ -9915,10 +9919,10 @@ function renderDRIP() {
     const cards = document.getElementById('dripSummaryCards');
     if (cards) {
         cards.innerHTML = [
-            { label: 'Current Portfolio',    val: portfolioValue > 0 ? formatCurrency(portfolioValue) : '—', color: '#3498db' },
-            { label: 'Est. Annual Dividend', val: annualIncome > 0 ? formatCurrency(annualIncome) : '—',   color: '#00b894' },
+            { label: 'Current Portfolio',    val: portfolioValue > 0 ? dripFmt(portfolioValue) : '—', color: '#3498db' },
+            { label: 'Est. Annual Dividend', val: annualIncome > 0 ? dripFmt(annualIncome) : '—',   color: '#00b894' },
             { label: 'Current Yield',        val: yieldPct > 0 ? yieldPct + '%' : '—',                    color: '#f39c12' },
-            { label: 'Monthly Dividend',     val: annualIncome > 0 ? formatCurrency(annualIncome/12) : '—', color: '#9b59b6' },
+            { label: 'Monthly Dividend',     val: annualIncome > 0 ? dripFmt(annualIncome/12) : '—', color: '#9b59b6' },
         ].map(c => `
             <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid ${c.color};border-radius:10px;padding:14px;">
                 <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${c.label}</div>
@@ -9982,12 +9986,12 @@ function runDRIP() {
     const lastRow = rows[rows.length - 1];
     const milestones = document.getElementById('dripMilestones');
     milestones.innerHTML = [
-        { label: `After ${years} Years (DRIP)`,      val: formatCurrency(lastRow.dripValue),       color: '#00b894' },
-        { label: `After ${years} Years (No DRIP)`,   val: formatCurrency(lastRow.noDripValue),     color: '#e74c3c' },
-        { label: 'DRIP Advantage',                    val: formatCurrency(lastRow.advantage),       color: '#f39c12' },
-        { label: 'Total Dividends Reinvested',        val: formatCurrency(lastRow.totalReinvested), color: '#9b59b6' },
-        { label: `Final Annual Dividend`,             val: formatCurrency(lastRow.dripValue * yieldDecimal), color: '#3498db' },
-        { label: 'Monthly Passive Income',            val: formatCurrency(lastRow.dripValue * yieldDecimal / 12), color: '#27ae60' },
+        { label: `After ${years} Years (DRIP)`,      val: dripFmt(lastRow.dripValue),       color: '#00b894' },
+        { label: `After ${years} Years (No DRIP)`,   val: dripFmt(lastRow.noDripValue),     color: '#e74c3c' },
+        { label: 'DRIP Advantage',                    val: dripFmt(lastRow.advantage),       color: '#f39c12' },
+        { label: 'Total Dividends Reinvested',        val: dripFmt(lastRow.totalReinvested), color: '#9b59b6' },
+        { label: `Final Annual Dividend`,             val: dripFmt(lastRow.dripValue * yieldDecimal), color: '#3498db' },
+        { label: 'Monthly Passive Income',            val: dripFmt(lastRow.dripValue * yieldDecimal / 12), color: '#27ae60' },
     ].map(c => `
         <div style="background:var(--card-bg-color);border:1px solid var(--border-color);border-left:4px solid ${c.color};border-radius:10px;padding:14px;">
             <div style="font-size:0.65rem;color:var(--text-color-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${c.label}</div>
@@ -10001,12 +10005,12 @@ function runDRIP() {
         const bg = isLast ? 'rgba(0,184,148,0.08)' : (i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)');
         return `<tr style="border-bottom:1px solid var(--border-color);background:${bg};">
             <td style="padding:8px 10px;font-weight:${isLast?'800':'400'};color:var(--text-color);">Year ${r.year}</td>
-            <td style="padding:8px 10px;text-align:right;font-weight:700;color:#00b894;">${formatCurrency(r.dripValue)}</td>
-            <td style="padding:8px 10px;text-align:right;color:var(--text-color);">${formatCurrency(r.annualDiv)}</td>
-            <td style="padding:8px 10px;text-align:right;color:#27ae60;">${formatCurrency(r.afterTaxDiv)}</td>
-            <td style="padding:8px 10px;text-align:right;color:#9b59b6;">${formatCurrency(r.totalReinvested)}</td>
-            <td style="padding:8px 10px;text-align:right;color:#e74c3c;">${formatCurrency(r.noDripValue)}</td>
-            <td style="padding:8px 10px;text-align:right;font-weight:700;color:#f39c12;">+${formatCurrency(r.advantage)}</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:700;color:#00b894;">${dripFmt(r.dripValue)}</td>
+            <td style="padding:8px 10px;text-align:right;color:var(--text-color);">${dripFmt(r.annualDiv)}</td>
+            <td style="padding:8px 10px;text-align:right;color:#27ae60;">${dripFmt(r.afterTaxDiv)}</td>
+            <td style="padding:8px 10px;text-align:right;color:#9b59b6;">${dripFmt(r.totalReinvested)}</td>
+            <td style="padding:8px 10px;text-align:right;color:#e74c3c;">${dripFmt(r.noDripValue)}</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:700;color:#f39c12;">+${dripFmt(r.advantage)}</td>
         </tr>`;
     }).join('');
 
@@ -10016,15 +10020,15 @@ function runDRIP() {
     document.getElementById('dripInsight').innerHTML = `
         <div style="font-size:0.72rem;font-weight:700;color:#00b894;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">💡 DRIP Insight</div>
         <div style="font-size:0.88rem;color:var(--text-color);line-height:1.8;">
-            Starting with <strong>${formatCurrency(startValue)}</strong> at a <strong>${yieldPct}%</strong> yield and
+            Starting with <strong>${dripFmt(startValue)}</strong> at a <strong>${yieldPct}%</strong> yield and
             <strong>${growthPct}%</strong> annual growth, your portfolio grows to
-            <strong style="color:#00b894;">${formatCurrency(lastRow.dripValue)}</strong> after ${years} years with DRIP —
+            <strong style="color:#00b894;">${dripFmt(lastRow.dripValue)}</strong> after ${years} years with DRIP —
             a <strong>${multiplier}x</strong> multiplier on your initial investment.<br><br>
-            Reinvesting dividends gives you <strong style="color:#f39c12;">${formatCurrency(lastRow.advantage)}</strong> more
+            Reinvesting dividends gives you <strong style="color:#f39c12;">${dripFmt(lastRow.advantage)}</strong> more
             than simply taking dividends as cash — that's <strong>${dripMultiplier}x</strong> the no-DRIP portfolio value.
-            ${monthlyAdd > 0 ? `<br><br>Your monthly contributions of <strong>${formatCurrency(monthlyAdd)}</strong> add an additional <strong>${formatCurrency(monthlyAdd * 12 * years)}</strong> over ${years} years.` : ''}
+            ${monthlyAdd > 0 ? `<br><br>Your monthly contributions of <strong>${dripFmt(monthlyAdd)}</strong> add an additional <strong>${dripFmt(monthlyAdd * 12 * years)}</strong> over ${years} years.` : ''}
             <br><br>
-            <strong>Final monthly passive income: ${formatCurrency(lastRow.dripValue * (yieldPct/100) / 12)}</strong>
+            <strong>Final monthly passive income: ${dripFmt(lastRow.dripValue * (yieldPct/100) / 12)}</strong>
             — enough to ${lastRow.dripValue * (yieldPct/100) / 12 >= 5000 ? '🎉 fully cover most retirement lifestyles!' : 'contribute meaningfully to your retirement income.'}
         </div>`;
 
