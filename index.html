@@ -5270,7 +5270,10 @@
                 </div>
                 <small>Blurs app and requires a 4-digit PIN after inactivity. PIN is set on first lock.</small>
                 <div style="margin-top:8px;">
-                    <button class="btn btn-danger" onclick="resetAutoLockPin()" style="width:100%;background:#e67e22;margin-top:6px;">🔑 Reset PIN</button>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+                        <button class="btn" onclick="testAutoLock()" style="background:#3498db;color:#fff;border:none;">🔒 Test Lock Now</button>
+                        <button class="btn btn-danger" onclick="resetAutoLockPin()" style="background:#e67e22;">🔑 Reset PIN</button>
+                    </div>
                 </div>
             </div>
 
@@ -10373,6 +10376,10 @@ window.syncToNetWorthTimeline = async function() {
     localStorage.setItem('autolock_timeout', secs);
     window._resetLockTimer && window._resetLockTimer();
     alert('Auto-lock set to ' + val + ' ' + unit + '. Move mouse to reset timer.');
+  };
+
+  window.testAutoLock = function() {
+    lock();
   };
 
   window.resetAutoLockPin = function() {
