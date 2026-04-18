@@ -10173,6 +10173,221 @@ window.syncToNetWorthTimeline = async function() {
 };
 </script>
 
+<!-- Auto-Lock Overlay -->
+<div id="autoLockOverlay" style="display:none;position:fixed;inset:0;z-index:99999;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  background:rgba(0,0,0,0.6);
+  display:none;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="background:var(--card-bg-color);border:1px solid var(--border-color);
+    border-radius:16px;padding:40px 36px;width:100%;max-width:340px;text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="font-size:2.5rem;margin-bottom:12px;">🔒</div>
+    <div style="font-size:1.2rem;font-weight:700;margin-bottom:6px;color:var(--text-color);">Session Locked</div>
+    <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-bottom:24px;">
+      Enter your PIN to continue
+    </div>
+    <div id="lockPinDots" style="display:flex;justify-content:center;gap:12px;margin-bottom:20px;">
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(n => `
+        <button onclick="lockPinPress('${n}')"
+          style="padding:14px;font-size:1.1rem;font-weight:700;border-radius:10px;
+          border:1px solid var(--border-color);background:var(--bg-color);
+          color:var(--text-color);cursor:pointer;transition:background 0.15s;"
+          ${n==='' ? 'disabled style="visibility:hidden"' : ''}>
+          ${n}
+        </button>`).join('')}
+    </div>
+    <div id="lockPinError" style="font-size:0.78rem;color:#e74c3c;min-height:20px;margin-top:4px;"></div>
+    <div style="margin-top:16px;font-size:0.65rem;color:var(--text-color-secondary);">
+      <a onclick="lockForgotPin()" style="cursor:pointer;color:var(--text-color-secondary);">Forgot PIN? Reset</a>
+    </div>
+  </div>
+</div>
+
+<style>
+.pin-dot {
+  width:12px;height:12px;border-radius:50%;
+  background:var(--border-color);border:2px solid var(--border-color);
+  transition:background 0.2s;
+}
+.pin-dot.filled { background:var(--primary-color,#3498db); border-color:var(--primary-color,#3498db); }
+#autoLockOverlay.active { display:flex !important; }
+</style>
+
+<script>
+// ── IDLE AUTO-LOCK ───────────────────────────────────────────────
+(function() {
+  const LOCK_KEY     = 'autolock_pin';
+  const TIMEOUT_KEY  = 'autolock_timeout';
+  const LOCK_ENABLED = 'autolock_enabled';
+  const DEFAULT_MINS = 10;
+
+  let lockTimer   = null;
+  let pinEntry    = '';
+  let isLocked    = false;
+
+  function getTimeoutMs() {
+    const mins = parseInt(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS);
+    return mins * 60 * 1000;
+  }
+
+  function isEnabled() {
+    return localStorage.getItem(LOCK_ENABLED) !== 'false';
+  }
+
+  function getPin() {
+    return localStorage.getItem(LOCK_KEY) || null;
+  }
+
+  function lock() {
+    if (isLocked || !isEnabled() || !getPin()) return;
+    isLocked = true;
+    document.getElementById('autoLockOverlay').classList.add('active');
+    pinEntry = '';
+    updateDots();
+  }
+
+  function unlock() {
+    isLocked = false;
+    document.getElementById('autoLockOverlay').classList.remove('active');
+    document.getElementById('lockPinError').textContent = '';
+    pinEntry = '';
+    updateDots();
+    resetTimer();
+  }
+
+  function resetTimer() {
+    clearTimeout(lockTimer);
+    if (!isEnabled() || !getPin()) return;
+    lockTimer = setTimeout(lock, getTimeoutMs());
+  }
+
+  function updateDots() {
+    const dots = document.querySelectorAll('.pin-dot');
+    dots.forEach((d, i) => {
+      d.classList.toggle('filled', i < pinEntry.length);
+    });
+  }
+
+  window.lockPinPress = function(val) {
+    if (val === '⌫') {
+      pinEntry = pinEntry.slice(0, -1);
+      updateDots();
+      return;
+    }
+    if (val === '' || pinEntry.length >= 4) return;
+    pinEntry += val;
+    updateDots();
+
+    if (pinEntry.length === 4) {
+      const stored = getPin();
+      if (!stored) {
+        // Setting PIN for first time
+        localStorage.setItem(LOCK_KEY, pinEntry);
+        unlock();
+        showToast('✓ PIN set! App will lock after ' + (parseInt(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS)) + ' min of inactivity.');
+      } else if (pinEntry === stored) {
+        unlock();
+      } else {
+        document.getElementById('lockPinError').textContent = '✗ Incorrect PIN. Try again.';
+        pinEntry = '';
+        updateDots();
+        // Shake animation
+        const overlay = document.querySelector('#autoLockOverlay > div');
+        overlay.style.animation = 'shake 0.3s ease';
+        setTimeout(() => overlay.style.animation = '', 400);
+      }
+    }
+  };
+
+  window.lockForgotPin = function() {
+    if (confirm('Reset your PIN? You will need to set a new one next time the app locks.')) {
+      localStorage.removeItem(LOCK_KEY);
+      unlock();
+    }
+  };
+
+  // Add shake animation
+  const style = document.createElement('style');
+  style.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}';
+  document.head.appendChild(style);
+
+  // Add settings to the settings modal
+  function injectLockSettings() {
+    const autoRefreshInput = document.getElementById('autoRefreshIntervalInput');
+    if (!autoRefreshInput) return;
+    const container = autoRefreshInput.closest('.form-group')?.parentElement;
+    if (!container || document.getElementById('autoLockSettings')) return;
+
+    const div = document.createElement('div');
+    div.id = 'autoLockSettings';
+    div.innerHTML = `
+      <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:15px;margin-top:15px;">
+        <label style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Auto-Lock (idle timeout)</span>
+          <input type="checkbox" id="autoLockEnabled" ${isEnabled() ? 'checked' : ''}
+            onchange="localStorage.setItem('autolock_enabled', this.checked); this.checked ? window._resetLockTimer() : clearTimeout(window._lockTimer);">
+        </label>
+        <select id="autoLockTimeout" onchange="localStorage.setItem('autolock_timeout', this.value); window._resetLockTimer();"
+          style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-top:8px;">
+          <option value="5"  ${localStorage.getItem('autolock_timeout')==='5'?'selected':''}>5 minutes</option>
+          <option value="10" ${!localStorage.getItem('autolock_timeout')||localStorage.getItem('autolock_timeout')==='10'?'selected':''}>10 minutes</option>
+          <option value="15" ${localStorage.getItem('autolock_timeout')==='15'?'selected':''}>15 minutes</option>
+          <option value="30" ${localStorage.getItem('autolock_timeout')==='30'?'selected':''}>30 minutes</option>
+        </select>
+        <small>App blurs and requires PIN after inactivity. PIN is set on first lock.</small>
+        ${getPin() ? '<div style="margin-top:6px;"><a onclick="if(confirm('Reset PIN?'))localStorage.removeItem('autolock_pin');" style="font-size:0.75rem;color:#e74c3c;cursor:pointer;">Reset PIN</a></div>' : ''}
+      </div>`;
+    container.appendChild(div);
+  }
+
+  // Expose for settings modal
+  window._resetLockTimer = resetTimer;
+  window._lockTimer = lockTimer;
+
+  // Listen for activity
+  ['mousedown','mousemove','keydown','touchstart','scroll','click'].forEach(evt => {
+    document.addEventListener(evt, resetTimer, { passive: true });
+  });
+
+  // Inject settings when modal opens
+  const origOpenSettings = window.openSettingsModal;
+  if (origOpenSettings) {
+    window.openSettingsModal = function() {
+      origOpenSettings();
+      setTimeout(injectLockSettings, 100);
+    };
+  } else {
+    // Try to hook into settings modal open
+    const observer = new MutationObserver(() => {
+      const modal = document.getElementById('settingsModal');
+      if (modal && modal.style.display !== 'none') {
+        injectLockSettings();
+      }
+    });
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['style'] });
+  }
+
+  // Start timer on load
+  window.addEventListener('load', () => {
+    setTimeout(resetTimer, 2000);
+  });
+
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2ecc71;color:#fff;padding:10px 20px;border-radius:8px;font-size:0.85rem;z-index:99998;font-weight:600;';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
+})();
+</script>
+
 </body>
 </html>
 
