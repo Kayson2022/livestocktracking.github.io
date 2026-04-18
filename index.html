@@ -1499,6 +1499,36 @@
             
             return annualizedVolatility;
         }
+
+        function calculateMaxDrawdown(history) {
+            if (!history || history.length < 2) return 0;
+            let peak = history[0].value;
+            let maxDrawdown = 0;
+            for (let i = 1; i < history.length; i++) {
+                const val = history[i].value;
+                if (val > peak) peak = val;
+                const drawdown = peak > 0 ? (peak - val) / peak : 0;
+                if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+            }
+            return maxDrawdown;
+        }
+
+        function calculateSharpeRatio(history, riskFreeRate = 0.045) {
+            if (!history || history.length < 30) return null;
+            const returns = [];
+            for (let i = 1; i < history.length; i++) {
+                const prev = history[i-1].value;
+                if (prev > 0) returns.push((history[i].value - prev) / prev);
+            }
+            if (returns.length < 2) return null;
+            const mean = returns.reduce((s,r) => s+r, 0) / returns.length;
+            const variance = returns.reduce((s,r) => s + Math.pow(r-mean,2), 0) / (returns.length-1);
+            const stdDev = Math.sqrt(variance);
+            if (stdDev === 0) return null;
+            const annualReturn = mean * 252;
+            const annualStd   = stdDev * Math.sqrt(252);
+            return (annualReturn - riskFreeRate) / annualStd;
+        }
         // --- END NEW FUNCTION ---
         
         // --- MODIFIED FUNCTION: Builds Unfiltered History for Main Chart ---
@@ -2929,6 +2959,8 @@
             
             // Portfolio Volatility uses the *filtered* history from buildVolatilityHistoryFromTransactions
             portfolioVolatility = calculatePortfolioVolatility(history);
+            const maxDrawdown   = calculateMaxDrawdown(history);
+            const sharpeRatio   = calculateSharpeRatio(history);
 
             return { 
                 totalCostBasis, 
@@ -2970,7 +3002,26 @@
             const volatilityEl = document.getElementById('portfolioVolatility');
             volatilityEl.textContent = formatPercentage(stats.portfolioVolatility);
             // Higher volatility is typically negative, so let's use a mild color to indicate this is a risk metric
-            volatilityEl.className = 'stat-value ' + (stats.portfolioVolatility > 0.15 ? 'negative' : 'positive'); 
+            volatilityEl.className = 'stat-value ' + (stats.portfolioVolatility > 0.15 ? 'negative' : 'positive');
+
+            // Max Drawdown
+            const maxDrawdownEl = document.getElementById('maxDrawdown');
+            if (maxDrawdownEl) {
+                maxDrawdownEl.textContent = formatPercentage(maxDrawdown);
+                maxDrawdownEl.className = 'stat-value ' + (maxDrawdown > 0.2 ? 'negative' : maxDrawdown > 0.1 ? '' : 'positive');
+            }
+
+            // Sharpe Ratio
+            const sharpeEl = document.getElementById('sharpeRatio');
+            if (sharpeEl) {
+                if (sharpeRatio !== null) {
+                    sharpeEl.textContent = sharpeRatio.toFixed(2);
+                    sharpeEl.className = 'stat-value ' + (sharpeRatio >= 1 ? 'positive' : sharpeRatio >= 0 ? '' : 'negative');
+                } else {
+                    sharpeEl.textContent = 'Need more data';
+                    sharpeEl.className = 'stat-value';
+                }
+            }
             // --- END NEW: Volatility Stat ---
 
             document.getElementById('bestPerformerValue').textContent = formatCurrency(stats.bestPerformer.gain);
@@ -5331,6 +5382,8 @@
             <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="portfolioVolatility">0.00%</div> <div class="stat-label">Annual Volatility</div> </div> <!-- NEW CARD -->
+            <div class="stat-card"> <div class="stat-value" id="maxDrawdown">0.00%</div> <div class="stat-label">Max Drawdown</div> </div>
+            <div class="stat-card"> <div class="stat-value" id="sharpeRatio">—</div> <div class="stat-label">Sharpe Ratio</div> </div>
             
             <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
