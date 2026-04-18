@@ -3014,9 +3014,10 @@
             // Sharpe Ratio
             const sharpeEl = document.getElementById('sharpeRatio');
             if (sharpeEl) {
-                if (sharpeRatio !== null) {
-                    sharpeEl.textContent = sharpeRatio.toFixed(2);
-                    sharpeEl.className = 'stat-value ' + (sharpeRatio >= 1 ? 'positive' : sharpeRatio >= 0 ? '' : 'negative');
+                const sr = (sharpeRatio !== null && sharpeRatio !== undefined && isFinite(sharpeRatio)) ? sharpeRatio : null;
+                if (sr !== null) {
+                    sharpeEl.textContent = parseFloat(sr).toFixed(2);
+                    sharpeEl.className = 'stat-value ' + (sr >= 1 ? 'positive' : sr >= 0 ? '' : 'negative');
                 } else {
                     sharpeEl.textContent = 'Need more data';
                     sharpeEl.className = 'stat-value';
