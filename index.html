@@ -5230,7 +5230,29 @@
                 <button class="btn btn-danger" id="signOutOthersBtn" onclick="signOutOtherDevices()" style="width: 100%; background: #c0392b;">Sign Out All Other Devices</button>
                 <small>This will sign out all other active sessions of this app.</small>
             </div>
-            
+
+            <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 15px;">
+                <label>🔒 Auto-Lock (Idle Timeout)</label>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                    <input type="checkbox" id="autoLockEnabled"
+                        onchange="localStorage.setItem('autolock_enabled', this.checked); window._resetLockTimer && window._resetLockTimer();"
+                        style="width:auto;">
+                    <span style="font-size:0.85rem;">Lock app after inactivity</span>
+                </div>
+                <select id="autoLockTimeout"
+                    onchange="localStorage.setItem('autolock_timeout', this.value); window._resetLockTimer && window._resetLockTimer();"
+                    style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-bottom:6px;">
+                    <option value="5">5 minutes</option>
+                    <option value="10">10 minutes</option>
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                </select>
+                <small>Blurs app and requires a 4-digit PIN after inactivity. PIN is set on first lock.</small>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-danger" onclick="if(confirm('Reset your PIN?')){localStorage.removeItem('autolock_pin');alert('PIN reset. You will set a new one next time the app locks.');}" style="width:100%;background:#e67e22;margin-top:6px;">🔑 Reset PIN</button>
+                </div>
+            </div>
+
             <div class="modal-buttons" style="margin-top: 20px;">
                 <button class="btn btn-confirm" onclick="saveSettings()">Save Settings</button>
             </div>
@@ -10375,6 +10397,13 @@ window.syncToNetWorthTimeline = async function() {
 
   // Start timer on load
   window.addEventListener('load', () => {
+    // Restore checkbox + select state
+    setTimeout(() => {
+      const cb  = document.getElementById('autoLockEnabled');
+      const sel = document.getElementById('autoLockTimeout');
+      if (cb)  cb.checked  = isEnabled();
+      if (sel) sel.value   = localStorage.getItem(TIMEOUT_KEY) || '10';
+    }, 500);
     setTimeout(resetTimer, 2000);
   });
 
