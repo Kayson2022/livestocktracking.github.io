@@ -10275,8 +10275,10 @@ window.syncToNetWorthTimeline = async function() {
   let isLocked    = false;
 
   function getTimeoutMs() {
-    const mins = parseFloat(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS);
-    return mins * 60 * 1000;
+    const stored = parseFloat(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_MINS);
+    // If value stored from old system (minutes), convert — new system stores seconds
+    const ms = stored < 1 ? stored * 60 * 1000 : stored * 1000;
+    return ms;
   }
 
   function isEnabled() {
@@ -10288,7 +10290,7 @@ window.syncToNetWorthTimeline = async function() {
   }
 
   function lock() {
-    if (isLocked || !isEnabled() || !getPin()) return;
+    if (isLocked || !isEnabled()) return;
     isLocked = true;
     document.getElementById('autoLockOverlay').classList.add('active');
     pinEntry = '';
@@ -10367,10 +10369,10 @@ window.syncToNetWorthTimeline = async function() {
     const val  = parseFloat(document.getElementById('autoLockCustomVal').value);
     const unit = document.getElementById('autoLockCustomUnit').value;
     if (!val || val <= 0) { alert('Enter a valid number'); return; }
-    const mins = unit === 'seconds' ? val / 60 : val;
-    localStorage.setItem('autolock_timeout', mins);
+    const secs = unit === 'seconds' ? val : val * 60;
+    localStorage.setItem('autolock_timeout', secs);
     window._resetLockTimer && window._resetLockTimer();
-    alert('Auto-lock set to ' + val + ' ' + unit + '!');
+    alert('Auto-lock set to ' + val + ' ' + unit + '. Move mouse to reset timer.');
   };
 
   window.resetAutoLockPin = function() {
@@ -10382,10 +10384,11 @@ window.syncToNetWorthTimeline = async function() {
 
   window.handleAutoLockChange = function(val) {
     if (val === 'custom') {
-      document.getElementById('autoLockCustom').style.display = 'flex';
+      document.getElementById('autoLockCustom').style.display = 'block';
     } else {
       document.getElementById('autoLockCustom').style.display = 'none';
-      localStorage.setItem('autolock_timeout', val);
+      // Store as seconds (val is in minutes)
+      localStorage.setItem('autolock_timeout', parseFloat(val) * 60);
       window._resetLockTimer && window._resetLockTimer();
     }
   };
