@@ -10228,7 +10228,7 @@ window.syncToNetWorthTimeline = async function() {
     <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-bottom:20px;" id="alSubtitle">Enter your PIN to continue</div>
 
     <!-- PIN dots -->
-    <div style="display:flex;justify-content:center;gap:14px;margin-bottom:20px;">
+    <div id="alDotsRow" style="display:flex;justify-content:center;gap:14px;margin-bottom:20px;">
       <div id="alDot0" style="width:14px;height:14px;border-radius:50%;background:var(--border-color);transition:background 0.2s;"></div>
       <div id="alDot1" style="width:14px;height:14px;border-radius:50%;background:var(--border-color);transition:background 0.2s;"></div>
       <div id="alDot2" style="width:14px;height:14px;border-radius:50%;background:var(--border-color);transition:background 0.2s;"></div>
@@ -10236,7 +10236,7 @@ window.syncToNetWorthTimeline = async function() {
     </div>
 
     <!-- PIN pad -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
+    <div id="alNumpad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
       <button onclick="alPress(1)" style="padding:14px;font-size:1.2rem;font-weight:700;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color);cursor:pointer;">1</button>
       <button onclick="alPress(2)" style="padding:14px;font-size:1.2rem;font-weight:700;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color);cursor:pointer;">2</button>
       <button onclick="alPress(3)" style="padding:14px;font-size:1.2rem;font-weight:700;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color);cursor:pointer;">3</button>
@@ -10303,8 +10303,8 @@ window.syncToNetWorthTimeline = async function() {
   function showKeypad(show) {
     var kp = document.getElementById('alKeypadSection');
     var rs = document.getElementById('alResetSection');
-    var dotsRow = document.querySelector('#alOverlay [style*="display:flex;justify-content:center;gap:14px"]');
-    var grid    = document.querySelector('#alOverlay [style*="grid-template-columns:repeat(3,1fr)"]');
+    var dotsRow = document.getElementById('alDotsRow');
+    var grid    = document.getElementById('alNumpad');
     if (kp) kp.style.display = show ? 'block' : 'none';
     if (rs) rs.style.display = show ? 'none'  : 'block';
     if (dotsRow) dotsRow.style.display = show ? 'flex' : 'none';
