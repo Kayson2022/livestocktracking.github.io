@@ -5,6 +5,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10251,138 +10252,190 @@ window.syncToNetWorthTimeline = async function() {
     </div>
 
     <div id="alError" style="font-size:0.78rem;color:#e74c3c;min-height:18px;margin-bottom:10px;"></div>
-    <a onclick="alResetPin()" style="font-size:0.7rem;color:var(--text-color-secondary);cursor:pointer;text-decoration:underline;">Forgot PIN? Reset</a>
+    <!-- EmailJS reset flow -->
+    <div id="alResetSection" style="display:none;margin-top:6px;">
+      <div style="font-size:0.75rem;color:#aaa;margin-bottom:8px;" id="alResetMsg">Enter the 6-digit code sent to your email.</div>
+      <input id="alResetCode" type="text" inputmode="numeric" maxlength="6"
+        style="width:100%;padding:10px;border-radius:8px;border:1px solid #444;background:#111;color:#fff;font-size:1.1rem;text-align:center;letter-spacing:6px;box-sizing:border-box;margin-bottom:8px;"
+        placeholder="——————">
+      <button onclick="alVerifyCode()" style="width:100%;padding:10px;background:#3498db;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:0.9rem;">Verify Code</button>
+      <a onclick="alCancelReset()" style="display:block;font-size:0.7rem;color:#888;cursor:pointer;text-decoration:underline;margin-top:8px;">Cancel — go back</a>
+    </div>
+    <!-- Keypad (shown when NOT in reset flow) -->
+    <div id="alKeypadSection">
+      <a onclick="alForgotPin()" style="font-size:0.7rem;color:#888;cursor:pointer;text-decoration:underline;">Forgot PIN? Reset via email</a>
+    </div>
   </div>
 </div>
 
 <script>
 (function() {
-  var PIN_KEY     = 'al_pin';
-  var TIMEOUT_KEY = 'al_timeout_secs';
-  var ENABLED_KEY = 'al_enabled';
-  var DEFAULT_SECS = 600; // 10 minutes
+  var PIN_KEY      = 'al_pin';
+  var TIMEOUT_KEY  = 'al_timeout_secs';
+  var ENABLED_KEY  = 'al_enabled';
+  var DEFAULT_SECS = 600;
+  var entry        = '';
+  var locked       = false;
+  var timer        = null;
+  var setting      = false;
+  var resetCode    = null;
 
-  var entry   = '';
-  var locked  = false;
-  var timer   = null;
-  var setting = false; // true when setting new PIN
+  var EJS_SVC  = 'service_9jnoib6';
+  var EJS_TPL  = 'template_wbsgl1q';
+  var EJS_KEY  = 'I15gJm9MKxGRBd9CQ';
+  var RESET_TO = 'khanhjunkemails@gmail.com';
 
   function getTimeoutMs() {
-    var secs = parseFloat(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_SECS);
-    return secs * 1000;
+    return parseFloat(localStorage.getItem(TIMEOUT_KEY) || DEFAULT_SECS) * 1000;
   }
-
   function isEnabled() {
     return localStorage.getItem(ENABLED_KEY) !== 'false';
   }
-
   function getPin() {
     return localStorage.getItem(PIN_KEY) || null;
   }
-
   function updateDots() {
     for (var i = 0; i < 4; i++) {
-      var dot = document.getElementById('alDot' + i);
-      if (dot) dot.style.background = i < entry.length ? '#3498db' : 'var(--border-color)';
+      var d = document.getElementById('alDot' + i);
+      if (d) d.style.background = i < entry.length ? '#3498db' : 'var(--border-color)';
     }
   }
-
-  function showOverlay() {
+  function showKeypad(show) {
+    var kp = document.getElementById('alKeypadSection');
+    var rs = document.getElementById('alResetSection');
+    var dotsRow = document.querySelector('#alOverlay [style*="display:flex;justify-content:center;gap:14px"]');
+    var grid    = document.querySelector('#alOverlay [style*="grid-template-columns:repeat(3,1fr)"]');
+    if (kp) kp.style.display = show ? 'block' : 'none';
+    if (rs) rs.style.display = show ? 'none'  : 'block';
+    if (dotsRow) dotsRow.style.display = show ? 'flex' : 'none';
+    if (grid)    grid.style.display    = show ? 'grid' : 'none';
+  }
+  function lock() {
+    if (locked || !isEnabled()) return;
+    locked  = true; entry = '';
+    setting = !getPin();
+    resetCode = null;
+    showKeypad(true);
+    var t = document.getElementById('alTitle');
+    var s = document.getElementById('alSubtitle');
+    var e = document.getElementById('alError');
+    if (t) t.textContent = setting ? 'Set Your PIN' : 'Session Locked';
+    if (s) s.textContent = setting ? 'Choose a 4-digit PIN' : 'Enter your PIN to continue';
+    if (e) e.textContent = '';
+    updateDots();
     var o = document.getElementById('alOverlay');
     if (o) o.style.display = 'flex';
   }
-
-  function hideOverlay() {
+  function unlock() {
+    locked = false; setting = false; entry = ''; resetCode = null;
+    showKeypad(true);
+    updateDots();
     var o = document.getElementById('alOverlay');
     if (o) o.style.display = 'none';
-  }
-
-  function lock() {
-    if (locked || !isEnabled()) return;
-    locked  = true;
-    entry   = '';
-    setting = !getPin();
-    var title = document.getElementById('alTitle');
-    var sub   = document.getElementById('alSubtitle');
-    var err   = document.getElementById('alError');
-    if (title) title.textContent = setting ? 'Set Your PIN' : 'Session Locked';
-    if (sub)   sub.textContent   = setting ? 'Choose a 4-digit PIN to secure the app' : 'Enter your PIN to continue';
-    if (err)   err.textContent   = '';
-    updateDots();
-    showOverlay();
-  }
-
-  function unlock() {
-    locked  = false;
-    setting = false;
-    entry   = '';
-    updateDots();
-    hideOverlay();
     resetTimer();
   }
-
   function resetTimer() {
     clearTimeout(timer);
-    if (!isEnabled()) return;
-    timer = setTimeout(lock, getTimeoutMs());
+    if (isEnabled()) timer = setTimeout(lock, getTimeoutMs());
   }
-
   window.alPress = function(num) {
     if (entry.length >= 4) return;
     entry += String(num);
     updateDots();
-    var err = document.getElementById('alError');
-    if (err) err.textContent = '';
-
+    var e = document.getElementById('alError');
+    if (e) e.textContent = '';
     if (entry.length === 4) {
       if (setting) {
         localStorage.setItem(PIN_KEY, entry);
         setTimeout(unlock, 300);
+      } else if (entry === getPin()) {
+        setTimeout(unlock, 200);
       } else {
-        if (entry === getPin()) {
-          setTimeout(unlock, 200);
-        } else {
-          if (err) err.textContent = 'Incorrect PIN. Try again.';
-          setTimeout(function() {
-            entry = '';
-            updateDots();
-          }, 600);
-        }
+        if (e) e.textContent = 'Incorrect PIN. Try again.';
+        setTimeout(function() { entry = ''; updateDots(); }, 600);
       }
     }
   };
-
-  window.alBackspace = function() {
-    entry = entry.slice(0, -1);
-    updateDots();
+  window.alBackspace = function() { entry = entry.slice(0, -1); updateDots(); };
+  window.alForgotPin = function() {
+    var msg = document.getElementById('alResetMsg');
+    var inp = document.getElementById('alResetCode');
+    var t   = document.getElementById('alTitle');
+    var s   = document.getElementById('alSubtitle');
+    if (msg) msg.textContent = 'Sending code to your email…';
+    if (inp) inp.value = '';
+    showKeypad(false);
+    if (t) t.textContent = 'PIN Reset';
+    if (s) s.textContent = 'Check your email for the code';
+    resetCode = String(Math.floor(100000 + Math.random() * 900000));
+    try {
+      if (typeof emailjs === 'undefined') throw new Error('EmailJS not loaded');
+      emailjs.init(EJS_KEY);
+      emailjs.send(EJS_SVC, EJS_TPL, {
+        to_email: RESET_TO,
+        subject:  '401k App — PIN Reset Code',
+        message:  'Your PIN reset code is: ' + resetCode + '\n\nThis code is valid for 10 minutes. If you did not request this, ignore this email.'
+      }).then(function() {
+        if (msg) msg.textContent = 'Code sent to ' + RESET_TO + '. Enter it below:';
+      }, function(err) {
+        if (msg) msg.textContent = '⚠️ Email failed. Try again.';
+        resetCode = null;
+        console.error('EmailJS error:', err);
+      });
+    } catch(e) {
+      if (msg) msg.textContent = '⚠️ EmailJS not available.';
+      resetCode = null;
+    }
+    setTimeout(function() { resetCode = null; }, 10 * 60 * 1000);
   };
-
-  window.alResetPin = function() {
-    if (confirm('Reset PIN? You will set a new one now.')) {
+  window.alVerifyCode = function() {
+    var inp = document.getElementById('alResetCode');
+    var msg = document.getElementById('alResetMsg');
+    var entered = inp ? inp.value.trim() : '';
+    if (!resetCode) {
+      if (msg) msg.textContent = '⚠️ Code expired. Click "Forgot PIN?" again.';
+      return;
+    }
+    if (entered === resetCode) {
       localStorage.removeItem(PIN_KEY);
-      entry   = '';
-      setting = true;
-      var title = document.getElementById('alTitle');
-      var sub   = document.getElementById('alSubtitle');
-      var err   = document.getElementById('alError');
-      if (title) title.textContent = 'Set New PIN';
-      if (sub)   sub.textContent   = 'Choose a 4-digit PIN';
-      if (err)   err.textContent   = '';
+      resetCode = null;
+      entry = ''; setting = true;
+      showKeypad(true);
+      var t = document.getElementById('alTitle');
+      var s = document.getElementById('alSubtitle');
+      var e = document.getElementById('alError');
+      if (t) t.textContent = 'Set New PIN';
+      if (s) s.textContent = 'Choose a 4-digit PIN';
+      if (e) e.textContent = '';
       updateDots();
+    } else {
+      if (msg) msg.textContent = '❌ Incorrect code. Try again.';
+      if (inp) inp.value = '';
     }
   };
-
-  window.testAutoLock = function() {
-    lock();
+  window.alCancelReset = function() {
+    resetCode = null;
+    entry = '';
+    setting = !getPin();
+    showKeypad(true);
+    var t = document.getElementById('alTitle');
+    var s = document.getElementById('alSubtitle');
+    var e = document.getElementById('alError');
+    if (t) t.textContent = setting ? 'Set Your PIN' : 'Session Locked';
+    if (s) s.textContent = setting ? 'Choose a 4-digit PIN' : 'Enter your PIN to continue';
+    if (e) e.textContent = '';
+    updateDots();
   };
-
+  window.alLockNow = lock;
+  window._alReset  = resetTimer;
+  window._resetLockTimer = resetTimer;
+  window.testAutoLock = function() { lock(); };
   window.resetAutoLockPin = function() {
     if (confirm('Reset your PIN?')) {
       localStorage.removeItem(PIN_KEY);
       alert('PIN cleared. Click Test Lock Now to set a new one.');
     }
   };
-
   window.setAutoLockCustom = function() {
     var val  = parseFloat(document.getElementById('autoLockCustomVal').value);
     var unit = document.getElementById('autoLockCustomUnit').value;
@@ -10392,7 +10445,6 @@ window.syncToNetWorthTimeline = async function() {
     window._resetLockTimer();
     alert('Auto-lock set to ' + val + ' ' + unit + '. Test it with the button below.');
   };
-
   window.handleAutoLockChange = function(val) {
     if (val === 'custom') {
       document.getElementById('autoLockCustom').style.display = 'block';
@@ -10402,21 +10454,15 @@ window.syncToNetWorthTimeline = async function() {
       window._resetLockTimer();
     }
   };
-
   window.handleAutoLockEnabled = function(checked) {
     localStorage.setItem(ENABLED_KEY, checked);
     if (checked) resetTimer();
     else clearTimeout(timer);
   };
-
-  window._resetLockTimer = resetTimer;
-
-  // Listen for activity
-  ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'].forEach(function(evt) {
-    document.addEventListener(evt, resetTimer, { passive: true });
+  ['mousedown','mousemove','keydown','touchstart','scroll','click'].forEach(function(ev) {
+    document.addEventListener(ev, resetTimer, {passive:true});
   });
-
-  // Restore checkbox state when settings open
+  window.addEventListener('load', function() { setTimeout(resetTimer, 3000); });
   var origOpen = window.openSettingsModal;
   if (typeof origOpen === 'function') {
     window.openSettingsModal = function() {
@@ -10438,11 +10484,6 @@ window.syncToNetWorthTimeline = async function() {
       }, 200);
     };
   }
-
-  // Start on load
-  window.addEventListener('load', function() {
-    setTimeout(resetTimer, 3000);
-  });
 })();
 </script>
 </body>
