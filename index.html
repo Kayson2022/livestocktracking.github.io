@@ -10159,8 +10159,6 @@ function runDRIP() {
     document.getElementById('dripResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-}
-
 window.renderDRIP = renderDRIP;
 window.runDRIP    = runDRIP;
 
@@ -10305,8 +10303,6 @@ function injectTWRButton() {
   btn.addEventListener('click', openTWRWidget);
   group.appendChild(btn);
 }
-setTimeout(injectTWRButton, 3700);
-window.addEventListener('load', () => setTimeout(injectTWRButton, 2400));
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -10412,8 +10408,6 @@ function injectExDateButton() {
   btn.addEventListener('click', openExDateWidget);
   group.appendChild(btn);
 }
-setTimeout(injectExDateButton, 3800);
-window.addEventListener('load', () => setTimeout(injectExDateButton, 2500));
 
 // ── SYNC TO NET WORTH TIMELINE ──────────────────────────────────
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -10491,6 +10485,43 @@ window.syncToNetWorthTimeline = async function() {
         alert('Sync failed: ' + e.message);
     }
 };
+</script>
+
+<!-- TWR/MWR + Ex-Date toolbar buttons — separate script so import errors above don't block these -->
+<script>
+(function() {
+  function injectTWRButton() {
+    var group = document.getElementById('_enhControlsInjected');
+    if (!group || document.getElementById('_twrBtn')) return;
+    var btn = document.createElement('span');
+    btn.id = '_twrBtn'; btn.className = 'density-toggle';
+    btn.title = 'TWR / MWR Return Analysis'; btn.textContent = '📈 TWR / MWR';
+    btn.addEventListener('click', function() { if (window.openTWRWidget) window.openTWRWidget(); });
+    group.appendChild(btn);
+  }
+  function injectExDateButton() {
+    var group = document.getElementById('_enhControlsInjected');
+    if (!group || document.getElementById('_exdateBtn')) return;
+    var btn = document.createElement('span');
+    btn.id = '_exdateBtn'; btn.className = 'density-toggle';
+    btn.title = 'Dividend Ex-Date Calendar'; btn.textContent = '📅 Ex-Dates';
+    btn.addEventListener('click', function() { if (window.openExDateWidget) window.openExDateWidget(); });
+    group.appendChild(btn);
+  }
+  function injectBoth() {
+    injectTWRButton();
+    injectExDateButton();
+  }
+  // Try multiple times to catch whenever _enhControlsInjected is ready
+  [1000, 2000, 3000, 4000, 5000].forEach(function(ms) {
+    setTimeout(injectBoth, ms);
+  });
+  window.addEventListener('load', function() {
+    [500, 1500, 2500, 3500].forEach(function(ms) {
+      setTimeout(injectBoth, ms);
+    });
+  });
+})();
 </script>
 
 <!-- AUTO-LOCK OVERLAY -->
