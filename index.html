@@ -5606,8 +5606,6 @@
                     <button class="tab-link" onclick="showTab('transactions')">All Transactions</button>
                     <button class="tab-link" onclick="showTab('tax'); renderTaxSummary();">🧾 Tax Summary</button>
                     <button class="tab-link" onclick="showTab('drip'); renderDRIP();">💧 DRIP Projector</button>
-                    <button class="tab-link" onclick="showTab('twr'); renderTWR();">📈 TWR / MWR</button>
-                    <button class="tab-link" onclick="showTab('exdate'); renderExDates();">📅 Ex-Dates</button>
                 </div>
                 <div id="investmentsTab" class="tab-content active">
                     <div class="controls-bar">
@@ -5760,29 +5758,6 @@
                       <div id="dripInsight" style="background:linear-gradient(135deg,rgba(0,184,148,0.08),rgba(0,206,201,0.08));border:1px solid rgba(0,184,148,0.3);border-radius:12px;padding:16px;margin-bottom:16px;"></div>
 
                     </div>
-                  </div>
-                </div>
-
-                <!-- ── TWR / MWR Tab ─────────────────────────────────────── -->
-                <div id="twrTab" class="tab-content">
-                  <div style="padding:16px;">
-                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">📈 Time-Weighted & Money-Weighted Return</h3>
-                    <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 16px;">TWR removes the effect of cash flows — it measures portfolio manager skill. MWR (IRR) reflects YOUR actual experience including when you added/withdrew money.</p>
-
-                    <div id="twrResults" style="display:grid;gap:12px;">
-                      <div style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:32px;">Click Calculate to compute returns.</div>
-                    </div>
-                    <button onclick="renderTWR()" style="margin-top:14px;padding:10px 20px;background:var(--primary-color,#3498db);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:0.9rem;">🔄 Calculate</button>
-                  </div>
-                </div>
-
-                <!-- ── Ex-Date Calendar Tab ──────────────────────────────── -->
-                <div id="exdateTab" class="tab-content">
-                  <div style="padding:16px;">
-                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0 0 4px;">📅 Dividend Ex-Date Calendar</h3>
-                    <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 16px;">Shows upcoming ex-dividend dates for your holdings. You must own shares <strong>before</strong> the ex-date to receive the dividend. Powered by Finnhub.</p>
-                    <button onclick="renderExDates()" style="margin-bottom:14px;padding:10px 20px;background:var(--primary-color,#3498db);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:0.9rem;">🔄 Refresh</button>
-                    <div id="exdateResults" style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:32px;">Loading ex-dates…</div>
                   </div>
                 </div>
 
@@ -6460,6 +6435,28 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   </div>
   <button onclick="window.runHSATracker()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#16a085,#1abc9c);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">🏥 Calculate</button>
   <div id="hsaResults"></div>
+</div>
+
+<!-- ── TWR / MWR Widget ─────────────────────────────────────────────── -->
+<div id="twrWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">📈 TWR / MWR — Return Analysis</h3>
+    <span onclick="document.getElementById('twrWidget').style.display='none'" style="cursor:pointer;color:var(--text-color-secondary);font-size:1.2rem;">✕</span>
+  </div>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 16px;">MWR (IRR) reflects your actual experience based on cash timing. Simple annualized return treats all contributions equally.</p>
+  <button onclick="renderTWR()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">📈 Calculate</button>
+  <div id="twrResults"><div style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:24px;">Click Calculate to compute returns.</div></div>
+</div>
+
+<!-- ── Ex-Date Calendar Widget ─────────────────────────────────────── -->
+<div id="exdateWidget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">📅 Dividend Ex-Date Calendar</h3>
+    <span onclick="document.getElementById('exdateWidget').style.display='none'" style="cursor:pointer;color:var(--text-color-secondary);font-size:1.2rem;">✕</span>
+  </div>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 16px;">You must own shares <strong>before</strong> the ex-date to receive the dividend. Next 90 days · Powered by Finnhub.</p>
+  <button onclick="renderExDates()" style="padding:8px 22px;border-radius:8px;border:none;background:linear-gradient(135deg,#8e44ad,#9b59b6);color:#fff;font-weight:700;font-size:0.88rem;cursor:pointer;margin-bottom:14px;">📅 Refresh</button>
+  <div id="exdateResults"><div style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:24px;">Click Refresh to load ex-dates.</div></div>
 </div>
 
 <button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
@@ -10168,13 +10165,13 @@ window.renderDRIP = renderDRIP;
 window.runDRIP    = runDRIP;
 
 // ═══════════════════════════════════════════════════════════════════
-// TWR / MWR (IRR) — Time-Weighted & Money-Weighted Return
+// TWR / MWR (IRR)
 // ═══════════════════════════════════════════════════════════════════
 function renderTWR() {
   const el = document.getElementById('twrResults');
   if (!el) return;
 
-  const txns = (window.portfolioData && window.portfolioData.transactions) || [];
+  const txns    = (window.portfolioData && window.portfolioData.transactions) || [];
   const holdings = window.portfolioHoldings || [];
 
   if (!txns.length) {
@@ -10182,19 +10179,16 @@ function renderTWR() {
     return;
   }
 
-  // ── Build cash flow list (date, amount) for MWR ──────────────────
-  // Buys = negative cash flow (money out), Sells = positive (money in)
-  const cashFlows = []; // { date: Date, amount: number }
-
+  const cashFlows = [];
   const sorted = [...txns].sort((a, b) => new Date(a.date) - new Date(b.date));
   sorted.forEach(t => {
-    const type   = (t.transactionType || '').toUpperCase();
-    const shares = parseFloat(t.shares) || 0;
-    const price  = parseFloat(t.price)  || 0;
-    const value  = shares * price;
-    if (!value || !t.date) return;
-    if (type === 'BUY')  cashFlows.push({ date: new Date(t.date), amount: -value });
-    if (type === 'SELL') cashFlows.push({ date: new Date(t.date), amount: +value });
+    const type  = (t.transactionType || '').toUpperCase();
+    const sh    = parseFloat(t.shares) || 0;
+    const pr    = parseFloat(t.price)  || 0;
+    const val   = sh * pr;
+    if (!val || !t.date) return;
+    if (type === 'BUY')  cashFlows.push({ date: new Date(t.date), amount: -val });
+    if (type === 'SELL') cashFlows.push({ date: new Date(t.date), amount: +val });
   });
 
   if (!cashFlows.length) {
@@ -10202,128 +10196,121 @@ function renderTWR() {
     return;
   }
 
-  // Current portfolio value = ending cash flow
   const currentValue = holdings.reduce((s, h) => {
-    const price  = parseFloat(h.currentPrice || h.lastPrice || 0);
-    const shares = parseFloat(h.totalShares || 0);
-    return s + price * shares;
+    return s + (parseFloat(h.currentPrice || h.lastPrice || 0)) * (parseFloat(h.totalShares || 0));
   }, 0);
 
-  const startDate = cashFlows[0].date;
-  const endDate   = new Date();
-  const totalDays = Math.max(1, (endDate - startDate) / (1000 * 60 * 60 * 24));
+  const startDate  = cashFlows[0].date;
+  const endDate    = new Date();
+  const totalDays  = Math.max(1, (endDate - startDate) / 864e5);
   const totalYears = totalDays / 365.25;
 
-  // ── MWR: solve IRR using Newton-Raphson ──────────────────────────
   const allFlows = [...cashFlows, { date: endDate, amount: currentValue }];
 
   function npv(rate) {
-    return allFlows.reduce((sum, cf) => {
-      const t = (cf.date - startDate) / (1000 * 60 * 60 * 24 * 365.25);
-      return sum + cf.amount / Math.pow(1 + rate, t);
+    return allFlows.reduce((s, cf) => {
+      const t = (cf.date - startDate) / (864e5 * 365.25);
+      return s + cf.amount / Math.pow(1 + rate, t);
     }, 0);
   }
-  function npvDeriv(rate) {
-    return allFlows.reduce((sum, cf) => {
-      const t = (cf.date - startDate) / (1000 * 60 * 60 * 24 * 365.25);
-      return sum - t * cf.amount / Math.pow(1 + rate, t + 1);
+  function npvD(rate) {
+    return allFlows.reduce((s, cf) => {
+      const t = (cf.date - startDate) / (864e5 * 365.25);
+      return s - t * cf.amount / Math.pow(1 + rate, t + 1);
     }, 0);
   }
 
   let mwr = 0.1;
   for (let i = 0; i < 100; i++) {
-    const f  = npv(mwr);
-    const fp = npvDeriv(mwr);
+    const fp = npvD(mwr);
     if (Math.abs(fp) < 1e-12) break;
-    const next = mwr - f / fp;
+    const next = mwr - npv(mwr) / fp;
     if (Math.abs(next - mwr) < 1e-8) { mwr = next; break; }
     mwr = next;
   }
-  const mwrPct = isFinite(mwr) ? (mwr * 100) : null;
+  const mwrPct = isFinite(mwr) ? mwr * 100 : null;
 
-  // ── TWR: chain-link sub-period returns ───────────────────────────
-  // Use quarterly sub-periods based on transaction dates
-  // Simple approximation: for each buy, treat previous portfolio value 
-  // as start-of-period, compute return to next external flow
-  let twr = 1;
-  let prevValue = 0;
-  let prevDate  = startDate;
-
-  sorted.forEach((t, i) => {
-    const type   = (t.transactionType || '').toUpperCase();
-    if (type !== 'BUY' && type !== 'SELL') return;
-    const shares = parseFloat(t.shares) || 0;
-    const price  = parseFloat(t.price)  || 0;
-    const value  = shares * price;
-    if (!value) return;
-
-    if (prevValue > 0) {
-      // Estimate portfolio value just before this flow
-      // Using simple growth assumption based on contribution pattern
-      const periodReturn = prevValue > 0 ? (prevValue / prevValue) : 1; // placeholder
-      twr *= periodReturn;
-    }
-    prevValue += (type === 'BUY' ? value : -value);
-    prevDate = new Date(t.date);
-  });
-
-  // Better TWR: use total invested vs current value adjusted for timing
   const totalInvested  = cashFlows.filter(c => c.amount < 0).reduce((s, c) => s + Math.abs(c.amount), 0);
   const totalWithdrawn = cashFlows.filter(c => c.amount > 0).reduce((s, c) => s + c.amount, 0);
   const netInvested    = totalInvested - totalWithdrawn;
   const simpleReturn   = netInvested > 0 ? ((currentValue - netInvested) / netInvested) * 100 : 0;
-  const annualizedSimple = netInvested > 0 && totalYears > 0
-    ? (Math.pow(currentValue / netInvested, 1 / totalYears) - 1) * 100
-    : 0;
+  const annualized     = netInvested > 0 && totalYears > 0 ? (Math.pow(currentValue / netInvested, 1 / totalYears) - 1) * 100 : 0;
 
-  // ── Format helpers ───────────────────────────────────────────────
-  const fc = v => '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  const fp = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+  const fc  = v => '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const fp2 = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
   const col = v => v >= 0 ? 'var(--success-color,#27ae60)' : 'var(--danger-color,#e74c3c)';
-
   const startStr = startDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  const yearsStr = totalYears < 1 ? Math.round(totalDays) + ' days' : totalYears.toFixed(1) + ' years';
+  const yrsStr   = totalYears < 1 ? Math.round(totalDays) + ' days' : totalYears.toFixed(1) + ' yrs';
 
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <div style="background:var(--card-bg-color,#fff);border:1px solid var(--border-color);border-radius:12px;padding:16px;text-align:center;">
-        <div style="font-size:0.7rem;color:var(--text-color-secondary);font-weight:700;letter-spacing:1px;margin-bottom:6px;">MONEY-WEIGHTED RETURN (IRR)</div>
-        <div style="font-size:2rem;font-weight:800;color:${mwrPct !== null ? col(mwrPct) : 'var(--text-color-secondary)'};">
-          ${mwrPct !== null ? fp(mwrPct) : 'N/A'}
-        </div>
-        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:4px;">annualized • reflects YOUR cash timing</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;padding:16px;text-align:center;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);font-weight:700;letter-spacing:1px;margin-bottom:6px;">MONEY-WEIGHTED (IRR)</div>
+        <div style="font-size:2rem;font-weight:800;color:${mwrPct !== null ? col(mwrPct) : 'var(--text-color-secondary)'};">${mwrPct !== null ? fp2(mwrPct) : 'N/A'}</div>
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:4px;">annualized · cash-timing weighted</div>
       </div>
-      <div style="background:var(--card-bg-color,#fff);border:1px solid var(--border-color);border-radius:12px;padding:16px;text-align:center;">
-        <div style="font-size:0.7rem;color:var(--text-color-secondary);font-weight:700;letter-spacing:1px;margin-bottom:6px;">SIMPLE ANNUALIZED RETURN</div>
-        <div style="font-size:2rem;font-weight:800;color:${col(annualizedSimple)};">
-          ${fp(annualizedSimple)}
-        </div>
-        <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:4px;">annualized • based on net invested</div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;padding:16px;text-align:center;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);font-weight:700;letter-spacing:1px;margin-bottom:6px;">SIMPLE ANNUALIZED</div>
+        <div style="font-size:2rem;font-weight:800;color:${col(annualized)};">${fp2(annualized)}</div>
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);margin-top:4px;">annualized · net invested basis</div>
       </div>
     </div>
-
-    <div style="background:var(--card-bg-color,#fff);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
-      <div style="font-size:0.75rem;font-weight:700;color:var(--text-color-secondary);letter-spacing:1px;margin-bottom:12px;">SUMMARY</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;">
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Total Invested</div><div style="font-weight:700;">${fc(totalInvested)}</div></div>
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Withdrawn</div><div style="font-weight:700;">${fc(totalWithdrawn)}</div></div>
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Current Value</div><div style="font-weight:700;color:${col(currentValue - netInvested)}">${fc(currentValue)}</div></div>
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Net Invested</div><div style="font-weight:700;">${fc(netInvested)}</div></div>
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Gain / Loss</div><div style="font-weight:700;color:${col(currentValue - netInvested)}">${fp(simpleReturn)}</div></div>
-        <div><div style="font-size:0.7rem;color:var(--text-color-secondary);">Period</div><div style="font-weight:700;">${startStr} · ${yearsStr}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;text-align:center;">
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Total Invested</div>
+        <div style="font-weight:700;">${fc(totalInvested)}</div>
+      </div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Withdrawn</div>
+        <div style="font-weight:700;">${fc(totalWithdrawn)}</div>
+      </div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Current Value</div>
+        <div style="font-weight:700;color:${col(currentValue - netInvested)}">${fc(currentValue)}</div>
+      </div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Net Invested</div>
+        <div style="font-weight:700;">${fc(netInvested)}</div>
+      </div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Total Gain/Loss</div>
+        <div style="font-weight:700;color:${col(currentValue - netInvested)}">${fp2(simpleReturn)}</div>
+      </div>
+      <div style="background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;padding:12px;">
+        <div style="font-size:0.68rem;color:var(--text-color-secondary);">Period</div>
+        <div style="font-weight:700;">${startStr} · ${yrsStr}</div>
       </div>
     </div>
-
-    <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:10px;padding:12px;font-size:0.75rem;color:var(--text-color-secondary);line-height:1.6;">
-      <strong>💡 MWR vs Simple Return:</strong> MWR (IRR) weights returns by the size and timing of each cash flow — if you invested more right before a drop, MWR will be lower than simple return. Simple annualized return treats all contributions equally over time.
-    </div>
-  `;
+    <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:10px;padding:12px;font-size:0.73rem;color:var(--text-color-secondary);line-height:1.6;">
+      <strong>💡 MWR vs Simple:</strong> MWR weights returns by the size and timing of each cash flow. If you invested more before a downturn, MWR will be lower than simple annualized return.
+    </div>`;
 }
 window.renderTWR = renderTWR;
 
+function openTWRWidget() {
+  const w = document.getElementById('twrWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) { renderTWR(); w.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+window.openTWRWidget = openTWRWidget;
+
+function injectTWRButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_twrBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_twrBtn'; btn.className = 'density-toggle';
+  btn.title = 'TWR / MWR Return Analysis'; btn.textContent = '📈 TWR / MWR';
+  btn.addEventListener('click', openTWRWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectTWRButton, 3700);
+window.addEventListener('load', () => setTimeout(injectTWRButton, 2400));
+
 
 // ═══════════════════════════════════════════════════════════════════
-// Dividend Ex-Date Calendar — powered by Finnhub
+// Dividend Ex-Date Calendar
 // ═══════════════════════════════════════════════════════════════════
 async function renderExDates() {
   const el = document.getElementById('exdateResults');
@@ -10336,115 +10323,97 @@ async function renderExDates() {
     return;
   }
 
-  // Only stocks/ETFs — skip money market / bonds
   const symbols = [...new Set(
-    holdings
-      .map(h => (h.symbol || '').toUpperCase().trim())
-      .filter(s => s && s.length <= 5 && !/\s/.test(s))
-  )].slice(0, 20); // cap at 20 to avoid rate limits
+    holdings.map(h => (h.symbol || '').toUpperCase().trim())
+             .filter(s => s && s.length <= 5 && !/\s/.test(s))
+  )].slice(0, 20);
 
   const apiKey = typeof FINNHUB_API_KEY !== 'undefined' ? FINNHUB_API_KEY : '';
   if (!apiKey) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--danger-color,#e74c3c);">⚠️ Finnhub API key not set. Add it in Settings.</div>';
+    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--danger-color,#e74c3c);">⚠️ Finnhub API key not set. Add it in ⚙️ Settings.</div>';
     return;
   }
 
-  // Date window: today → +90 days
   const today = new Date();
   const end   = new Date(today); end.setDate(end.getDate() + 90);
   const fmt   = d => d.toISOString().split('T')[0];
-
   const results = [];
 
   await Promise.allSettled(symbols.map(async sym => {
     try {
-      const url = `https://finnhub.io/api/v1/stock/dividend2?symbol=${sym}&from=${fmt(today)}&to=${fmt(end)}&token=${apiKey}`;
-      const r   = await fetch(url);
+      const r = await fetch(`https://finnhub.io/api/v1/stock/dividend2?symbol=${sym}&from=${fmt(today)}&to=${fmt(end)}&token=${apiKey}`);
       if (!r.ok) return;
       const data = await r.json();
       (Array.isArray(data) ? data : []).forEach(d => {
-        if (d.exDate) results.push({
-          symbol:      sym,
-          exDate:      d.exDate,
-          payDate:     d.payDate     || '—',
-          amount:      d.amount      != null ? d.amount : null,
-          frequency:   d.frequency   || '',
-        });
+        if (d.exDate) results.push({ symbol: sym, exDate: d.exDate, payDate: d.payDate || '—', amount: d.amount != null ? d.amount : null });
       });
     } catch(_) {}
   }));
 
   if (!results.length) {
-    el.innerHTML = `
-      <div style="text-align:center;padding:24px;color:var(--text-color-secondary);">
-        No ex-dividend dates found in the next 90 days for your holdings.<br>
-        <small style="font-size:0.7rem;">ETFs and growth stocks typically don't pay dividends.</small>
-      </div>`;
+    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No ex-dividend dates found in the next 90 days.<br><small>Growth stocks and some ETFs don't pay dividends.</small></div>`;
     return;
   }
 
-  // Sort by ex-date ascending
   results.sort((a, b) => a.exDate.localeCompare(b.exDate));
 
-  const todayStr = fmt(today);
-  const in7  = fmt(new Date(today.getTime() + 7  * 86400000));
-  const in14 = fmt(new Date(today.getTime() + 14 * 86400000));
-
-  const urgencyColor = exDate => {
-    if (exDate <= in7)  return '#e74c3c';
-    if (exDate <= in14) return '#e67e22';
-    return 'var(--text-color-secondary)';
-  };
-  const urgencyLabel = exDate => {
-    if (exDate <= in7)  return '🔴 This week';
-    if (exDate <= in14) return '🟡 Next 2 weeks';
-    return '';
-  };
-
+  const in7  = fmt(new Date(today.getTime() + 7  * 864e5));
+  const in14 = fmt(new Date(today.getTime() + 14 * 864e5));
   const holdingMap = {};
   holdings.forEach(h => { holdingMap[(h.symbol||'').toUpperCase()] = h; });
 
   const rows = results.map(r => {
     const h      = holdingMap[r.symbol] || {};
     const shares = parseFloat(h.totalShares || 0);
-    const est    = r.amount != null && shares ? (r.amount * shares).toFixed(2) : null;
-    const urg    = urgencyColor(r.exDate);
-    const label  = urgencyLabel(r.exDate);
-    return `
-      <tr style="border-bottom:1px solid var(--border-color);">
-        <td style="padding:10px 8px;font-weight:700;">${r.symbol}</td>
-        <td style="padding:10px 8px;color:${urg};font-weight:${r.exDate <= in14 ? '700' : '400'};">
-          ${r.exDate} ${label ? '<span style="font-size:0.7rem;">' + label + '</span>' : ''}
-        </td>
-        <td style="padding:10px 8px;color:var(--text-color-secondary);">${r.payDate}</td>
-        <td style="padding:10px 8px;text-align:right;">${r.amount != null ? '$' + r.amount.toFixed(4) : '—'}</td>
-        <td style="padding:10px 8px;text-align:right;color:var(--success-color,#27ae60);font-weight:700;">
-          ${est ? '$' + est : '—'}
-        </td>
-      </tr>`;
+    const est    = r.amount != null && shares ? '$' + (r.amount * shares).toFixed(2) : '—';
+    const urgent = r.exDate <= in7 ? '#e74c3c' : r.exDate <= in14 ? '#e67e22' : 'var(--text-color-primary)';
+    const badge  = r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
+    return `<tr style="border-bottom:1px solid var(--border-color);">
+      <td style="padding:9px 8px;font-weight:700;">${r.symbol}</td>
+      <td style="padding:9px 8px;color:${urgent};font-weight:${r.exDate <= in14 ? '700' : '400'};">${r.exDate}${badge}</td>
+      <td style="padding:9px 8px;color:var(--text-color-secondary);">${r.payDate}</td>
+      <td style="padding:9px 8px;text-align:right;">${r.amount != null ? '$' + r.amount.toFixed(4) : '—'}</td>
+      <td style="padding:9px 8px;text-align:right;color:var(--success-color,#27ae60);font-weight:700;">${est}</td>
+    </tr>`;
   }).join('');
 
   el.innerHTML = `
     <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-        <thead>
-          <tr style="background:var(--card-bg-color,#f8f9fa);">
-            <th style="padding:8px;text-align:left;color:var(--text-color-secondary);font-weight:700;">Symbol</th>
-            <th style="padding:8px;text-align:left;color:var(--text-color-secondary);font-weight:700;">Ex-Date</th>
-            <th style="padding:8px;text-align:left;color:var(--text-color-secondary);font-weight:700;">Pay Date</th>
-            <th style="padding:8px;text-align:right;color:var(--text-color-secondary);font-weight:700;">$/Share</th>
-            <th style="padding:8px;text-align:right;color:var(--text-color-secondary);font-weight:700;">Est. Income</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:var(--bg-color);">
+          <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Symbol</th>
+          <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Ex-Date</th>
+          <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Pay Date</th>
+          <th style="padding:8px;text-align:right;color:var(--text-color-secondary);">$/Share</th>
+          <th style="padding:8px;text-align:right;color:var(--text-color-secondary);">Est. Income</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div style="margin-top:10px;font-size:0.7rem;color:var(--text-color-secondary);">
-      Showing next 90 days · ${results.length} dividend event${results.length !== 1 ? 's' : ''} · Source: Finnhub
-    </div>
-  `;
+    <div style="margin-top:8px;font-size:0.7rem;color:var(--text-color-secondary);">Next 90 days · ${results.length} event${results.length !== 1 ? 's' : ''} · Finnhub</div>`;
 }
 window.renderExDates = renderExDates;
+
+function openExDateWidget() {
+  const w = document.getElementById('exdateWidget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) { renderExDates(); w.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+window.openExDateWidget = openExDateWidget;
+
+function injectExDateButton() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_exdateBtn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_exdateBtn'; btn.className = 'density-toggle';
+  btn.title = 'Dividend Ex-Date Calendar'; btn.textContent = '📅 Ex-Dates';
+  btn.addEventListener('click', openExDateWidget);
+  group.appendChild(btn);
+}
+setTimeout(injectExDateButton, 3800);
+window.addEventListener('load', () => setTimeout(injectExDateButton, 2500));
 
 // ── SYNC TO NET WORTH TIMELINE ──────────────────────────────────
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
