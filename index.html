@@ -10373,11 +10373,8 @@ async function renderExDates() {
     return;
   }
 
-  const apiKey = typeof FINNHUB_API_KEY !== 'undefined' ? FINNHUB_API_KEY : '';
-  if (!apiKey) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--danger-color,#e74c3c);">⚠️ Finnhub API key not set. Add it in ⚙️ Settings.</div>';
-    return;
-  }
+  // Read Finnhub key from localStorage (same key the main app uses)
+  const apiKey = localStorage.getItem('myPortfolioFinnhubKey_v4') || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
 
   const today = new Date();
   const end   = new Date(today); end.setDate(end.getDate() + 90);
