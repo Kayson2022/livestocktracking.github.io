@@ -10372,9 +10372,15 @@ window.syncToNetWorthTimeline = async function() {
       if (typeof emailjs === 'undefined') throw new Error('EmailJS not loaded');
       emailjs.init(EJS_KEY);
       emailjs.send(EJS_SVC, EJS_TPL, {
-        to_email: RESET_TO,
-        subject:  '401k App — PIN Reset Code',
-        message:  'Your PIN reset code is: ' + resetCode + '\n\nThis code is valid for 10 minutes. If you did not request this, ignore this email.'
+        to_email:     RESET_TO,
+        name:         '401k App',
+        email:        RESET_TO,
+        title:        '401k App — PIN Reset Code',
+        subject:      '401k App — PIN Reset Code',
+        message:      'PIN Reset Code: ' + resetCode,
+        record_count: 'PIN RESET',
+        backup_date:  new Date().toLocaleString(),
+        backup_json:  '🔐 Your PIN reset code is:\n\n  ' + resetCode + '\n\nEnter this code in the app to set a new PIN.\nExpires in 10 minutes.'
       }).then(function() {
         if (msg) msg.textContent = 'Code sent to ' + RESET_TO + '. Enter it below:';
       }, function(err) {
