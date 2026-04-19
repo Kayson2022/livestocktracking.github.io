@@ -6459,7 +6459,74 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   <div id="exdateResults"><div style="color:var(--text-color-secondary);font-size:0.85rem;text-align:center;padding:24px;">Click Refresh to load ex-dates.</div></div>
 </div>
 
-<button id="kbd401-btn" title="Keyboard shortcuts">⌨️</button>
+<!-- ── Target 62 Widget ─────────────────────────────────────────────────── -->
+<div id="t62Widget" style="display:none;margin:0 20px 30px;background:var(--card-bg-color);border-radius:15px;padding:24px;border:1px solid var(--border-color);box-shadow:0 4px 10px var(--shadow-color);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-color-primary);margin:0;">🎯 Target 62 Simulator — SECURE 2.0 Roadmap</h3>
+    <span onclick="document.getElementById('t62Widget').style.display='none'" style="cursor:pointer;color:var(--text-color-secondary);font-size:1.2rem;">✕</span>
+  </div>
+  <p style="font-size:0.75rem;color:var(--text-color-secondary);margin:0 0 16px;">
+    Projects your path to retirement with auto-escalating IRS contribution limits (SECURE 2.0).
+    Compares your current pace vs maxing contributions each year.
+  </p>
+
+  <!-- Inputs -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">CURRENT AGE</div>
+      <input id="t62aAge" type="number" value="40" min="18" max="70"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">TARGET RETIREMENT AGE</div>
+      <input id="t62aTarget" type="number" value="62" min="50" max="75"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">CURRENT NET WORTH ($)</div>
+      <input id="t62aWorth" type="number" min="0" step="1000" placeholder="e.g. 1611000"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">ANNUAL 401k CONTRIB ($)</div>
+      <input id="t62aContrib401k" type="number" value="23500" min="0" step="500"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">MONTHLY BROKERAGE CONTRIB ($)</div>
+      <input id="t62aContribBrok" type="number" value="2500" min="0" step="100"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">EXPECTED ANNUAL RETURN (%)</div>
+      <input id="t62aReturn" type="number" value="7" min="1" max="15" step="0.5"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">RETIREMENT GOAL ($)</div>
+      <input id="t62aGoal" type="number" value="3000000" min="500000" step="100000"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">SS MONTHLY PIA ($) <span style="opacity:0.6;">(0 = skip)</span></div>
+      <input id="t62aSS" type="number" value="0" min="0" step="100" placeholder="e.g. 2800"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+    <div>
+      <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-bottom:5px;">INFLATION RATE (%)</div>
+      <input id="t62aInflation" type="number" value="3" min="0" max="10" step="0.5"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-color);color:var(--text-color-primary);font-size:0.9rem;">
+    </div>
+  </div>
+
+  <button onclick="runT62App()" style="padding:10px 24px;background:linear-gradient(135deg,#2980b9,#3498db);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:0.9rem;margin-bottom:16px;">▶ Run Simulation</button>
+
+  <div id="t62SummaryApp" style="color:var(--text-color-secondary);"></div>
+  <div style="height:320px;margin:16px 0;"><canvas id="t62ChartApp"></canvas></div>
+  <div id="t62TableApp"></div>
+</div>
+
+
 <div id="kbd401-panel">
   <h4>Keyboard Shortcuts</h4>
   <div class="k401row"><span>Toggle dark mode</span><kbd>D</kbd></div>
@@ -10609,6 +10676,7 @@ window.syncToNetWorthTimeline = async function() {
   function injectBoth() {
     injectTWRButton();
     injectExDateButton();
+    if (window.injectT62Button) window.injectT62Button();
   }
   // Try multiple times to catch whenever _enhControlsInjected is ready
   [1000, 2000, 3000, 4000, 5000].forEach(function(ms) {
@@ -10620,6 +10688,383 @@ window.syncToNetWorthTimeline = async function() {
     });
   });
 })();
+</script>
+
+<!-- Target 62 Simulator Engine + App Runner -->
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// TARGET 62 SIMULATOR — Shared Engine (used in Pi dashboard + 401k app)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// IRS contribution limits by age bracket (SECURE 2.0, 2026 values)
+const T62_LIMITS = {
+  base:        23500,  // everyone
+  catchup_50:   7500,  // age 50-59 and 64+
+  catchup_6063:11250,  // SECURE 2.0 super catch-up ages 60-63
+};
+
+// Social Security bend points / FRA info
+const T62_SS = {
+  early_age:  62,   // earliest claiming age
+  fra_age:    67,   // full retirement age (born after 1960)
+  delay_age:  70,   // max delay age
+  early_pct:  0.70, // 70% of PIA if claimed at 62
+  fra_pct:    1.00, // 100% of PIA at FRA
+  delay_pct:  1.24, // 124% of PIA at 70
+};
+
+function t62MaxContrib(age) {
+  if (age >= 60 && age <= 63) return T62_LIMITS.base + T62_LIMITS.catchup_6063;
+  if (age >= 50)              return T62_LIMITS.base + T62_LIMITS.catchup_50;
+  return T62_LIMITS.base;
+}
+
+function t62AnnualGrowth(balance, annualContrib, rate) {
+  // Compound once per year with contributions added monthly
+  const monthly = annualContrib / 12;
+  let b = balance;
+  const monthlyRate = rate / 12;
+  for (let m = 0; m < 12; m++) {
+    b = b * (1 + monthlyRate) + monthly;
+  }
+  return b;
+}
+
+function runTarget62(inputs) {
+  const {
+    currentAge,        // number
+    currentNetWorth,   // number — total portfolio today
+    annual401kContrib, // number — current annual 401k contribution
+    brokerageMonthly,  // number — monthly brokerage/taxable contributions
+    expectedReturn,    // decimal e.g. 0.07 for 7%
+    targetAge,         // number — default 62
+    goal,              // number — default 3000000
+    ssMonthlyPIA,      // number — estimated Social Security PIA (monthly at FRA)
+    inflationRate,     // decimal e.g. 0.03
+  } = inputs;
+
+  const target = targetAge || 62;
+  const yearsToTarget = target - currentAge;
+  if (yearsToTarget <= 0) return { error: 'Target age must be greater than current age.' };
+
+  const results = [];
+  let balance = currentNetWorth;
+  let year = new Date().getFullYear();
+
+  // Two scenarios:
+  // A) Current pace (user's actual contribution amount, stays flat in real terms)
+  // B) Max contributions (auto-escalates to IRS max each year based on age)
+
+  let balA = currentNetWorth;
+  let balB = currentNetWorth;
+  let goalHitA = null;
+  let goalHitB = null;
+
+  for (let i = 0; i <= yearsToTarget; i++) {
+    const age = currentAge + i;
+    const y   = year + i;
+
+    // IRS max for this age
+    const irsMax = t62MaxContrib(age);
+
+    // Scenario A: user's contribution (inflation-adjusted brokerage)
+    const contribA = annual401kContrib + (brokerageMonthly * 12 * Math.pow(1 + inflationRate, i));
+
+    // Scenario B: max 401k + same brokerage
+    const contribB = irsMax + (brokerageMonthly * 12 * Math.pow(1 + inflationRate, i));
+
+    if (i > 0) {
+      balA = t62AnnualGrowth(balA, contribA, expectedReturn);
+      balB = t62AnnualGrowth(balB, contribB, expectedReturn);
+    }
+
+    if (!goalHitA && balA >= goal) goalHitA = { age, year: y, balance: balA };
+    if (!goalHitB && balB >= goal) goalHitB = { age, year: y, balance: balB };
+
+    results.push({
+      age, year: y,
+      balanceA:    Math.round(balA),
+      balanceB:    Math.round(balB),
+      contribA:    Math.round(contribA),
+      contribB:    Math.round(contribB),
+      irsMax,
+      catchupBracket: age >= 60 && age <= 63 ? 'SUPER' : age >= 50 ? 'STANDARD' : 'NONE',
+    });
+  }
+
+  // Social Security estimates at target age
+  const ssAge62  = ssMonthlyPIA * T62_SS.early_pct * 12;   // annual if claimed at 62
+  const ssFRA    = ssMonthlyPIA * T62_SS.fra_pct   * 12;
+  const ssAge70  = ssMonthlyPIA * T62_SS.delay_pct * 12;
+
+  // 4% safe withdrawal from final balance
+  const finalA = results[results.length - 1].balanceA;
+  const finalB = results[results.length - 1].balanceB;
+  const withdrawA = Math.round(finalA * 0.04 / 12);
+  const withdrawB = Math.round(finalB * 0.04 / 12);
+
+  return {
+    inputs,
+    results,             // year-by-year array
+    goalHitA,            // {age, year, balance} when Scenario A hits goal (null if not)
+    goalHitB,            // same for Scenario B
+    finalA,              // balance at target age, Scenario A
+    finalB,              // balance at target age, Scenario B
+    withdrawA,           // 4% monthly at target, Scenario A
+    withdrawB,           // 4% monthly at target, Scenario B
+    ssAge62,             // annual SS if claimed at 62
+    ssFRA,               // annual SS at FRA (67)
+    ssAge70,             // annual SS at 70
+    yearsToTarget,
+    irsMaxAtTarget: t62MaxContrib(target),
+  };
+}
+
+function renderTarget62(result, chartCanvasId, tableId, summaryId) {
+  if (result.error) {
+    const el = document.getElementById(summaryId);
+    if (el) el.innerHTML = `<div style="color:#e74c3c;padding:16px;">${result.error}</div>`;
+    return;
+  }
+
+  const fmt$0  = n => '$' + Math.round(Math.abs(n||0)).toLocaleString('en-US');
+  const fmt$   = n => '$' + (n||0).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtPct = n => (n||0).toLocaleString('en-US', {minimumFractionDigits:1,maximumFractionDigits:1}) + '%';
+  const col    = n => n >= 0 ? '#27ae60' : '#e74c3c';
+
+  // ── Summary cards ──────────────────────────────────────────────────────
+  const sumEl = document.getElementById(summaryId);
+  if (sumEl) {
+    const { goalHitA, goalHitB, finalA, finalB, withdrawA, withdrawB,
+            ssAge62, ssFRA, ssAge70, inputs, irsMaxAtTarget } = result;
+
+    const goalAHtml = goalHitA
+      ? `<span style="color:#27ae60;font-weight:700;">✓ Age ${goalHitA.age} (${goalHitA.year})</span>`
+      : `<span style="color:#e74c3c;">Not reached by age ${inputs.targetAge||62}</span>`;
+    const goalBHtml = goalHitB
+      ? `<span style="color:#27ae60;font-weight:700;">✓ Age ${goalHitB.age} (${goalHitB.year})</span>`
+      : `<span style="color:#e74c3c;">Not reached by age ${inputs.targetAge||62}</span>`;
+
+    sumEl.innerHTML = `
+      <!-- Goal hit summary -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:16px;">
+          <div style="font-size:0.7rem;letter-spacing:1px;opacity:0.7;margin-bottom:6px;">SCENARIO A — CURRENT PACE</div>
+          <div style="font-size:1.5rem;font-weight:800;">${fmt$0(finalA)}</div>
+          <div style="font-size:0.75rem;opacity:0.7;margin:4px 0;">at age ${inputs.targetAge||62}</div>
+          <div style="font-size:0.8rem;">$3M goal: ${goalAHtml}</div>
+          <div style="font-size:0.75rem;opacity:0.7;margin-top:6px;">4% rule: ${fmt$(withdrawA)}/mo</div>
+        </div>
+        <div style="background:rgba(52,152,219,0.08);border:1px solid rgba(52,152,219,0.25);border-radius:12px;padding:16px;">
+          <div style="font-size:0.7rem;letter-spacing:1px;opacity:0.7;margin-bottom:6px;">SCENARIO B — MAX CONTRIBUTIONS</div>
+          <div style="font-size:1.5rem;font-weight:800;color:#3498db;">${fmt$0(finalB)}</div>
+          <div style="font-size:0.75rem;opacity:0.7;margin:4px 0;">at age ${inputs.targetAge||62} · IRS max = ${fmt$0(irsMaxAtTarget)}/yr</div>
+          <div style="font-size:0.8rem;">$3M goal: ${goalBHtml}</div>
+          <div style="font-size:0.75rem;opacity:0.7;margin-top:6px;">4% rule: ${fmt$(withdrawB)}/mo</div>
+        </div>
+      </div>
+
+      <!-- Social Security -->
+      ${inputs.ssMonthlyPIA > 0 ? `
+      <div style="background:rgba(155,89,182,0.08);border:1px solid rgba(155,89,182,0.25);border-radius:12px;padding:14px;margin-bottom:16px;">
+        <div style="font-size:0.7rem;letter-spacing:1px;opacity:0.7;margin-bottom:10px;">📋 SOCIAL SECURITY ESTIMATES (based on ${fmt$(inputs.ssMonthlyPIA)}/mo PIA)</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center;">
+          <div>
+            <div style="font-size:0.68rem;opacity:0.6;">Claim at 62 (early)</div>
+            <div style="font-size:1rem;font-weight:700;color:#e74c3c;">${fmt$0(inputs.ssMonthlyPIA * 0.7 * 12)}/yr</div>
+            <div style="font-size:0.65rem;opacity:0.6;">−30% penalty</div>
+          </div>
+          <div>
+            <div style="font-size:0.68rem;opacity:0.6;">Claim at 67 (FRA)</div>
+            <div style="font-size:1rem;font-weight:700;color:#27ae60;">${fmt$0(inputs.ssMonthlyPIA * 12)}/yr</div>
+            <div style="font-size:0.65rem;opacity:0.6;">Full benefit</div>
+          </div>
+          <div>
+            <div style="font-size:0.68rem;opacity:0.6;">Claim at 70 (max)</div>
+            <div style="font-size:1rem;font-weight:700;color:#3498db;">${fmt$0(inputs.ssMonthlyPIA * 1.24 * 12)}/yr</div>
+            <div style="font-size:0.65rem;opacity:0.6;">+24% bonus</div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      <!-- SECURE 2.0 explanation -->
+      <div style="background:rgba(243,156,18,0.08);border:1px solid rgba(243,156,18,0.25);border-radius:12px;padding:14px;margin-bottom:16px;font-size:0.78rem;line-height:1.7;">
+        <strong>⚡ SECURE 2.0 Super Catch-Up (Ages 60–63)</strong><br>
+        Under SECURE 2.0, ages 60–63 get a special catch-up limit of <strong>${fmt$0(T62_LIMITS.base + T62_LIMITS.catchup_6063)}/yr</strong>
+        vs the standard ${fmt$0(T62_LIMITS.base + T62_LIMITS.catchup_50)}/yr for ages 50–59.
+        After 63, the limit drops back to the standard catch-up. Scenario B automatically
+        applies the correct limit each year as you age through each bracket.
+      </div>`;
+  }
+
+  // ── Chart ──────────────────────────────────────────────────────────────
+  const canvas = document.getElementById(chartCanvasId);
+  if (canvas) {
+    const ctx    = canvas.getContext('2d');
+    const labels = result.results.map(r => `Age ${r.age}\n(${r.year})`);
+    const dataA  = result.results.map(r => r.balanceA);
+    const dataB  = result.results.map(r => r.balanceB);
+    const goalLine = result.results.map(() => result.inputs.goal || 3000000);
+
+    // Destroy existing chart if any
+    if (canvas._t62chart) canvas._t62chart.destroy();
+    canvas._t62chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Scenario A — Current Pace',
+            data: dataA,
+            borderColor: '#27ae60',
+            backgroundColor: 'rgba(39,174,96,0.06)',
+            borderWidth: 2.5,
+            pointRadius: 3,
+            fill: false,
+            tension: 0.3,
+          },
+          {
+            label: 'Scenario B — Max Contributions',
+            data: dataB,
+            borderColor: '#3498db',
+            backgroundColor: 'rgba(52,152,219,0.06)',
+            borderWidth: 2.5,
+            pointRadius: 3,
+            fill: false,
+            tension: 0.3,
+          },
+          {
+            label: '$3M Goal',
+            data: goalLine,
+            borderColor: '#f39c12',
+            borderWidth: 1.5,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            fill: false,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 14 } },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString('en-US')}`,
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { font: { size: 9 }, maxTicksLimit: 10 } },
+          y: {
+            ticks: {
+              callback: v => '$' + (v >= 1000000
+                ? (v/1000000).toLocaleString('en-US',{maximumFractionDigits:1}) + 'M'
+                : (v/1000).toLocaleString('en-US',{maximumFractionDigits:0}) + 'K'),
+              font: { size: 10 }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ── Year-by-year table ─────────────────────────────────────────────────
+  const tableEl = document.getElementById(tableId);
+  if (tableEl) {
+    const rows = result.results.map(r => {
+      const catchupLabel = r.catchupBracket === 'SUPER'
+        ? '<span style="color:#f39c12;font-weight:700;font-size:0.65rem;">⚡SUPER</span>'
+        : r.catchupBracket === 'STANDARD'
+        ? '<span style="color:#9b59b6;font-size:0.65rem;">CATCH-UP</span>'
+        : '';
+      return `<tr style="border-bottom:1px solid var(--border,#30363d);">
+        <td style="padding:6px 8px;font-weight:700;">${r.age} ${catchupLabel}</td>
+        <td style="padding:6px 8px;">${r.year}</td>
+        <td style="padding:6px 8px;text-align:right;">${fmt$0(r.irsMax)}</td>
+        <td style="padding:6px 8px;text-align:right;">${fmt$0(r.contribA)}</td>
+        <td style="padding:6px 8px;text-align:right;">${fmt$0(r.contribB)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#27ae60;font-weight:700;">${fmt$0(r.balanceA)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#3498db;font-weight:700;">${fmt$0(r.balanceB)}</td>
+      </tr>`;
+    }).join('');
+
+    tableEl.innerHTML = `
+      <div style="overflow-x:auto;margin-top:16px;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.75rem;">
+          <thead>
+            <tr style="background:rgba(0,0,0,0.15);">
+              <th style="padding:7px 8px;text-align:left;">Age</th>
+              <th style="padding:7px 8px;text-align:left;">Year</th>
+              <th style="padding:7px 8px;text-align:right;">IRS Max</th>
+              <th style="padding:7px 8px;text-align:right;">Contrib A</th>
+              <th style="padding:7px 8px;text-align:right;">Contrib B</th>
+              <th style="padding:7px 8px;text-align:right;color:#27ae60;">Balance A</th>
+              <th style="padding:7px 8px;text-align:right;color:#3498db;">Balance B</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+}
+
+
+
+// ── Target 62 App Runner ──────────────────────────────────────────────────
+function runT62App() {
+  const worth = parseFloat(document.getElementById('t62aWorth').value);
+  // Try to read total value from the stat card if not entered
+  const totalEl = document.getElementById('totalValue');
+  const liveVal = totalEl ? parseFloat((totalEl.textContent||'').replace(/[^0-9.]/g,'')) || 0 : 0;
+  const inputs = {
+    currentAge:        parseFloat(document.getElementById('t62aAge').value),
+    targetAge:         parseFloat(document.getElementById('t62aTarget').value),
+    currentNetWorth:   worth > 0 ? worth : liveVal,
+    annual401kContrib: parseFloat(document.getElementById('t62aContrib401k').value) || 0,
+    brokerageMonthly:  parseFloat(document.getElementById('t62aContribBrok').value) || 0,
+    expectedReturn:    (parseFloat(document.getElementById('t62aReturn').value) || 7) / 100,
+    goal:              parseFloat(document.getElementById('t62aGoal').value) || 3000000,
+    ssMonthlyPIA:      parseFloat(document.getElementById('t62aSS').value) || 0,
+    inflationRate:     (parseFloat(document.getElementById('t62aInflation').value) || 3) / 100,
+  };
+  if (!inputs.currentNetWorth) {
+    document.getElementById('t62SummaryApp').innerHTML =
+      '<div style="color:#e74c3c;padding:12px;">⚠️ Please enter your current net worth.</div>';
+    return;
+  }
+  if (!inputs.currentAge || inputs.currentAge < 18) {
+    document.getElementById('t62SummaryApp').innerHTML =
+      '<div style="color:#e74c3c;padding:12px;">⚠️ Please enter your current age.</div>';
+    return;
+  }
+  const result = runTarget62(inputs);
+  renderTarget62(result, 't62ChartApp', 't62TableApp', 't62SummaryApp');
+}
+window.runT62App = runT62App;
+
+function openT62Widget() {
+  const w = document.getElementById('t62Widget');
+  if (!w) return;
+  const isOpen = w.style.display !== 'none';
+  w.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+window.openT62Widget = openT62Widget;
+
+function injectT62Button() {
+  const group = document.getElementById('_enhControlsInjected');
+  if (!group || document.getElementById('_t62Btn')) return;
+  const btn = document.createElement('span');
+  btn.id = '_t62Btn'; btn.className = 'density-toggle';
+  btn.title = 'Target 62 Retirement Simulator'; btn.textContent = '🎯 Target 62';
+  btn.addEventListener('click', openT62Widget);
+  group.appendChild(btn);
+}
+setTimeout(injectT62Button, 3900);
+window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
+
 </script>
 
 <!-- AUTO-LOCK OVERLAY -->
