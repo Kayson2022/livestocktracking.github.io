@@ -10194,9 +10194,37 @@ function renderTWR() {
     return;
   }
 
-  const currentValue = holdings.reduce((s, h) => {
-    return s + (parseFloat(h.currentPrice || h.lastPrice || 0)) * (parseFloat(h.totalShares || 0));
-  }, 0);
+  // Read current portfolio value same way as $3M sync button
+  let currentValue = 0;
+  const totalEl = document.getElementById('totalValue');
+  if (totalEl) {
+    currentValue = parseFloat(totalEl.textContent.trim().replace(/[^0-9.]/g, '')) || 0;
+  }
+  if (!currentValue && window._enhPortfolioValue) {
+    currentValue = window._enhPortfolioValue;
+  }
+  if (!currentValue) {
+    // fallback: sum from priceCache + transactions
+    const shares = {};
+    sorted.forEach(t => {
+      const type = (t.transactionType || '').toUpperCase();
+      const key  = (t.symbol || '') + '|||' + (t.accountType || '');
+      const sh   = parseFloat(t.shares) || 0;
+      if (type === 'BUY')  shares[key] = (shares[key] || 0) + sh;
+      if (type === 'SELL') shares[key] = (shares[key] || 0) - sh;
+    });
+    const pc = window.priceCache || {};
+    Object.entries(shares).forEach(([key, sh]) => {
+      const sym   = key.split('|||')[0];
+      const price = (pc[sym] && (pc[sym].currentPrice || pc[sym].manualPrice)) || 0;
+      currentValue += sh * price;
+    });
+  }
+
+  if (currentValue <= 0) {
+    el.innerHTML = '<div style="color:var(--text-color-secondary);text-align:center;padding:24px;">⚠️ Could not read current portfolio value. Make sure prices are loaded (click Refresh Now on the main page) then click Calculate again.</div>';
+    return;
+  }
 
   const startDate  = cashFlows[0].date;
   const endDate    = new Date();
@@ -10226,7 +10254,7 @@ function renderTWR() {
     if (Math.abs(next - mwr) < 1e-8) { mwr = next; break; }
     mwr = next;
   }
-  const mwrPct = isFinite(mwr) ? mwr * 100 : null;
+  const mwrPct = isFinite(mwr) && Math.abs(mwr) < 100 ? mwr * 100 : null;
 
   const totalInvested  = cashFlows.filter(c => c.amount < 0).reduce((s, c) => s + Math.abs(c.amount), 0);
   const totalWithdrawn = cashFlows.filter(c => c.amount > 0).reduce((s, c) => s + c.amount, 0);
@@ -10234,8 +10262,8 @@ function renderTWR() {
   const simpleReturn   = netInvested > 0 ? ((currentValue - netInvested) / netInvested) * 100 : 0;
   const annualized     = netInvested > 0 && totalYears > 0 ? (Math.pow(currentValue / netInvested, 1 / totalYears) - 1) * 100 : 0;
 
-  const fc  = v => '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
-  const fp2 = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+  const fc  = v => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+  const fp2 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
   const col = v => v >= 0 ? 'var(--success-color,#27ae60)' : 'var(--danger-color,#e74c3c)';
   const startStr = startDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   const yrsStr   = totalYears < 1 ? Math.round(totalDays) + ' days' : totalYears.toFixed(1) + ' yrs';
