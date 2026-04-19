@@ -10347,101 +10347,96 @@ function injectTWRButton() {
 async function renderExDates() {
   const el = document.getElementById('exdateResults');
   if (!el) return;
-  el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">⏳ Fetching ex-dates via Yahoo Finance…</div>';
+  el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">⏳ Fetching ex-dividend dates…</div>';
 
-  // Derive symbols from priceCache, fallback to transactions
+  // Get holdings via the app's own function (has h.dividend, h.symbol, h.totalShares)
+  const holdings = (typeof window.calculateHoldingsAndCash === 'function')
+    ? window.calculateHoldingsAndCash().filter(h => h.symbol && parseFloat(h.dividend) > 0)
+    : [];
+
+  // Build shares map and symbol list from transactions as fallback
+  const sharesMap = {};
+  const divMap    = {}; // symbol -> annual dividend per share from holdings
+  holdings.forEach(h => {
+    const sym = (h.symbol || '').toUpperCase().trim();
+    if (!sym) return;
+    sharesMap[sym] = parseFloat(h.totalShares) || 0;
+    divMap[sym]    = parseFloat(h.dividend)    || 0;
+  });
+
+  // If no holdings with dividends, try fetching from Yahoo for all symbols
+  let symbols = Object.keys(divMap).filter(s => divMap[s] > 0);
+
+  // Also include symbols from priceCache that might have dividends we don't know about
   const pc = window.priceCache || {};
-  let symbols = Object.keys(pc).filter(s => s && /^[A-Z]{1,6}$/.test(s));
-  if (!symbols.length && window.portfolioData && window.portfolioData.transactions) {
-    const s = new Set();
-    window.portfolioData.transactions.forEach(t => {
-      if (t.symbol && /^[A-Z]{1,6}$/.test(t.symbol.trim().toUpperCase()))
-        s.add(t.symbol.trim().toUpperCase());
-    });
-    symbols = [...s];
-  }
-  symbols = symbols.slice(0, 30);
+  const allSymbols = [...new Set([
+    ...symbols,
+    ...Object.keys(pc).filter(s => /^[A-Z]{1,5}$/.test(s))
+  ])].slice(0, 30);
 
-  if (!symbols.length) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found. Wait for prices to load first.</div>';
+  if (!allSymbols.length) {
+    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found. Make sure prices are loaded first.</div>';
     return;
   }
 
-  // Build shares map from transactions
-  const sharesMap = {};
-  if (window.portfolioData && window.portfolioData.transactions) {
-    window.portfolioData.transactions.forEach(t => {
-      const sym  = (t.symbol || '').toUpperCase().trim();
-      const type = (t.transactionType || '').toUpperCase();
-      const sh   = parseFloat(t.shares) || 0;
-      if (!sym) return;
-      if (type === 'BUY')  sharesMap[sym] = (sharesMap[sym] || 0) + sh;
-      if (type === 'SELL') sharesMap[sym] = (sharesMap[sym] || 0) - sh;
-    });
-  }
+  const today   = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+  const fmt     = d => d.toISOString().split('T')[0];
+  const results = [];
+  const delay   = ms => new Promise(r => setTimeout(r, ms));
 
-  const today    = new Date(); today.setHours(0,0,0,0);
-  const todayMs  = today.getTime();
-  const fmt      = d => d.toISOString().split('T')[0];
-  const in90days = todayMs + 90  * 864e5;
-  const ago30    = todayMs - 30  * 864e5;
-  const results  = [];
-
-  // Fetch in batches of 5 to avoid hammering corsproxy
-  const delay = ms => new Promise(r => setTimeout(r, ms));
+  // Fetch Yahoo Finance for ex-date info in batches of 5
   const batches = [];
-  for (let i = 0; i < symbols.length; i += 5) batches.push(symbols.slice(i, i + 5));
+  for (let i = 0; i < allSymbols.length; i += 5) batches.push(allSymbols.slice(i, i + 5));
 
-  for (const batch of batches) {
-    await Promise.allSettled(batch.map(async sym => {
+  for (let b = 0; b < batches.length; b++) {
+    await Promise.allSettled(batches[b].map(async sym => {
       try {
-        // Yahoo Finance v7 quote — returns exDividendDate (unix), dividendRate, trailingAnnualDividendRate
-        const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=exDividendDate,dividendDate,trailingAnnualDividendRate,dividendRate,forwardDividendRate`;
-        const r   = await fetch(url);
+        const url  = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+        const r    = await fetch(url);
         if (!r.ok) return;
         const data = await r.json();
-        const q    = data?.quoteResponse?.result?.[0];
-        if (!q) return;
+        const meta = data?.chart?.result?.[0]?.meta;
+        if (!meta) return;
 
-        // Skip if no dividend data at all
-        const rate = q.dividendRate || q.forwardDividendRate ||
-                     (q.trailingAnnualDividendRate ? q.trailingAnnualDividendRate / 4 : null);
-        if (!rate) return;
+        // Get dividend rate — prefer holdings data (manually entered), fallback to Yahoo
+        const yahooRate = meta.dividendRate || meta.trailingAnnualDividendRate;
+        const annualDiv = divMap[sym] || yahooRate || 0;
+        if (!annualDiv) return; // not a dividend payer
 
-        const exTs = q.exDividendDate;
+        const exTs = meta.exDividendDate;
         if (!exTs) return;
+
         let exMs = exTs * 1000;
 
-        // If ex-date already passed, estimate next one by adding ~90 days (quarterly)
-        // Most dividends are quarterly; some monthly ETFs use ~30 days
-        const annualRate  = q.trailingAnnualDividendRate || (rate * 4);
-        const perPayment  = rate;
-        // Guess frequency: if per-payment is close to annual/12 → monthly, else quarterly
-        const isMonthly   = annualRate > 0 && (perPayment / (annualRate / 12)) > 0.7 && (perPayment / (annualRate / 12)) < 1.3;
-        const freqDays    = isMonthly ? 30 : 91;
+        // Guess frequency from rate
+        const perPayment = annualDiv / 4; // assume quarterly default
+        const isMonthly  = meta.trailingAnnualDividendRate &&
+                           (annualDiv / (meta.trailingAnnualDividendRate / 12)) > 0.7;
+        const freqDays   = isMonthly ? 30 : 91;
+        const ratePerPmt = annualDiv / (isMonthly ? 12 : 4);
 
-        // Advance ex-date until it's in the future or within past 30 days
-        while (exMs < ago30) exMs += freqDays * 864e5;
-
-        // Skip if still too far out
-        if (exMs > in90days) return;
+        // Advance past ex-date until within next 120 days
+        const ago14    = todayMs - 14 * 864e5;
+        const in120    = todayMs + 120 * 864e5;
+        while (exMs < ago14) exMs += freqDays * 864e5;
+        if (exMs > in120) return;
 
         const exDate  = fmt(new Date(exMs));
-        const payTs   = q.dividendDate;
-        // Estimate pay date as ~2 weeks after ex-date if Yahoo's payDate is stale
-        const payMs   = payTs ? payTs * 1000 : exMs + 14 * 864e5;
-        const payDate = fmt(new Date(payMs));
+        const payDate = fmt(new Date(exMs + 14 * 864e5)); // ~2 weeks after ex-date
+        const isPast  = exMs < todayMs;
 
-        results.push({ symbol: sym, exDate, payDate, amount: rate, isPast: exMs < todayMs });
+        const shares  = sharesMap[sym] || 0;
+        results.push({ symbol: sym, exDate, payDate, amount: ratePerPmt, shares, isPast });
       } catch(_) {}
     }));
-    if (batches.indexOf(batch) < batches.length - 1) await delay(300);
+    if (b < batches.length - 1) await delay(400);
   }
 
   if (!results.length) {
     el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">
-      No dividend data found for your holdings.<br>
-      <small style="font-size:0.72rem;">TSLA, NVDA and other growth stocks don't pay dividends. For dividend payers like AVGO, DELL, SCHD — make sure prices are loaded first.</small>
+      No upcoming ex-dividend dates found.<br>
+      <small style="font-size:0.72rem;">Make sure you've entered dividend amounts in your holdings, and that prices are loaded.</small>
     </div>`;
     return;
   }
@@ -10452,22 +10447,22 @@ async function renderExDates() {
   const in14 = fmt(new Date(todayMs + 14 * 864e5));
 
   const rows = results.map(r => {
-    const shares = Math.max(0, sharesMap[r.symbol] || 0);
-    const est    = r.amount != null && shares
-      ? '$' + (r.amount * shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
+    const est    = r.amount && r.shares
+      ? '$' + (r.amount * r.shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
       : '—';
     const isPast  = r.isPast;
     const urgent  = isPast ? 'var(--text-color-secondary)'
-                  : r.exDate <= in7 ? '#e74c3c'
+                  : r.exDate <= in7  ? '#e74c3c'
                   : r.exDate <= in14 ? '#e67e22'
                   : 'var(--text-color-primary)';
-    const badge   = isPast ? ' ✓' : r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
-    const estNote = isPast ? '<span style="font-size:0.65rem;color:var(--text-color-secondary);"> (est. next)</span>' : '';
-    return `<tr style="border-bottom:1px solid var(--border-color);${isPast ? 'opacity:0.65;' : ''}">
+    const badge   = isPast ? ' <span style="font-size:0.65rem;opacity:0.6;">(est.)</span>'
+                  : r.exDate <= in7  ? ' 🔴'
+                  : r.exDate <= in14 ? ' 🟡' : '';
+    return `<tr style="border-bottom:1px solid var(--border-color);${isPast ? 'opacity:0.6;' : ''}">
       <td style="padding:9px 8px;font-weight:700;">${r.symbol}</td>
-      <td style="padding:9px 8px;color:${urgent};font-weight:${!isPast && r.exDate <= in14 ? '700' : '400'};">${r.exDate}${badge}${estNote}</td>
+      <td style="padding:9px 8px;color:${urgent};font-weight:${!isPast && r.exDate <= in14 ? '700':'400'};">${r.exDate}${badge}</td>
       <td style="padding:9px 8px;color:var(--text-color-secondary);">${r.payDate}</td>
-      <td style="padding:9px 8px;text-align:right;">${r.amount != null ? '$' + r.amount.toFixed(4) : '—'}</td>
+      <td style="padding:9px 8px;text-align:right;">${r.amount ? '$'+r.amount.toFixed(4) : '—'}</td>
       <td style="padding:9px 8px;text-align:right;color:var(--success-color,#27ae60);font-weight:700;">${est}</td>
     </tr>`;
   }).join('');
@@ -10478,7 +10473,7 @@ async function renderExDates() {
         <thead><tr style="background:var(--bg-color);">
           <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Symbol</th>
           <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Ex-Date</th>
-          <th style="padding:8px;text-align:left;color:var(--text-color-secondary);">Pay Date</th>
+          <th style="padding:8px;text-align:right;color:var(--text-color-secondary);">Est. Pay Date</th>
           <th style="padding:8px;text-align:right;color:var(--text-color-secondary);">$/Share</th>
           <th style="padding:8px;text-align:right;color:var(--text-color-secondary);">Est. Income</th>
         </tr></thead>
@@ -10486,7 +10481,7 @@ async function renderExDates() {
       </table>
     </div>
     <div style="margin-top:8px;font-size:0.7rem;color:var(--text-color-secondary);">
-      ${results.length} dividend payer${results.length !== 1 ? 's' : ''} · Yahoo Finance · ✓ = estimated next date based on frequency · 🔴 within 7 days · 🟡 within 14 days
+      ${results.length} dividend payer${results.length!==1?'s':''} · Yahoo Finance · (est.) = estimated next date · 🔴 ≤7 days · 🟡 ≤14 days
     </div>`;
 }
 window.renderExDates = renderExDates;
