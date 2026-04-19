@@ -10347,60 +10347,25 @@ function injectTWRButton() {
 async function renderExDates() {
   const el = document.getElementById('exdateResults');
   if (!el) return;
-  el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">⏳ Fetching ex-dates from Finnhub…</div>';
+  el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">⏳ Fetching ex-dates via Yahoo Finance…</div>';
 
-  // Derive symbols from priceCache (most reliable — it's populated when prices load)
+  // Derive symbols from priceCache, fallback to transactions
   const pc = window.priceCache || {};
-  let symbols = Object.keys(pc).filter(s => s && s.length <= 6 && !/\s/.test(s));
-
-  // Fallback: derive from transactions if priceCache empty
+  let symbols = Object.keys(pc).filter(s => s && /^[A-Z]{1,6}$/.test(s));
   if (!symbols.length && window.portfolioData && window.portfolioData.transactions) {
-    const symsFromTxns = new Set();
+    const s = new Set();
     window.portfolioData.transactions.forEach(t => {
-      if (t.symbol && t.symbol.trim()) symsFromTxns.add(t.symbol.trim().toUpperCase());
+      if (t.symbol && /^[A-Z]{1,6}$/.test(t.symbol.trim().toUpperCase()))
+        s.add(t.symbol.trim().toUpperCase());
     });
-    symbols = [...symsFromTxns];
+    symbols = [...s];
   }
-
-  // Filter out money market / cash funds (usually >5 chars or contain numbers)
-  const WATCHLIST = 'Yahoo Finance';
-  symbols = symbols
-    .filter(s => s.length <= 5 && /^[A-Z]+$/.test(s))
-    .slice(0, 25);
+  symbols = symbols.slice(0, 30);
 
   if (!symbols.length) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found. Make sure prices are loaded first (wait for the countdown timer on main page).</div>';
+    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found. Wait for prices to load first.</div>';
     return;
   }
-
-  // Read Finnhub key from localStorage (same key the main app uses)
-  const apiKey = localStorage.getItem('myPortfolioFinnhubKey_v4') || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
-
-  const today = new Date();
-  const end   = new Date(today); end.setDate(end.getDate() + 90);
-  const fmt   = d => d.toISOString().split('T')[0];
-  const results = [];
-
-  await Promise.allSettled(symbols.map(async sym => {
-    try {
-      const r = await fetch(`https://finnhub.io/api/v1/stock/dividend2?symbol=${sym}&from=${fmt(today)}&to=${fmt(end)}&token=${apiKey}`);
-      if (!r.ok) return;
-      const data = await r.json();
-      (Array.isArray(data) ? data : []).forEach(d => {
-        if (d.exDate) results.push({ symbol: sym, exDate: d.exDate, payDate: d.payDate || '—', amount: d.amount != null ? d.amount : null });
-      });
-    } catch(_) {}
-  }));
-
-  if (!results.length) {
-    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No ex-dividend dates found in the next 90 days.<br><small>Growth stocks and some ETFs don't pay dividends.</small></div>`;
-    return;
-  }
-
-  results.sort((a, b) => a.exDate.localeCompare(b.exDate));
-
-  const in7  = fmt(new Date(today.getTime() + 7  * 864e5));
-  const in14 = fmt(new Date(today.getTime() + 14 * 864e5));
 
   // Build shares map from transactions
   const sharesMap = {};
@@ -10415,9 +10380,65 @@ async function renderExDates() {
     });
   }
 
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const todayMs  = today.getTime();
+  const fmt      = d => d.toISOString().split('T')[0];
+  const in90days = todayMs + 90 * 864e5;
+  const results  = [];
+
+  // Fetch in batches of 5 to avoid hammering corsproxy
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+  const batches = [];
+  for (let i = 0; i < symbols.length; i += 5) batches.push(symbols.slice(i, i + 5));
+
+  for (const batch of batches) {
+    await Promise.allSettled(batch.map(async sym => {
+      try {
+        // Yahoo Finance v7 quote — returns exDividendDate (unix), dividendRate, trailingAnnualDividendRate
+        const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=exDividendDate,dividendDate,trailingAnnualDividendRate,dividendRate,forwardPE`;
+        const r   = await fetch(url);
+        if (!r.ok) return;
+        const data = await r.json();
+        const q    = data?.quoteResponse?.result?.[0];
+        if (!q) return;
+
+        // exDividendDate is a Unix timestamp (seconds)
+        const exTs = q.exDividendDate;
+        if (!exTs) return;
+        const exMs = exTs * 1000;
+        if (exMs < todayMs || exMs > in90days) return; // outside window
+
+        const exDate  = fmt(new Date(exMs));
+        const payTs   = q.dividendDate;
+        const payDate = payTs ? fmt(new Date(payTs * 1000)) : '—';
+
+        // Amount per share — prefer dividendRate (forward), fall back to trailing/4
+        const rate    = q.dividendRate || (q.trailingAnnualDividendRate ? q.trailingAnnualDividendRate / 4 : null);
+
+        results.push({ symbol: sym, exDate, payDate, amount: rate || null });
+      } catch(_) {}
+    }));
+    if (batches.indexOf(batch) < batches.length - 1) await delay(300);
+  }
+
+  if (!results.length) {
+    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">
+      No ex-dividend dates found in the next 90 days for your holdings.<br>
+      <small style="font-size:0.72rem;">Only shows dividends with a known upcoming ex-date. Growth stocks and some ETFs don't pay dividends.</small>
+    </div>`;
+    return;
+  }
+
+  results.sort((a, b) => a.exDate.localeCompare(b.exDate));
+
+  const in7  = fmt(new Date(todayMs + 7  * 864e5));
+  const in14 = fmt(new Date(todayMs + 14 * 864e5));
+
   const rows = results.map(r => {
     const shares = Math.max(0, sharesMap[r.symbol] || 0);
-    const est    = r.amount != null && shares ? '$' + (r.amount * shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+    const est    = r.amount != null && shares
+      ? '$' + (r.amount * shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
+      : '—';
     const urgent = r.exDate <= in7 ? '#e74c3c' : r.exDate <= in14 ? '#e67e22' : 'var(--text-color-primary)';
     const badge  = r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
     return `<tr style="border-bottom:1px solid var(--border-color);">
@@ -10442,7 +10463,9 @@ async function renderExDates() {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div style="margin-top:8px;font-size:0.7rem;color:var(--text-color-secondary);">Next 90 days · ${results.length} event${results.length !== 1 ? 's' : ''} · Finnhub</div>`;
+    <div style="margin-top:8px;font-size:0.7rem;color:var(--text-color-secondary);">
+      Next 90 days · ${results.length} event${results.length !== 1 ? 's' : ''} · Yahoo Finance
+    </div>`;
 }
 window.renderExDates = renderExDates;
 
