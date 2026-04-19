@@ -10383,7 +10383,8 @@ async function renderExDates() {
   const today    = new Date(); today.setHours(0,0,0,0);
   const todayMs  = today.getTime();
   const fmt      = d => d.toISOString().split('T')[0];
-  const in90days = todayMs + 90 * 864e5;
+  const in90days = todayMs + 90  * 864e5;
+  const ago30    = todayMs - 30  * 864e5;
   const results  = [];
 
   // Fetch in batches of 5 to avoid hammering corsproxy
@@ -10395,27 +10396,43 @@ async function renderExDates() {
     await Promise.allSettled(batch.map(async sym => {
       try {
         // Yahoo Finance v7 quote — returns exDividendDate (unix), dividendRate, trailingAnnualDividendRate
-        const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=exDividendDate,dividendDate,trailingAnnualDividendRate,dividendRate,forwardPE`;
+        const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=exDividendDate,dividendDate,trailingAnnualDividendRate,dividendRate,forwardDividendRate`;
         const r   = await fetch(url);
         if (!r.ok) return;
         const data = await r.json();
         const q    = data?.quoteResponse?.result?.[0];
         if (!q) return;
 
-        // exDividendDate is a Unix timestamp (seconds)
+        // Skip if no dividend data at all
+        const rate = q.dividendRate || q.forwardDividendRate ||
+                     (q.trailingAnnualDividendRate ? q.trailingAnnualDividendRate / 4 : null);
+        if (!rate) return;
+
         const exTs = q.exDividendDate;
         if (!exTs) return;
-        const exMs = exTs * 1000;
-        if (exMs < todayMs || exMs > in90days) return; // outside window
+        let exMs = exTs * 1000;
+
+        // If ex-date already passed, estimate next one by adding ~90 days (quarterly)
+        // Most dividends are quarterly; some monthly ETFs use ~30 days
+        const annualRate  = q.trailingAnnualDividendRate || (rate * 4);
+        const perPayment  = rate;
+        // Guess frequency: if per-payment is close to annual/12 → monthly, else quarterly
+        const isMonthly   = annualRate > 0 && (perPayment / (annualRate / 12)) > 0.7 && (perPayment / (annualRate / 12)) < 1.3;
+        const freqDays    = isMonthly ? 30 : 91;
+
+        // Advance ex-date until it's in the future or within past 30 days
+        while (exMs < ago30) exMs += freqDays * 864e5;
+
+        // Skip if still too far out
+        if (exMs > in90days) return;
 
         const exDate  = fmt(new Date(exMs));
         const payTs   = q.dividendDate;
-        const payDate = payTs ? fmt(new Date(payTs * 1000)) : '—';
+        // Estimate pay date as ~2 weeks after ex-date if Yahoo's payDate is stale
+        const payMs   = payTs ? payTs * 1000 : exMs + 14 * 864e5;
+        const payDate = fmt(new Date(payMs));
 
-        // Amount per share — prefer dividendRate (forward), fall back to trailing/4
-        const rate    = q.dividendRate || (q.trailingAnnualDividendRate ? q.trailingAnnualDividendRate / 4 : null);
-
-        results.push({ symbol: sym, exDate, payDate, amount: rate || null });
+        results.push({ symbol: sym, exDate, payDate, amount: rate, isPast: exMs < todayMs });
       } catch(_) {}
     }));
     if (batches.indexOf(batch) < batches.length - 1) await delay(300);
@@ -10423,8 +10440,8 @@ async function renderExDates() {
 
   if (!results.length) {
     el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">
-      No ex-dividend dates found in the next 90 days for your holdings.<br>
-      <small style="font-size:0.72rem;">Only shows dividends with a known upcoming ex-date. Growth stocks and some ETFs don't pay dividends.</small>
+      No dividend data found for your holdings.<br>
+      <small style="font-size:0.72rem;">TSLA, NVDA and other growth stocks don't pay dividends. For dividend payers like AVGO, DELL, SCHD — make sure prices are loaded first.</small>
     </div>`;
     return;
   }
@@ -10439,11 +10456,16 @@ async function renderExDates() {
     const est    = r.amount != null && shares
       ? '$' + (r.amount * shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
       : '—';
-    const urgent = r.exDate <= in7 ? '#e74c3c' : r.exDate <= in14 ? '#e67e22' : 'var(--text-color-primary)';
-    const badge  = r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
-    return `<tr style="border-bottom:1px solid var(--border-color);">
+    const isPast  = r.isPast;
+    const urgent  = isPast ? 'var(--text-color-secondary)'
+                  : r.exDate <= in7 ? '#e74c3c'
+                  : r.exDate <= in14 ? '#e67e22'
+                  : 'var(--text-color-primary)';
+    const badge   = isPast ? ' ✓' : r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
+    const estNote = isPast ? '<span style="font-size:0.65rem;color:var(--text-color-secondary);"> (est. next)</span>' : '';
+    return `<tr style="border-bottom:1px solid var(--border-color);${isPast ? 'opacity:0.65;' : ''}">
       <td style="padding:9px 8px;font-weight:700;">${r.symbol}</td>
-      <td style="padding:9px 8px;color:${urgent};font-weight:${r.exDate <= in14 ? '700' : '400'};">${r.exDate}${badge}</td>
+      <td style="padding:9px 8px;color:${urgent};font-weight:${!isPast && r.exDate <= in14 ? '700' : '400'};">${r.exDate}${badge}${estNote}</td>
       <td style="padding:9px 8px;color:var(--text-color-secondary);">${r.payDate}</td>
       <td style="padding:9px 8px;text-align:right;">${r.amount != null ? '$' + r.amount.toFixed(4) : '—'}</td>
       <td style="padding:9px 8px;text-align:right;color:var(--success-color,#27ae60);font-weight:700;">${est}</td>
@@ -10464,7 +10486,7 @@ async function renderExDates() {
       </table>
     </div>
     <div style="margin-top:8px;font-size:0.7rem;color:var(--text-color-secondary);">
-      Next 90 days · ${results.length} event${results.length !== 1 ? 's' : ''} · Yahoo Finance
+      ${results.length} dividend payer${results.length !== 1 ? 's' : ''} · Yahoo Finance · ✓ = estimated next date based on frequency · 🔴 within 7 days · 🟡 within 14 days
     </div>`;
 }
 window.renderExDates = renderExDates;
