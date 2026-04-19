@@ -10263,7 +10263,7 @@ function renderTWR() {
   const annualized     = netInvested > 0 && totalYears > 0 ? (Math.pow(currentValue / netInvested, 1 / totalYears) - 1) * 100 : 0;
 
   const fc  = v => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
-  const fp2 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+  const fp2 = v => (v >= 0 ? '+' : '') + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '%';
   const col = v => v >= 0 ? 'var(--success-color,#27ae60)' : 'var(--danger-color,#e74c3c)';
   const startStr = startDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   const yrsStr   = totalYears < 1 ? Math.round(totalDays) + ' days' : totalYears.toFixed(1) + ' yrs';
@@ -10307,8 +10307,16 @@ function renderTWR() {
         <div style="font-weight:700;">${startStr} · ${yrsStr}</div>
       </div>
     </div>
-    <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:10px;padding:12px;font-size:0.73rem;color:var(--text-color-secondary);line-height:1.6;">
-      <strong>💡 MWR vs Simple:</strong> MWR weights returns by the size and timing of each cash flow. If you invested more before a downturn, MWR will be lower than simple annualized return.
+    <div style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);border-radius:10px;padding:14px;font-size:0.73rem;color:var(--text-color-secondary);line-height:1.8;">
+      <div style="font-weight:700;color:var(--text-color-primary);margin-bottom:8px;">📖 What do these numbers mean?</div>
+      <div><strong style="color:var(--text-color-primary);">Money-Weighted Return (IRR)</strong> — Your true personal return. It weights each dollar by when you invested it. If you put in more money right before a big gain, your MWR will be higher than simple return. This is what your money actually earned for YOU.</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Simple Annualized Return</strong> — (Current Value ÷ Net Invested)^(1/years) − 1. Ignores timing — treats every contribution as equal regardless of when it was made.</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Total Invested</strong> — Sum of all BUY transactions (shares × price paid).</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Withdrawn</strong> — Sum of all SELL proceeds received.</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Net Invested</strong> — Total Invested minus Withdrawn. This is your actual out-of-pocket capital still at work.</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Current Value</strong> — Live portfolio value read from the dashboard (requires prices to be loaded).</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Total Gain/Loss %</strong> — (Current Value − Net Invested) ÷ Net Invested. Simple total return since your first trade.</div>
+      <div style="margin-top:6px;"><strong style="color:var(--text-color-primary);">Period</strong> — From your first BUY transaction to today.</div>
     </div>`;
 }
 window.renderTWR = renderTWR;
