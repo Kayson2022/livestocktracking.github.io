@@ -5236,7 +5236,7 @@
                 <label>🔒 Auto-Lock (Idle Timeout)</label>
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
                     <input type="checkbox" id="autoLockEnabled"
-                        onchange="localStorage.setItem('autolock_enabled', this.checked); window._resetLockTimer && window._resetLockTimer();"
+                        onchange="localStorage.setItem('al_enabled', this.checked); window._resetLockTimer && window._resetLockTimer();"
                         style="width:auto;">
                     <span style="font-size:0.85rem;">Lock app after inactivity</span>
                 </div>
@@ -5246,7 +5246,7 @@
                             document.getElementById('autoLockCustom').style.display='flex';
                         } else {
                             document.getElementById('autoLockCustom').style.display='none';
-                            localStorage.setItem('autolock_timeout', this.value);
+                            localStorage.setItem('al_timeout_secs', parseFloat(this.value) * 60);
                             window._resetLockTimer && window._resetLockTimer();
                         }"
                     style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-bottom:6px;">
