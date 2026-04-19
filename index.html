@@ -10349,16 +10349,29 @@ async function renderExDates() {
   if (!el) return;
   el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">⏳ Fetching ex-dates from Finnhub…</div>';
 
-  const holdings = window.portfolioHoldings || [];
-  if (!holdings.length) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found.</div>';
-    return;
+  // Derive symbols from priceCache (most reliable — it's populated when prices load)
+  const pc = window.priceCache || {};
+  let symbols = Object.keys(pc).filter(s => s && s.length <= 6 && !/\s/.test(s));
+
+  // Fallback: derive from transactions if priceCache empty
+  if (!symbols.length && window.portfolioData && window.portfolioData.transactions) {
+    const symsFromTxns = new Set();
+    window.portfolioData.transactions.forEach(t => {
+      if (t.symbol && t.symbol.trim()) symsFromTxns.add(t.symbol.trim().toUpperCase());
+    });
+    symbols = [...symsFromTxns];
   }
 
-  const symbols = [...new Set(
-    holdings.map(h => (h.symbol || '').toUpperCase().trim())
-             .filter(s => s && s.length <= 5 && !/\s/.test(s))
-  )].slice(0, 20);
+  // Filter out money market / cash funds (usually >5 chars or contain numbers)
+  const WATCHLIST = 'Yahoo Finance';
+  symbols = symbols
+    .filter(s => s.length <= 5 && /^[A-Z]+$/.test(s))
+    .slice(0, 25);
+
+  if (!symbols.length) {
+    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-color-secondary);">No holdings found. Make sure prices are loaded first (wait for the countdown timer on main page).</div>';
+    return;
+  }
 
   const apiKey = typeof FINNHUB_API_KEY !== 'undefined' ? FINNHUB_API_KEY : '';
   if (!apiKey) {
@@ -10391,13 +10404,23 @@ async function renderExDates() {
 
   const in7  = fmt(new Date(today.getTime() + 7  * 864e5));
   const in14 = fmt(new Date(today.getTime() + 14 * 864e5));
-  const holdingMap = {};
-  holdings.forEach(h => { holdingMap[(h.symbol||'').toUpperCase()] = h; });
+
+  // Build shares map from transactions
+  const sharesMap = {};
+  if (window.portfolioData && window.portfolioData.transactions) {
+    window.portfolioData.transactions.forEach(t => {
+      const sym  = (t.symbol || '').toUpperCase().trim();
+      const type = (t.transactionType || '').toUpperCase();
+      const sh   = parseFloat(t.shares) || 0;
+      if (!sym) return;
+      if (type === 'BUY')  sharesMap[sym] = (sharesMap[sym] || 0) + sh;
+      if (type === 'SELL') sharesMap[sym] = (sharesMap[sym] || 0) - sh;
+    });
+  }
 
   const rows = results.map(r => {
-    const h      = holdingMap[r.symbol] || {};
-    const shares = parseFloat(h.totalShares || 0);
-    const est    = r.amount != null && shares ? '$' + (r.amount * shares).toFixed(2) : '—';
+    const shares = Math.max(0, sharesMap[r.symbol] || 0);
+    const est    = r.amount != null && shares ? '$' + (r.amount * shares).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
     const urgent = r.exDate <= in7 ? '#e74c3c' : r.exDate <= in14 ? '#e67e22' : 'var(--text-color-primary)';
     const badge  = r.exDate <= in7 ? ' 🔴' : r.exDate <= in14 ? ' 🟡' : '';
     return `<tr style="border-bottom:1px solid var(--border-color);">
