@@ -2847,11 +2847,12 @@
             // Populate symbol dropdown from holdings
             const sel = document.getElementById('split401kSym');
             sel.innerHTML = '<option value="">— Select holding —</option>';
+            
             if (window.portfolioHoldings) {
                 window.portfolioHoldings.forEach((h, idx) => {
                     const totalShares = (h.transactions||[])
-                        .filter(t=>t.type==='buy'||t.type==='Buy').reduce((s,t)=>s+parseFloat(t.shares||0),0) -
-                        (h.transactions||[]).filter(t=>t.type==='sell'||t.type==='Sell').reduce((s,t)=>s+parseFloat(t.shares||0),0);
+                        .filter(t=>t.transactionType==='BUY').reduce((s,t)=>s+parseFloat(t.shares||0),0) -
+                        (h.transactions||[]).filter(t=>t.transactionType==='SELL').reduce((s,t)=>s+parseFloat(t.shares||0),0);
                     
                     // Only add holdings with positive share balance
                     if (totalShares > 0) {
@@ -2881,7 +2882,7 @@
             }
             const h = window.portfolioHoldings[parseInt(idx)];
             if (!h) return;
-            const buys = (h.transactions||[]).filter(t=>t.type==='buy'||t.type==='Buy');
+            const buys = (h.transactions||[]).filter(t=>t.transactionType==='BUY');
             const totalShares = buys.reduce((s,t)=>s+parseFloat(t.shares||0),0);
             const avgCost = totalShares > 0 ?
                 buys.reduce((s,t)=>s+parseFloat(t.shares||0)*parseFloat(t.price||0),0) / totalShares : 0;
