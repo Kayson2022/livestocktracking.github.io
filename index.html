@@ -2907,26 +2907,27 @@
             const sym = h.symbol || h.name;
             if (!confirm(`Apply ${type==='forward' ? ratio+':1 forward' : '1:'+ratio+' reverse'} split to ${sym}?\nThis will adjust all buy/sell transactions.`)) return;
 
-            // Apply split to all transactions
-            h.transactions = (h.transactions||[]).map(t => {
-                const newT = {...t};
-                const shares = parseFloat(t.shares||0);
-                const price  = parseFloat(t.price||0);
-                if (type === 'forward') {
-                    newT.shares = shares * ratio;
-                    newT.price  = price  / ratio;
-                } else {
-                    newT.shares = shares / ratio;
-                    newT.price  = price  * ratio;
+            // Apply split to all matching transactions in the main portfolioData.transactions array
+            portfolioData.transactions = portfolioData.transactions.map(t => {
+                // Only modify transactions that match this holding's symbol, accountType, and platform
+                if (t.symbol === h.symbol && t.accountType === h.accountType && t.platform === h.platform) {
+                    const newT = {...t};
+                    const shares = parseFloat(t.shares||0);
+                    const price  = parseFloat(t.price||0);
+                    if (type === 'forward') {
+                        newT.shares = shares * ratio;
+                        newT.price  = price  / ratio;
+                    } else {
+                        newT.shares = shares / ratio;
+                        newT.price  = price  * ratio;
+                    }
+                    return newT;
                 }
-                return newT;
+                return t;
             });
 
-            // Record split history on holding
-            h.splitHistory = [...(h.splitHistory||[]), {
-                type, ratio,
-                date: new Date().toISOString().split('T')[0]
-            }];
+            // Log the split in activity log
+            logActivity(`Applied ${type} split (${type==='forward'?ratio+':1':'1:'+ratio}) to ${sym} in ${h.accountType} (${h.platform})`);
 
             // Save and refresh
             try {
