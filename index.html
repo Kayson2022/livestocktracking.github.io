@@ -6,6 +6,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3524,6 +3525,9 @@
             try {
                 if (!isInitialDataLoaded) return;
                 const currentHoldings = calculateHoldingsAndCash();
+                
+                // Make holdings available globally for Stock Split modal and other features
+                window.portfolioHoldings = currentHoldings;
 
                 // Volatility uses cached history only - never blocks initial render
                 let volatilityHistory = [];
