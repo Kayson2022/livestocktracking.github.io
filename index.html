@@ -2924,7 +2924,7 @@
 
             // Save and refresh
             try {
-                await savePortfolioData();
+                await saveDataToFirestore();
                 await refreshAllPrices(true);
                 closeSplitModal401k();
                 alert(`✅ ${sym} ${type} split (${type==='forward'?ratio+':1':'1:'+ratio}) applied successfully!`);
@@ -5202,7 +5202,11 @@
         window.closeActivityLogModal = closeActivityLogModal;
         window.showTab = showTab;
         window.toggleStatsVisibility = toggleStatsVisibility;
-        window.signOutOtherDevices = signOutOtherDevices; 
+        window.signOutOtherDevices = signOutOtherDevices;
+		window.openSplitModal401k = openSplitModal401k;
+        window.closeSplitModal401k = closeSplitModal401k;
+        window.preview401kSplit = preview401kSplit;
+        window.apply401kSplit = apply401kSplit;
     </script>
 
     <!-- MODALS -->
