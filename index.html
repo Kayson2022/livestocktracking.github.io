@@ -1706,13 +1706,21 @@
             const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
             const accountsToExclude = ['401(k)', '529 College Saving'];
             
+            console.log('buildVolatilityHistoryFromTransactions called');
+            console.log('Total transactions:', portfolioData.transactions ? portfolioData.transactions.length : 0);
+            
             const transactions = (portfolioData.transactions || []).filter(t => 
                 t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
                 !accountsToExclude.includes(t.accountType) &&
                 (t.transactionType === 'BUY' || t.transactionType === 'SELL' || isCashEquivalentType(t.type))
             );
             
-            if (transactions.length === 0) return [];
+            console.log('Filtered transactions for volatility:', transactions.length);
+            
+            if (transactions.length === 0) {
+                console.log('No transactions after filter - returning empty array');
+                return [];
+            }
 
             const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id);
             if (sorted.length === 0) return [];
@@ -3535,9 +3543,13 @@
                 // Volatility uses cached history only - never blocks initial render
                 let volatilityHistory = [];
                 // Always build volatility history for stats display, even if main history chart hasn't been clicked yet
+                console.log('Building volatility history...');
                 volatilityHistory = await buildVolatilityHistoryFromTransactions();
+                console.log('Volatility history built, length:', volatilityHistory.length);
+                console.log('First 5 data points:', volatilityHistory.slice(0, 5));
 
                 const stats = calculateOverallStats(currentHoldings, volatilityHistory);
+                console.log('Stats calculated with history length:', volatilityHistory.length);
                 updateUserNameDisplay();
                 updateStats(stats);
 
