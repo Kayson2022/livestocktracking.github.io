@@ -6,6 +6,8 @@
 
 
 
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3532,9 +3534,8 @@
 
                 // Volatility uses cached history only - never blocks initial render
                 let volatilityHistory = [];
-                if (cachedMainHistory) {
-                    volatilityHistory = await buildVolatilityHistoryFromTransactions();
-                }
+                // Always build volatility history for stats display, even if main history chart hasn't been clicked yet
+                volatilityHistory = await buildVolatilityHistoryFromTransactions();
 
                 const stats = calculateOverallStats(currentHoldings, volatilityHistory);
                 updateUserNameDisplay();
