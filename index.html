@@ -3084,7 +3084,9 @@
                 portfolioYieldOnCost: totalCostBasis > 0 ? estimatedAnnualIncome / totalCostBasis : 0, 
                 bestPerformer, 
                 worstPerformer,
-                portfolioVolatility // Pass new metric
+                portfolioVolatility, // Pass new metric
+                maxDrawdown,         // Add maxDrawdown
+                sharpeRatio          // Add sharpeRatio
             };
         }
 
@@ -3119,14 +3121,15 @@
             // Max Drawdown
             const maxDrawdownEl = document.getElementById('maxDrawdown');
             if (maxDrawdownEl) {
-                maxDrawdownEl.textContent = formatPercentage(maxDrawdown);
-                maxDrawdownEl.className = 'stat-value ' + (maxDrawdown > 0.2 ? 'negative' : maxDrawdown > 0.1 ? '' : 'positive');
+                const md = stats.maxDrawdown || 0;
+                maxDrawdownEl.textContent = formatPercentage(md);
+                maxDrawdownEl.className = 'stat-value ' + (md > 0.2 ? 'negative' : md > 0.1 ? '' : 'positive');
             }
 
             // Sharpe Ratio
             const sharpeEl = document.getElementById('sharpeRatio');
             if (sharpeEl) {
-                const sr = (sharpeRatio !== null && sharpeRatio !== undefined && isFinite(sharpeRatio)) ? sharpeRatio : null;
+                const sr = (stats.sharpeRatio !== null && stats.sharpeRatio !== undefined && isFinite(stats.sharpeRatio)) ? stats.sharpeRatio : null;
                 if (sr !== null) {
                     sharpeEl.textContent = parseFloat(sr).toFixed(2);
                     sharpeEl.className = 'stat-value ' + (sr >= 1 ? 'positive' : sr >= 0 ? '' : 'negative');
