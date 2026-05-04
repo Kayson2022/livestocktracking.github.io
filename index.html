@@ -1709,7 +1709,7 @@
             const transactions = (portfolioData.transactions || []).filter(t => 
                 t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
                 !accountsToExclude.includes(t.accountType) &&
-                (typesToInclude.includes(t.type) || isCashEquivalentType(t.type))
+                (t.transactionType === 'BUY' || t.transactionType === 'SELL' || isCashEquivalentType(t.type))
             );
             
             if (transactions.length === 0) return [];
