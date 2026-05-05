@@ -2057,34 +2057,27 @@
 
             } else if (isStockOrETF) {
                 if (priceMode === 'delayed') {
-                    // Yahoo mode: get current price from Yahoo (15-min delayed display price)
-                    // BUT always get previousClosePrice from Finnhub — Yahoo's prev close fields
-                    // are unreliable (often return same value as current after-hours, causing $0 G/L)
-                    console.log(`[Stock/ETF][Yahoo+Finnhub] Fetching ${symbol}`);
+                    // Yahoo mode: Try Yahoo first (15-min delayed, no rate limits)
+                    // Only try Finnhub if Yahoo completely fails
+                    console.log(`[Stock/ETF][Yahoo] Fetching ${symbol}`);
                     
-                    const [yahooData, finnhubData] = await Promise.all([
-                        fetchPriceFromYahooQuote(symbol),
-                        fetchPriceFromFinnhub(symbol)
-                    ]);
+                    const yahooData = await fetchPriceFromYahooQuote(symbol);
 
-                    // Current price: Yahoo preferred (it's what the user sees as "delayed")
-                    // Fallback to Finnhub current if Yahoo fails
-                    const currentPrice = (yahooData?.currentPrice > 0)
-                        ? yahooData.currentPrice
-                        : (finnhubData?.currentPrice > 0 ? finnhubData.currentPrice : null);
-
-                    // Previous close: ALWAYS use Finnhub's pc field — it's always correct
-                    // Finnhub d.pc is the official prior day regular market close, never stale
-                    const previousClosePrice = (finnhubData?.previousClosePrice > 0)
-                        ? finnhubData.previousClosePrice
-                        : (yahooData?.previousClosePrice > 0 ? yahooData.previousClosePrice : null);
-
-                    if (currentPrice > 0) {
-                        const name      = yahooData?.name      || finnhubData?.name      || null;
-                        const quoteType = yahooData?.quoteType || finnhubData?.quoteType || null;
-                        console.log(`[Stock/ETF] ${symbol} cur=$${currentPrice}(${yahooData?.currentPrice>0?'Yahoo':'Finnhub'}) prev=$${previousClosePrice}(Finnhub)`);
-                        return { currentPrice, previousClosePrice, name, quoteType };
+                    if (yahooData && yahooData.currentPrice > 0) {
+                        // Yahoo succeeded - use it for both current and previous close
+                        console.log(`[Stock/ETF] ${symbol} via Yahoo ✅ cur=$${yahooData.currentPrice} prev=$${yahooData.previousClosePrice}`);
+                        return yahooData;
                     }
+
+                    // Yahoo failed - try Finnhub as fallback
+                    console.warn(`[Stock/ETF] Yahoo failed for ${symbol}, trying Finnhub fallback.`);
+                    const finnhubData = await fetchPriceFromFinnhub(symbol);
+                    
+                    if (finnhubData && finnhubData.currentPrice > 0) {
+                        console.log(`[Stock/ETF] ${symbol} via Finnhub fallback ✅`);
+                        return finnhubData;
+                    }
+
                     // Both failed
                     console.warn(`[Stock/ETF] Both Yahoo and Finnhub failed for ${symbol}`);
                 } else {
@@ -2317,7 +2310,7 @@
                     const holding = fastAssetsToFetch[i];
                     const progress = i + 1;
 
-                    updateRefreshProgress('progress', progress, totalSymbols, `Fetching ${holding.symbol} (${progress}/${totalSymbols})`);
+                    updateRefreshProgress('progress', progress, totalSymbols, holding.symbol);
 
                     // Fetch ONE price at a time
                     const priceData = await fetchPrice(holding);
