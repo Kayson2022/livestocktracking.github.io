@@ -3631,16 +3631,36 @@
                 // Do NOT rebuild on every refresh — it fetches Yahoo historical data
                 // for every symbol and blocks the price refresh loop.
                 if (cachedVolatilityHistory === null) {
-                    // First load: fetch silently in background, don't block render
                     buildVolatilityHistoryFromTransactions().then(h => {
                         cachedVolatilityHistory = h;
-                        // Quietly update just the volatility/sharpe/drawdown stats once ready
                         const holdings = calculateHoldingsAndCash();
                         const stats = calculateOverallStats(holdings, cachedVolatilityHistory);
                         updateStats(stats);
                     }).catch(e => {
                         console.warn('Volatility history build failed:', e);
                         cachedVolatilityHistory = [];
+                    });
+                }
+
+                // Auto-populate historical chart on first load with YTD view.
+                // User doesn't need to click a button — it loads silently in background.
+                if (!isHistoricalDataLoaded && !window._historyFetchInProgress) {
+                    window._historyFetchInProgress = true;
+                    buildPortfolioHistoryFromTransactions().then(history => {
+                        cachedMainHistory = history;
+                        window._tlFullHistory = history;
+                        isHistoricalDataLoaded = true;
+                        window._historyFetchInProgress = false;
+                        // Default to YTD view
+                        activeChartFilter = 'YTD';
+                        filterChart('YTD', history).catch(()=>{});
+                        // Highlight YTD button
+                        document.querySelectorAll('.chart-filter-btn').forEach(b => {
+                            b.classList.toggle('active', b.textContent === 'YTD');
+                        });
+                    }).catch(e => {
+                        console.warn('Historical chart auto-load failed:', e);
+                        window._historyFetchInProgress = false;
                     });
                 }
 
@@ -5103,6 +5123,9 @@
                 const d = new Date(t.date);
                 if (d.getFullYear() !== year) return;
                 if (account && t.accountType !== account) return;
+                // Skip auto-generated cash/money-market transactions — only count
+                // real investment purchases (stocks, ETFs, mutual funds, etc.)
+                if (isCashEquivalentType(t.type)) return;
                 const m   = d.getMonth();
                 const amt = (parseFloat(t.shares) || 0) * (parseFloat(t.price) || 0);
                 if ((t.transactionType || '').toUpperCase() === 'BUY')  buyData[m]  += amt;
@@ -5114,7 +5137,7 @@
             const _existingMonthly = Chart.getChart(canvas);
             if (_existingMonthly) _existingMonthly.destroy();
 
-            const isDark   = document.body.classList.contains('dark-mode');
+            const isDark   = document.documentElement.getAttribute('data-theme') === 'dark';
             const gridClr  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
             const labelClr = isDark ? '#ccc' : '#555';
 
@@ -5711,9 +5734,9 @@
         <div id="contributionTrackerSection" style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h3 style="font-size:1rem;font-weight:700;color:var(--text-color);">📈 Annual Contribution Tracker</h3>
-                <button onclick="toggleContributionTracker()" id="toggleContribBtn" style="font-size:0.78rem;font-weight:600;padding:4px 12px;border-radius:999px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-secondary);cursor:pointer;">Hide</button>
+                <button onclick="toggleContributionTracker()" id="toggleContribBtn" style="font-size:0.78rem;font-weight:600;padding:4px 12px;border-radius:999px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color-secondary);cursor:pointer;">Show</button>
             </div>
-            <div id="contributionTrackerGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
+            <div id="contributionTrackerGrid" style="display:none;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
                 <!-- filled by JS -->
             </div>
         </div>
