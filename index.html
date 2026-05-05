@@ -5720,9 +5720,42 @@
             
             <div class="stat-card"> <div class="stat-value" id="estimatedAnnualIncome">$0.00</div> <div class="stat-label">Est. Annual Income</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="portfolioYieldOnCost">0.00%</div> <div class="stat-label">Portfolio Yield on Cost</div> </div> 
-            <div class="stat-card"> <div class="stat-value" id="portfolioVolatility">0.00%</div> <div class="stat-label">Annual Volatility</div> </div> <!-- NEW CARD -->
-            <div class="stat-card"> <div class="stat-value" id="maxDrawdown">0.00%</div> <div class="stat-label">Max Drawdown</div> </div>
-            <div class="stat-card"> <div class="stat-value" id="sharpeRatio">—</div> <div class="stat-label">Sharpe Ratio</div> </div>
+            <div class="stat-card">
+                <div class="stat-value" id="portfolioVolatility">0.00%</div>
+                <div class="stat-label" style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                    Annual Volatility
+                    <span style="
+                        display:inline-flex;align-items:center;justify-content:center;
+                        width:14px;height:14px;border-radius:50%;
+                        background:var(--border-color);color:var(--text-color-secondary);
+                        font-size:0.65rem;font-weight:700;cursor:help;flex-shrink:0;
+                    " title="Annual Volatility: How much your portfolio value swings up and down over a year (annualized standard deviation of daily returns). Under 10% = low volatility. 10-20% = moderate (similar to S&amp;P 500). Over 20% = high volatility. Lower means smoother ride, but may mean lower returns.">?</span>
+                </div>
+            </div>
+            <div class="stat-card" style="position:relative;">
+                <div class="stat-value" id="maxDrawdown">0.00%</div>
+                <div class="stat-label" style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                    Max Drawdown
+                    <span style="
+                        display:inline-flex;align-items:center;justify-content:center;
+                        width:14px;height:14px;border-radius:50%;
+                        background:var(--border-color);color:var(--text-color-secondary);
+                        font-size:0.65rem;font-weight:700;cursor:help;flex-shrink:0;
+                    " title="Max Drawdown: The largest peak-to-trough drop in your portfolio value during the measured period. Example: if your portfolio fell from $100K to $75K before recovering, that&#39;s a 25% max drawdown. Lower is better. Under 10% = low risk, 10-20% = moderate, over 20% = high risk.">?</span>
+                </div>
+            </div>
+            <div class="stat-card" style="position:relative;">
+                <div class="stat-value" id="sharpeRatio">—</div>
+                <div class="stat-label" style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                    Sharpe Ratio
+                    <span style="
+                        display:inline-flex;align-items:center;justify-content:center;
+                        width:14px;height:14px;border-radius:50%;
+                        background:var(--border-color);color:var(--text-color-secondary);
+                        font-size:0.65rem;font-weight:700;cursor:help;flex-shrink:0;
+                    " title="Sharpe Ratio: Return earned per unit of risk taken, vs the risk-free rate (4.5%). Above 1.0 = good (you&#39;re being well compensated for risk). Above 2.0 = excellent. Below 0 = your returns don&#39;t justify the risk. Needs 30+ days of history to calculate.">?</span>
+                </div>
+            </div>
             
             <div class="stat-card"> <div class="stat-value" id="bestPerformerValue">$0.00</div> <div class="stat-label">Best Performer (<span id="bestPerformerSymbol">N/A</span>)</div> </div> 
             <div class="stat-card"> <div class="stat-value" id="worstPerformerValue">$0.00</div> <div class="stat-label">Worst Performer (<span id="worstPerformerSymbol">N/A</span>)</div> </div>
