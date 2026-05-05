@@ -380,19 +380,20 @@
         .refresh-message-card {
             background: var(--accent-color-1); /* Purple background for completion */
             color: white;
-            padding: 15px 25px;
+            padding: 12px 20px;
             border-radius: 12px;
-            font-size: 1.1em;
+            font-size: 1em;
             font-weight: 600;
             box-shadow: 0 6px 15px rgba(0,0,0,0.25);
             margin-bottom: 10px;
             transition: all 0.3s ease;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
-            white-space: nowrap;
-            /* FIX 2: Added flex-wrap for horizontal space issues */
-            flex-wrap: wrap; 
+            white-space: normal;
+            flex-wrap: wrap;
+            max-width: min(600px, 90vw);
+            text-align: left;
         }
         .refresh-message-card.progress {
             background: var(--card-bg-color); /* White background for progress */
@@ -674,7 +675,7 @@
         
         // --- NEW STATE FOR REFRESH LOGIC ---
         let isRefreshing = false; 
-        let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 }; 
+        let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [] }; 
         let hideBannerTimeoutId = null; 
         // --- END NEW STATE ---
         
@@ -2209,7 +2210,7 @@
             
             // --- Start Refresh Process ---
             isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0 };
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [] };
             
             // UI setup
             const refreshButton = document.getElementById('refreshNowBtn');
@@ -2295,8 +2296,18 @@
                             // if isBadSameValue and no Finnhub key: leave existing cache entry alone
                         }
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                        if (priceDelta > 0.0001) refreshStats.gained++;
-                        else if (priceDelta < -0.0001) refreshStats.lost++;
+                        // Use previousClosePrice for true today's gain/loss, not cached-vs-cached
+                        const finalPc = priceCache[holding.symbol].previousClosePrice;
+                        const finalCur = priceCache[holding.symbol].currentPrice;
+                        const todayDelta = (finalPc && finalPc > 0) ? (finalCur - finalPc) : priceDelta;
+                        const todayPct = (finalPc && finalPc > 0) ? ((finalCur - finalPc) / finalPc * 100) : 0;
+                        if (todayDelta > 0.0001) {
+                            refreshStats.gained++;
+                            refreshStats.gainers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
+                        } else if (todayDelta < -0.0001) {
+                            refreshStats.lost++;
+                            refreshStats.losers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
+                        }
                     } else {
                         refreshStats.failed++;
                         if (forceRefresh && priceCache[holding.symbol]) {
@@ -2332,8 +2343,7 @@
                 
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
-                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
-                logActivity(`Refreshed prices for ${totalFetched} Stocks/ETFs.`);
+                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
                 await saveDataToFirestore(); // Save updated price cache
                 if (forceRefresh) window._priceCacheFreshFetched = true; // block Firestore from overwriting
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
@@ -2343,7 +2353,7 @@
                 console.error("Error during refreshAllPrices:", error);
                 updateDataStatus('error', "Refresh Failed");
                 // Update progress to show failure, though stats might be incomplete
-                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
+                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
                 // Optionally show a user-facing error message here
                 showConfirmationModal(`An error occurred during price refresh: ${error.message}`, null);
 
@@ -2385,7 +2395,7 @@
 
 
         // --- NEW FUNCTION: Update Refresh Progress ---
-        function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0) {
+        function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0, gainers = [], losers = []) {
             const card = document.getElementById('refreshMessageCard');
             const box = document.getElementById('refreshStatusBox');
             const timer = document.getElementById('nextUpdateTimer');
@@ -2407,17 +2417,38 @@
             } else if (status === 'completed') {
                 card.classList.remove('progress');
                 
-                // Calculate total successfully refreshed (total - failed)
                 const totalRefreshed = total - failed;
-                
-                // Modified completion message structure for mobile wrapping
+
+                // Sort by absolute % move descending
+                const sortedGainers = [...gainers].sort((a, b) => b.pct - a.pct);
+                const sortedLosers  = [...losers].sort((a, b) => a.pct - b.pct);
+
+                const fmt = (pct) => (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+
+                const gainerTags = sortedGainers.map(g =>
+                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
+                        <span style="color:#16A34A;font-weight:600;">${g.symbol}</span>
+                        <span style="color:#16A34A;"> ${fmt(g.pct)}</span>
+                    </span>`
+                ).join('');
+
+                const loserTags = sortedLosers.map(l =>
+                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
+                        <span style="color:#DC2626;font-weight:600;">${l.symbol}</span>
+                        <span style="color:#DC2626;"> ${fmt(l.pct)}</span>
+                    </span>`
+                ).join('');
+
+                const failedLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.8em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
+
                 const message = `
-                    Refreshed ${totalRefreshed} asset(s).
-                    <span style="display: block;">
-                        <span class="positive-sync">✔ ${gained} gained,</span>
-                        <span class="negative-sync">▼ ${lost} lost.</span> 
-                        Failed: ${failed}.
-                    </span>
+                    <div style="width:100%;text-align:left;line-height:1.6;">
+                        <div style="font-size:0.9em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> asset(s) · Today vs prev close</div>
+                        ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gainerTags}</div>` : ''}
+                        ${lost  > 0 ? `<div><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
+                        ${gained === 0 && lost === 0 ? `<div style="font-size:0.85em;opacity:0.7;">No price movement vs previous close.</div>` : ''}
+                        ${failedLine}
+                    </div>
                 `;
                 card.innerHTML = message;
             }
@@ -4176,7 +4207,7 @@
             updateDataStatus('loading');
             
             isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: holdingsToRefresh.length }; 
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: holdingsToRefresh.length, gainers: [], losers: [] }; 
             document.getElementById('refreshStatusBox').style.display = 'block'; 
             document.getElementById('nextUpdateTimer').style.display = 'none'; 
 
@@ -4193,14 +4224,17 @@
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                     
-                    priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
-                    
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+
+                    const pc = priceData.previousClosePrice;
+                    const cur = priceData.currentPrice;
+                    priceDelta = (pc && pc > 0) ? (cur - pc) : (cur - (cached?.currentPrice || cur));
+                    const pct = (pc && pc > 0) ? ((cur - pc) / pc * 100) : 0;
                     
-                    if (priceDelta > 0.0001) refreshStats.gained++;
-                    else if (priceDelta < -0.0001) refreshStats.lost++;
+                    if (priceDelta > 0.0001) { refreshStats.gained++; refreshStats.gainers.push({ symbol: holding.symbol, delta: priceDelta, pct }); }
+                    else if (priceDelta < -0.0001) { refreshStats.lost++; refreshStats.losers.push({ symbol: holding.symbol, delta: priceDelta, pct }); }
                 } else {
                     refreshStats.failed++;
                 }
@@ -4208,7 +4242,7 @@
             }
             
             const totalFetched = refreshStats.total - refreshStats.failed;
-            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed);
+            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
             logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
