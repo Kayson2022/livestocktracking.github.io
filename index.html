@@ -1963,17 +1963,25 @@
                 const price = meta?.regularMarketPrice;
                 if (!isValid(price)) throw new Error('No valid current price');
 
-                // Previous close: prefer regularMarketPreviousClose from meta (most reliable)
-                // Fall back to second-to-last value in historical close array
+                // Previous close: derive from regularMarketChange (price - todayChange = yesterday's close).
+                // This is the most accurate method — Yahoo always populates regularMarketChange correctly.
+                // Do NOT use the historical close array from the 6mo chart: with weekly/monthly bars
+                // that gives last week's or last month's close, producing wildly wrong % figures.
                 let previousClosePrice = null;
-                const prevCloseMeta = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
-                if (isValid(prevCloseMeta)) {
-                    previousClosePrice = prevCloseMeta;
-                } else {
-                    const closes = result?.indicators?.quote?.[0]?.close || [];
-                    const validCloses = closes.filter(isValid);
-                    if (validCloses.length >= 2) {
-                        previousClosePrice = validCloses[validCloses.length - 2];
+                const marketChange = meta?.regularMarketChange; // today's $ change (negative = down day)
+                if (typeof marketChange === 'number' && isFinite(marketChange)) {
+                    const derived = price - marketChange;
+                    if (derived > 0) {
+                        previousClosePrice = derived;
+                        console.log(`[PrevClose] ${sym}: derived prev=$${derived.toFixed(4)} via price(${price}) - change(${marketChange})`);
+                    }
+                }
+                // Only fall back to meta fields if regularMarketChange is missing
+                if (!previousClosePrice) {
+                    const prevCloseMeta = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
+                    if (isValid(prevCloseMeta)) {
+                        previousClosePrice = prevCloseMeta;
+                        console.log(`[PrevClose] ${sym}: used meta prevClose=$${prevCloseMeta}`);
                     }
                 }
 
@@ -2296,11 +2304,18 @@
                             // if isBadSameValue and no Finnhub key: leave existing cache entry alone
                         }
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                        // Use previousClosePrice for true today's gain/loss, not cached-vs-cached
+                        // Use previousClosePrice for true today's gain/loss, not cached-vs-cached.
+                        // SANITY CHECK: if prev close is >25% away from current, it's almost certainly
+                        // stale historical data (Yahoo 6mo chart fallback), not yesterday's close — skip it.
                         const finalPc = priceCache[holding.symbol].previousClosePrice;
                         const finalCur = priceCache[holding.symbol].currentPrice;
-                        const todayDelta = (finalPc && finalPc > 0) ? (finalCur - finalPc) : priceDelta;
-                        const todayPct = (finalPc && finalPc > 0) ? ((finalCur - finalPc) / finalPc * 100) : 0;
+                        const pctAwayFromCur = (finalPc && finalPc > 0) ? Math.abs(finalCur - finalPc) / finalPc : 999;
+                        const prevCloseIsPlausible = finalPc && finalPc > 0 && pctAwayFromCur <= 0.25;
+                        if (!prevCloseIsPlausible && finalPc) {
+                            console.warn(`[PrevClose] ${holding.symbol}: prev=$${finalPc} cur=$${finalCur} (${(pctAwayFromCur*100).toFixed(1)}% apart) — looks stale, skipping % display`);
+                        }
+                        const todayDelta = prevCloseIsPlausible ? (finalCur - finalPc) : 0;
+                        const todayPct   = prevCloseIsPlausible ? ((finalCur - finalPc) / finalPc * 100) : null;
                         if (todayDelta > 0.0001) {
                             refreshStats.gained++;
                             refreshStats.gainers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
@@ -2410,26 +2425,28 @@
                 
                 const totalRefreshed = total - failed;
 
-                // Sort by absolute % move descending
-                const sortedGainers = [...gainers].sort((a, b) => b.pct - a.pct);
-                const sortedLosers  = [...losers].sort((a, b) => a.pct - b.pct);
+                // Sort by absolute % move descending (null pct = stale, sort to end)
+                const sortedGainers = [...gainers].sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+                const sortedLosers  = [...losers].sort((a, b) => (a.pct ?? 999) - (b.pct ?? 999));
 
-                const fmt = (pct) => (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+                const fmt = (pct) => pct != null ? ((pct >= 0 ? '+' : '') + pct.toFixed(2) + '%') : '?%';
 
                 const gainerTags = sortedGainers.map(g =>
-                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
+                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;${g.pct==null?'opacity:0.55;':''}" ${g.pct==null?'title="Prev close data looks stale — % skipped"':''}>
                         <span style="color:#16A34A;font-weight:600;">${g.symbol}</span>
                         <span style="color:#16A34A;"> ${fmt(g.pct)}</span>
                     </span>`
                 ).join('');
 
                 const loserTags = sortedLosers.map(l =>
-                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
+                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;${l.pct==null?'opacity:0.55;':''}" ${l.pct==null?'title="Prev close data looks stale — % skipped"':''}>
                         <span style="color:#DC2626;font-weight:600;">${l.symbol}</span>
                         <span style="color:#DC2626;"> ${fmt(l.pct)}</span>
                     </span>`
                 ).join('');
 
+                const staleCount = [...gainers, ...losers].filter(x => x.pct == null).length;
+                const staleLine = staleCount > 0 ? `<div style="margin-top:4px;font-size:0.78em;opacity:0.65;">⚠ ${staleCount} ticker(s) show ?% — prev close from Yahoo looks stale (try refreshing again after market open)</div>` : '';
                 const failedLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.8em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
 
                 const message = `
@@ -2439,6 +2456,7 @@
                         ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gainerTags}</div>` : ''}
                         ${lost  > 0 ? `<div><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
                         ${gained === 0 && lost === 0 ? `<div style="font-size:0.85em;opacity:0.7;">No price movement vs previous close.</div>` : ''}
+                        ${staleLine}
                         ${failedLine}
                     </div>
                 `;
