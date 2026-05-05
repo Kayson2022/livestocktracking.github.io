@@ -2267,61 +2267,36 @@
 
                 const processResult = async (holding, priceData) => {
                     const cached = priceCache[holding.symbol];
-                    let priceDelta = 0;
 
                     if (priceData && priceData.currentPrice !== null) {
                         if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                         if (cached?.manualPrice == null || forceRefresh) {
-                            priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
                             priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-
-                            // Guard against Yahoo after-hours bug: prev == current → G/L = $0.
-                            // If Yahoo's prev close looks bad (within $0.01 of current), try
-                            // Finnhub on-demand for just this symbol instead of a blanket pre-fetch.
-                            const pc  = priceData.previousClosePrice;
-                            const cur = priceData.currentPrice;
-                            const isGoodPrevClose = pc !== null && pc > 0 && Math.abs(pc - cur) >= 0.01;
-                            const isBadSameValue  = pc !== null && pc > 0 && Math.abs(pc - cur) < 0.01;
-
-                            if (isGoodPrevClose) {
-                                priceCache[holding.symbol].previousClosePrice = pc;
-                            } else if (isBadSameValue && FINNHUB_API_KEY) {
-                                // Yahoo gave us a suspect prev close — ask Finnhub just for this symbol
-                                console.log(`[PrevClose] Yahoo prev close suspect for ${holding.symbol} ($${pc} vs cur $${cur}), trying Finnhub on-demand...`);
-                                const fbData = await fetchPriceFromFinnhub(holding.symbol);
-                                const fbPc = fbData?.previousClosePrice;
-                                if (fbPc && fbPc > 0 && Math.abs(fbPc - cur) >= 0.01) {
-                                    priceCache[holding.symbol].previousClosePrice = fbPc;
-                                    console.log(`[PrevClose] ${holding.symbol}: used Finnhub pc=$${fbPc}`);
-                                } else {
-                                    // Finnhub also unhelpful — keep existing cached value if any
-                                    console.warn(`[PrevClose] ${holding.symbol}: Finnhub also returned bad/no prev close, keeping existing cache.`);
-                                }
-                            } else if (!isBadSameValue) {
-                                // pc is null — clear it
-                                priceCache[holding.symbol].previousClosePrice = null;
-                            }
-                            // if isBadSameValue and no Finnhub key: leave existing cache entry alone
+                            // previousClosePrice is already correctly derived in fetchPriceFromYahooQuote
+                            // via (currentPrice - regularMarketChange). Trust it directly — do NOT
+                            // overwrite with stale cache values or re-check isGoodPrevClose here.
+                            priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice ?? null;
                         }
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                        // Use previousClosePrice for true today's gain/loss, not cached-vs-cached.
-                        // SANITY CHECK: if prev close is >25% away from current, it's almost certainly
-                        // stale historical data (Yahoo 6mo chart fallback), not yesterday's close — skip it.
-                        const finalPc = priceCache[holding.symbol].previousClosePrice;
+
+                        // Calculate today's % change using the freshly derived prev close
+                        const finalPc  = priceCache[holding.symbol].previousClosePrice;
                         const finalCur = priceCache[holding.symbol].currentPrice;
-                        const pctAwayFromCur = (finalPc && finalPc > 0) ? Math.abs(finalCur - finalPc) / finalPc : 999;
-                        const prevCloseIsPlausible = finalPc && finalPc > 0 && pctAwayFromCur <= 0.25;
-                        if (!prevCloseIsPlausible && finalPc) {
-                            console.warn(`[PrevClose] ${holding.symbol}: prev=$${finalPc} cur=$${finalCur} (${(pctAwayFromCur*100).toFixed(1)}% apart) — looks stale, skipping % display`);
-                        }
-                        const todayDelta = prevCloseIsPlausible ? (finalCur - finalPc) : 0;
-                        const todayPct   = prevCloseIsPlausible ? ((finalCur - finalPc) / finalPc * 100) : null;
-                        if (todayDelta > 0.0001) {
+                        const hasPrevClose = finalPc != null && finalPc > 0;
+                        const todayDelta = hasPrevClose ? (finalCur - finalPc) : 0;
+                        const todayPct   = hasPrevClose ? ((finalCur - finalPc) / finalPc * 100) : null;
+
+                        console.log(`[Stats] ${holding.symbol}: cur=$${finalCur} prev=$${finalPc} delta=${todayDelta?.toFixed(4)} pct=${todayPct?.toFixed(2)}%`);
+
+                        if (todayDelta > 0.005) {
                             refreshStats.gained++;
                             refreshStats.gainers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
-                        } else if (todayDelta < -0.0001) {
+                        } else if (todayDelta < -0.005) {
                             refreshStats.lost++;
                             refreshStats.losers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
+                        } else {
+                            // Flat / no prev close data — count as flat, not disappeared
+                            refreshStats.flat = (refreshStats.flat || 0) + 1;
                         }
                     } else {
                         refreshStats.failed++;
@@ -2358,7 +2333,7 @@
                 
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
-                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
+                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
                 await saveDataToFirestore(); // Save updated price cache
                 if (forceRefresh) window._priceCacheFreshFetched = true; // block Firestore from overwriting
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
@@ -2368,7 +2343,7 @@
                 console.error("Error during refreshAllPrices:", error);
                 updateDataStatus('error', "Refresh Failed");
                 // Update progress to show failure, though stats might be incomplete
-                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
+                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
                 // Optionally show a user-facing error message here
                 showConfirmationModal(`An error occurred during price refresh: ${error.message}`, null);
 
@@ -2401,7 +2376,7 @@
 
 
         // --- NEW FUNCTION: Update Refresh Progress ---
-        function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0, gainers = [], losers = []) {
+        function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0, gainers = [], losers = [], flat = 0) {
             const card = document.getElementById('refreshMessageCard');
             const box = document.getElementById('refreshStatusBox');
             const timer = document.getElementById('nextUpdateTimer');
@@ -2445,18 +2420,17 @@
                     </span>`
                 ).join('');
 
-                const staleCount = [...gainers, ...losers].filter(x => x.pct == null).length;
-                const staleLine = staleCount > 0 ? `<div style="margin-top:4px;font-size:0.78em;opacity:0.65;">⚠ ${staleCount} ticker(s) show ?% — prev close from Yahoo looks stale (try refreshing again after market open)</div>` : '';
                 const failedLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.8em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
+                const flatLine   = flat   > 0 ? `<div style="margin-top:2px;font-size:0.78em;opacity:0.6;">— ${flat} unchanged (or no prev close data)</div>` : '';
 
                 const message = `
                     <div style="width:100%;text-align:left;line-height:1.6;position:relative;padding-right:24px;">
                         <button onclick="(function(){clearTimeout(window._hideBannerTimeoutId||null);var b=document.getElementById('refreshStatusBox');var t=document.getElementById('nextUpdateTimer');if(b){b.style.display='none';}if(t&&window._isAutoRefreshEnabled){t.style.display='block';}})()" style="position:absolute;top:-4px;right:-4px;background:rgba(255,255,255,0.25);border:none;color:white;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:20px;text-align:center;cursor:pointer;padding:0;font-weight:700;" title="Dismiss">✕</button>
-                        <div style="font-size:0.9em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> asset(s) · Today vs prev close</div>
+                        <div style="font-size:0.9em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> asset(s) · ▲${gained} up · ▼${lost} down · —${flat} flat</div>
                         ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gainerTags}</div>` : ''}
-                        ${lost  > 0 ? `<div><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
-                        ${gained === 0 && lost === 0 ? `<div style="font-size:0.85em;opacity:0.7;">No price movement vs previous close.</div>` : ''}
-                        ${staleLine}
+                        ${lost  > 0 ? `<div style="margin-bottom:3px;"><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
+                        ${gained === 0 && lost === 0 && flat > 0 ? `<div style="font-size:0.85em;opacity:0.7;">All flat — no movement vs previous close.</div>` : ''}
+                        ${flatLine}
                         ${failedLine}
                     </div>
                 `;
@@ -4252,7 +4226,7 @@
             }
             
             const totalFetched = refreshStats.total - refreshStats.failed;
-            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers);
+            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
             logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
