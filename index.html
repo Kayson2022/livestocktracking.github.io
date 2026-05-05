@@ -1937,7 +1937,8 @@
             // regularMarketPreviousClose is the authoritative "yesterday's close" field.
             // regularMarketPrice is the live/delayed current price.
             try {
-                const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=2d`;
+                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=2d`;
+                const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
                 const res = await fetch(url, { cache: 'no-store' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const json = await res.json();
@@ -1948,28 +1949,17 @@
                 const price = meta?.regularMarketPrice;
                 if (!isValid(price)) throw new Error('No valid current price');
 
-                // Best previous close fields in order of reliability:
+                // Get previous close from the close array (first element when range=2d)
                 let previousClosePrice = null;
-                const candidates = [
-                    meta?.regularMarketPreviousClose,  // most reliable
-                    meta?.previousClose,               // sometimes correct
-                ];
-                for (const c of candidates) {
-                    if (isValid(c)) { previousClosePrice = c; break; }
-                }
-
-                // Fallback: derive from yesterday's candle in the OHLC array
-                if (!previousClosePrice) {
-                    const closes     = result?.indicators?.quote?.[0]?.close || [];
-                    const timestamps = result?.timestamp || [];
-                    const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-                    for (let i = timestamps.length - 1; i >= 0; i--) {
-                        const d = new Date(timestamps[i] * 1000); d.setHours(0,0,0,0);
-                        if (d < todayMidnight && isValid(closes[i])) {
-                            previousClosePrice = closes[i];
-                            break;
-                        }
-                    }
+                const closes = result?.indicators?.quote?.[0]?.close || [];
+                
+                // The close array for range=2d contains [yesterday, today]
+                // So the first element is yesterday's close (previous close)
+                if (closes.length >= 2 && isValid(closes[0])) {
+                    previousClosePrice = closes[0];
+                } else if (closes.length === 1 && isValid(closes[0])) {
+                    // Fallback: if only one close value, assume it's today (no prev close available)
+                    previousClosePrice = null;
                 }
 
                 const name      = meta?.shortName || meta?.longName || null;
@@ -1983,7 +1973,8 @@
 
             // ── Attempt 2: v7/finance/quote (different endpoint, often has both fields) ──
             try {
-                const url2 = `https://corsproxy.io/?https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=regularMarketPrice,regularMarketPreviousClose,shortName,quoteType`;
+                const yahooUrl2 = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=regularMarketPrice,regularMarketPreviousClose,shortName,quoteType`;
+                const url2 = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl2)}`;
                 const res2 = await fetch(url2, { cache: 'no-store' });
                 if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
                 const json2 = await res2.json();
