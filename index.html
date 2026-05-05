@@ -1461,42 +1461,44 @@
         }
         window.calculateHoldingsAndCash = calculateHoldingsAndCash; // expose for rebalancer + other external scripts
         function calculatePortfolioVolatility(history) {
-            if (!history || history.length < 2) {
-                return 0; // Not enough data points
-            }
+            if (!history || history.length < 2) return 0;
+
+            // Build a set of dates that had new transactions (cash inflows/outflows).
+            // On those days the portfolio value jumps due to new money, not price movement.
+            // Including them would produce fake returns like +50% in one day, making
+            // annualized volatility absurdly high (e.g. 177%). We exclude those days.
+            const txnDates = new Set(
+                (portfolioData?.transactions || [])
+                    .filter(t => (t.transactionType||'').toUpperCase() === 'BUY'
+                              || (t.transactionType||'').toUpperCase() === 'SELL')
+                    .map(t => t.date ? t.date.slice(0, 10) : null)
+                    .filter(Boolean)
+            );
 
             const returns = [];
-            
-            // Calculate daily returns (current value / previous value - 1)
             for (let i = 1; i < history.length; i++) {
-                const currentValue = history[i].value;
-                const previousValue = history[i - 1].value;
-                
-                if (previousValue > 0) {
-                    returns.push((currentValue / previousValue) - 1);
+                const dateStr = history[i].date ? history[i].date.slice(0, 10) : '';
+                // Skip days with transactions — value change is cash flow, not market return
+                if (txnDates.has(dateStr)) continue;
+
+                const cur  = history[i].value;
+                const prev = history[i - 1].value;
+                if (prev > 0 && cur > 0) {
+                    const r = (cur / prev) - 1;
+                    // Also skip extreme outliers (>25% single-day move) — these are
+                    // almost certainly data artifacts, not real market moves
+                    if (Math.abs(r) < 0.25) returns.push(r);
                 }
             }
 
-            if (returns.length < 2) {
-                return 0;
-            }
+            if (returns.length < 10) return 0;
 
-            // Calculate the Mean (Average) Daily Return
-            const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+            const mean     = returns.reduce((s, r) => s + r, 0) / returns.length;
+            const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
+            const dailyStd = Math.sqrt(variance);
 
-            // Calculate the Variance (Average of the squared differences from the Mean)
-            const squaredDifferences = returns.map(r => (r - mean) ** 2);
-            const variance = squaredDifferences.reduce((sum, sd) => sum + sd, 0) / (returns.length - 1); // Use n-1 for sample variance
-
-            // Calculate the Standard Deviation (Square root of Variance)
-            const dailyStandardDeviation = Math.sqrt(variance);
-
-            // Annualize the Standard Deviation (Multiply by sqrt(252 - approx trading days))
-            // We'll use 252 for financial market standard practice
-            const ANNUALIZATION_FACTOR = Math.sqrt(252); 
-            const annualizedVolatility = dailyStandardDeviation * ANNUALIZATION_FACTOR;
-            
-            return annualizedVolatility;
+            // Annualize: multiply by sqrt(252 trading days)
+            return dailyStd * Math.sqrt(252);
         }
 
         function calculateMaxDrawdown(history) {
@@ -5729,7 +5731,7 @@
                         width:14px;height:14px;border-radius:50%;
                         background:var(--border-color);color:var(--text-color-secondary);
                         font-size:0.65rem;font-weight:700;cursor:help;flex-shrink:0;
-                    " title="Annual Volatility: How much your portfolio value swings up and down over a year (annualized standard deviation of daily returns). Under 10% = low volatility. 10-20% = moderate (similar to S&amp;P 500). Over 20% = high volatility. Lower means smoother ride, but may mean lower returns.">?</span>
+                    " title="Annual Volatility: How much your portfolio value swings up and down over a year (annualized standard deviation of daily returns). Calculated only on days with no new transactions — so cash inflows from selling VMFXX/SPAXX to buy stocks don&#39;t distort the result. Under 10% = low. 10-20% = moderate (S&amp;P 500 range). Over 20% = high.">?</span>
                 </div>
             </div>
             <div class="stat-card" style="position:relative;">
