@@ -2308,71 +2308,62 @@
                     return; 
                 }
                 
-                // --- Parallel Batch Fetch Loop ---
-                // Fetch in batches of 10 simultaneously — ~10x faster than sequential
-                // Finnhub free = 60 calls/min, Yahoo = unlimited → batches of 10 are safe
-                const BATCH_SIZE = priceMode === 'realtime' ? 8 : 12; // smaller batches for Finnhub, larger for Yahoo
+                // --- SEQUENTIAL Fetch Loop (Like Secure App) ---
+                // Process ONE stock at a time to avoid rate limits
+                // This is slower but NEVER hits rate limits
                 const totalSymbols = fastAssetsToFetch.length;
 
-                for (let batchStart = 0; batchStart < totalSymbols; batchStart += BATCH_SIZE) {
-                    const batch = fastAssetsToFetch.slice(batchStart, batchStart + BATCH_SIZE);
-                    const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
-                    const totalBatches = Math.ceil(totalSymbols / BATCH_SIZE);
-                    const symbols = batch.map(h => h.symbol).join(', ');
+                for (let i = 0; i < totalSymbols; i++) {
+                    const holding = fastAssetsToFetch[i];
+                    const progress = i + 1;
 
-                    updateRefreshProgress('progress', batchStart + batch.length, totalSymbols, `Batch ${batchNum}/${totalBatches}: ${symbols}`);
+                    updateRefreshProgress('progress', progress, totalSymbols, `Fetching ${holding.symbol} (${progress}/${totalSymbols})`);
 
-                    // Fire all requests in the batch simultaneously
-                    const results = await Promise.all(batch.map(holding => fetchPrice(holding)));
+                    // Fetch ONE price at a time
+                    const priceData = await fetchPrice(holding);
 
-                    // Process results
-                    results.forEach((priceData, idx) => {
-                        const holding = batch[idx];
-                        const cached = priceCache[holding.symbol];
-                        let priceDelta = 0;
+                    // Process result
+                    const cached = priceCache[holding.symbol];
+                    let priceDelta = 0;
 
-                        if (priceData && priceData.currentPrice !== null) {
-                            if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                            if (cached?.manualPrice == null || forceRefresh) {
-                                priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
-                                priceCache[holding.symbol].currentPrice = priceData.currentPrice;
+                    if (priceData && priceData.currentPrice !== null) {
+                        if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
+                        if (cached?.manualPrice == null || forceRefresh) {
+                            priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
+                            priceCache[holding.symbol].currentPrice = priceData.currentPrice;
 
-                                // CRITICAL FIX: only store previousClosePrice if it genuinely
-                                // differs from currentPrice. Yahoo after-hours returns prev=current
-                                // (same exact value), which makes G/L = $0 for every symbol.
-                                // A real previous close must differ by at least $0.01.
-                                // If prev==current, keep the existing cached value (don't overwrite
-                                // a good Finnhub value with a bad Yahoo one).
-                                const pc  = priceData.previousClosePrice;
-                                const cur = priceData.currentPrice;
-                                const isGoodPrevClose = pc !== null && pc > 0 && Math.abs(pc - cur) >= 0.01;
-                                const isBadSameValue  = pc !== null && pc > 0 && Math.abs(pc - cur) < 0.01;
-                                if (isGoodPrevClose) {
-                                    priceCache[holding.symbol].previousClosePrice = pc;
-                                } else if (!isBadSameValue) {
-                                    // pc is null — clear it
-                                    priceCache[holding.symbol].previousClosePrice = null;
-                                }
-                                // if isBadSameValue (Yahoo bug): leave existing cache entry alone
-                            }
-                            priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                            if (priceDelta > 0.0001) refreshStats.gained++;
-                            else if (priceDelta < -0.0001) refreshStats.lost++;
-                        } else {
-                            refreshStats.failed++;
-                            // On forceRefresh, also clear stale previousClosePrice for failed symbols
-                            if (forceRefresh && priceCache[holding.symbol]) {
+                            // CRITICAL FIX: only store previousClosePrice if it genuinely
+                            // differs from currentPrice. Yahoo after-hours returns prev=current
+                            // (same exact value), which makes G/L = $0 for every symbol.
+                            // A real previous close must differ by at least $0.01.
+                            // If prev==current, keep the existing cached value (don't overwrite
+                            // a good Finnhub value with a bad Yahoo one).
+                            const pc  = priceData.previousClosePrice;
+                            const cur = priceData.currentPrice;
+                            const isGoodPrevClose = pc !== null && pc > 0 && Math.abs(pc - cur) >= 0.01;
+                            const isBadSameValue  = pc !== null && pc > 0 && Math.abs(pc - cur) < 0.01;
+                            if (isGoodPrevClose) {
+                                priceCache[holding.symbol].previousClosePrice = pc;
+                            } else if (!isBadSameValue) {
+                                // pc is null — clear it
                                 priceCache[holding.symbol].previousClosePrice = null;
                             }
-                            console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
+                            // if isBadSameValue (Yahoo bug): leave existing cache entry alone
                         }
-                    });
-
-                    // Small pause between batches to avoid hammering the proxy
-                    if (batchStart + BATCH_SIZE < totalSymbols) {
-                        await delay(priceMode === 'realtime' ? 500 : 200);
+                        priceCache[holding.symbol].lastFetchTimestamp = Date.now();
+                        if (priceDelta > 0.0001) refreshStats.gained++;
+                        else if (priceDelta < -0.0001) refreshStats.lost++;
+                    } else {
+                        refreshStats.failed++;
+                        // On forceRefresh, also clear stale previousClosePrice for failed symbols
+                        if (forceRefresh && priceCache[holding.symbol]) {
+                            priceCache[holding.symbol].previousClosePrice = null;
+                        }
+                        console.warn(`Price fetch failed for ${holding.symbol} during refresh.`);
                     }
-                } // --- End Batch Loop ---
+
+                    // NO delay needed - sequential is naturally rate-limited
+                } // --- End Sequential Loop ---
                 
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
