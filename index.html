@@ -1939,39 +1939,41 @@
             }
         }
 
+        // Your own Cloudflare Worker — no rate limits, no CORS issues, handles parallel requests fine
+        const YAHOO_PROXY = 'https://yahoo-proxy.giolamchieu1975.workers.dev';
+
         async function fetchPriceFromYahooQuote(symbol) {
             const sym = symbol.toUpperCase().trim();
-
-            // Helper to validate a price number
             const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
 
-            // ── Attempt 1: v8/finance/chart with range=2d ──
-            // regularMarketPreviousClose is the authoritative "yesterday's close" field.
-            // regularMarketPrice is the live/delayed current price.
             try {
-                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=2d`;
-                const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
-                const res = await fetchWithTimeout(url, { cache: 'no-store' }, 5000);
+                // Worker returns { source, data } where data = chart.result[0] (range=6mo)
+                const url = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
+                const res = await fetchWithTimeout(url, { cache: 'no-store' }, 8000);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const json = await res.json();
-                const result = json?.chart?.result?.[0];
-                const meta   = result?.meta;
+
+                const result = json?.data;
+                if (!result) throw new Error('No data in proxy response');
+
+                const meta = result?.meta;
                 if (!meta) throw new Error('No meta');
 
                 const price = meta?.regularMarketPrice;
                 if (!isValid(price)) throw new Error('No valid current price');
 
-                // Get previous close from the close array (first element when range=2d)
+                // Previous close: prefer regularMarketPreviousClose from meta (most reliable)
+                // Fall back to second-to-last value in historical close array
                 let previousClosePrice = null;
-                const closes = result?.indicators?.quote?.[0]?.close || [];
-                
-                // The close array for range=2d contains [yesterday, today]
-                // So the first element is yesterday's close (previous close)
-                if (closes.length >= 2 && isValid(closes[0])) {
-                    previousClosePrice = closes[0];
-                } else if (closes.length === 1 && isValid(closes[0])) {
-                    // Fallback: if only one close value, assume it's today (no prev close available)
-                    previousClosePrice = null;
+                const prevCloseMeta = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
+                if (isValid(prevCloseMeta)) {
+                    previousClosePrice = prevCloseMeta;
+                } else {
+                    const closes = result?.indicators?.quote?.[0]?.close || [];
+                    const validCloses = closes.filter(isValid);
+                    if (validCloses.length >= 2) {
+                        previousClosePrice = validCloses[validCloses.length - 2];
+                    }
                 }
 
                 const name      = meta?.shortName || meta?.longName || null;
@@ -1980,32 +1982,7 @@
                 return { currentPrice: price, previousClosePrice, name, quoteType };
 
             } catch (err) {
-                console.warn(`Yahoo chart failed for ${sym}: ${err.message}`);
-            }
-
-            // ── Attempt 2: v7/finance/quote (different endpoint, often has both fields) ──
-            try {
-                const yahooUrl2 = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(sym)}&fields=regularMarketPrice,regularMarketPreviousClose,shortName,quoteType`;
-                const url2 = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl2)}`;
-                const res2 = await fetchWithTimeout(url2, { cache: 'no-store' }, 5000);
-                if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
-                const json2 = await res2.json();
-                const q = json2?.quoteResponse?.result?.[0];
-                if (!q) throw new Error('No quote result');
-
-                const price2 = q?.regularMarketPrice;
-                const prev2  = q?.regularMarketPreviousClose;
-                if (!isValid(price2)) throw new Error('No valid price in v7');
-
-                console.log(`Yahoo v7 ✅ ${sym}: cur=$${price2} prev=$${prev2}`);
-                return {
-                    currentPrice:      price2,
-                    previousClosePrice: isValid(prev2) ? prev2 : null,
-                    name:      q?.shortName || null,
-                    quoteType: q?.quoteType || null
-                };
-            } catch (err2) {
-                console.warn(`Yahoo v7 also failed for ${sym}: ${err2.message}`);
+                console.warn(`Yahoo proxy failed for ${sym}: ${err.message}`);
                 return { currentPrice: null, previousClosePrice: null };
             }
         }
