@@ -1941,62 +1941,36 @@
             const sym = symbol.toUpperCase().trim();
             const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
 
-            // Single request to Yahoo v8 chart with range=1d via corsproxy.
-            // range=1d gives:
-            //   meta.regularMarketPrice  = current/latest price
-            //   meta.chartPreviousClose  = yesterday's actual close (always accurate)
-            //   meta.regularMarketPreviousClose = same, also reliable on 1d range
-            // This is one call per symbol — no Worker needed for delayed mode.
-            // Fall back to Worker if corsproxy fails.
+            // Your Worker now uses range=1d, which means:
+            //   meta.regularMarketPrice     = current/latest price ✅
+            //   meta.chartPreviousClose     = yesterday's actual close ✅
+            //   meta.regularMarketPreviousClose = same ✅
+            // Single request, no corsproxy dependency, no rate limits.
 
-            const directUrl  = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
-            const workerUrl  = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
-
-            let price = null, previousClosePrice = null, name = null, quoteType = null;
-
-            // --- Try direct Yahoo first (most accurate prev close) ---
             try {
-                const res = await fetchWithTimeout(directUrl, { cache: 'no-store' }, 7000);
-                if (res.ok) {
-                    const json = await res.json();
-                    const meta = json?.chart?.result?.[0]?.meta;
-                    if (meta) {
-                        const p  = meta.regularMarketPrice;
-                        const pc = meta.chartPreviousClose || meta.regularMarketPreviousClose;
-                        if (isValid(p)) {
-                            price              = p;
-                            previousClosePrice = isValid(pc) ? pc : null;
-                            name               = meta.shortName || meta.longName || null;
-                            quoteType          = meta.instrumentType || null;
-                            console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice} (direct 5d)`);
-                            return { currentPrice: price, previousClosePrice, name, quoteType };
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn(`[Yahoo direct] ${sym}: ${e.message} — trying Worker fallback`);
-            }
-
-            // --- Fallback: Worker (fast, but prev close from 6mo range may be wrong) ---
-            try {
-                const res = await fetchWithTimeout(workerUrl, { cache: 'no-store' }, 8000);
+                const url = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
+                const res = await fetchWithTimeout(url, { cache: 'no-store' }, 8000);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const json   = await res.json();
-                const meta   = json?.data?.meta;
+                const json = await res.json();
+
+                const meta = json?.data?.meta;
                 if (!meta) throw new Error('No meta in Worker response');
-                const p  = meta.regularMarketPrice;
-                if (!isValid(p)) throw new Error('No valid price in Worker response');
-                price     = p;
-                name      = meta.shortName || meta.longName || null;
-                quoteType = meta.instrumentType || null;
-                // Worker's regularMarketPreviousClose is from a 6mo chart — unreliable.
-                // Don't use it; leave previousClosePrice as null so G/L shows as '—'
-                // rather than showing a wrong number.
-                previousClosePrice = null;
-                console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=null (Worker fallback — prev close unavailable)`);
+
+                const price = meta.regularMarketPrice;
+                if (!isValid(price)) throw new Error('No valid price');
+
+                // With range=1d, chartPreviousClose is yesterday's actual close
+                const pc = meta.chartPreviousClose || meta.regularMarketPreviousClose;
+                const previousClosePrice = isValid(pc) ? pc : null;
+
+                const name      = meta.shortName || meta.longName || null;
+                const quoteType = meta.instrumentType || null;
+
+                console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice}`);
                 return { currentPrice: price, previousClosePrice, name, quoteType };
+
             } catch (err) {
-                console.warn(`Yahoo all sources failed for ${sym}: ${err.message}`);
+                console.warn(`Yahoo Worker failed for ${sym}: ${err.message}`);
                 return { currentPrice: null, previousClosePrice: null };
             }
         }
