@@ -2370,25 +2370,16 @@
                  updateDataStatus(true); // Reset status to 'Synced' unless an error occurred (handled in catch)
 
                 // --- Handle Banner Timeout ---
-                // Set timeout to hide the banner after 5 seconds
-                clearTimeout(hideBannerTimeoutId); // Clear any existing timeout first
+                // Banner stays visible until the user clicks ✕ (no auto-hide after completion)
+                clearTimeout(hideBannerTimeoutId);
+                // Expose state for the dismiss button's inline handler
+                window._hideBannerTimeoutId = null;
+                window._isAutoRefreshEnabled = isAutoRefreshEnabled;
 
                 if (isAutoRefreshEnabled) {
-                    // If auto-refresh is on, hide the message card, show the timer
-                    hideBannerTimeoutId = setTimeout(() => {
-                        console.log("Auto-refresh ON: Hiding message, showing timer.");
-                        const msgCard = document.getElementById('refreshMessageCard');
-                        const timerEl = document.getElementById('nextUpdateTimer');
-                        if (msgCard) msgCard.style.display = 'none'; 
-                        if (timerEl) timerEl.style.display = 'block'; 
-                    }, 5000); 
-                } else {
-                    // If auto-refresh is off, hide the entire status box
-                    hideBannerTimeoutId = setTimeout(() => {
-                        console.log("Auto-refresh OFF: Hiding status box.");
-                        const statusBox = document.getElementById('refreshStatusBox');
-                        if (statusBox) statusBox.style.display = 'none'; 
-                    }, 5000);
+                    // Show timer alongside the banner (don't hide the banner automatically)
+                    const timerEl = document.getElementById('nextUpdateTimer');
+                    if (timerEl) timerEl.style.display = 'block';
                 }
             } // --- End Finally ---
         }
@@ -2442,7 +2433,8 @@
                 const failedLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.8em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
 
                 const message = `
-                    <div style="width:100%;text-align:left;line-height:1.6;">
+                    <div style="width:100%;text-align:left;line-height:1.6;position:relative;padding-right:24px;">
+                        <button onclick="(function(){clearTimeout(window._hideBannerTimeoutId||null);var b=document.getElementById('refreshStatusBox');var t=document.getElementById('nextUpdateTimer');if(b){b.style.display='none';}if(t&&window._isAutoRefreshEnabled){t.style.display='block';}})()" style="position:absolute;top:-4px;right:-4px;background:rgba(255,255,255,0.25);border:none;color:white;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:20px;text-align:center;cursor:pointer;padding:0;font-weight:700;" title="Dismiss">✕</button>
                         <div style="font-size:0.9em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> asset(s) · Today vs prev close</div>
                         ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gainerTags}</div>` : ''}
                         ${lost  > 0 ? `<div><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
@@ -4253,19 +4245,13 @@
             
             isRefreshing = false; 
             
+            // Banner stays until user clicks ✕
+            clearTimeout(hideBannerTimeoutId);
+            window._hideBannerTimeoutId = null;
+            window._isAutoRefreshEnabled = isAutoRefreshEnabled;
             if (isAutoRefreshEnabled) {
-                 // Auto-hide the completion message after 5s (CHANGED), showing timer only
-                 clearTimeout(hideBannerTimeoutId);
-                 hideBannerTimeoutId = setTimeout(() => {
-                    document.getElementById('refreshMessageCard').style.display = 'none';
-                    document.getElementById('nextUpdateTimer').style.display = 'block';
-                 }, 5000); // <-- OPTIMIZATION: Changed from 4000 to 5000
-            } else {
-                 // Auto-hide the status box completely after 5s
-                 clearTimeout(hideBannerTimeoutId);
-                 hideBannerTimeoutId = setTimeout(() => {
-                    document.getElementById('refreshStatusBox').style.display = 'none';
-                 }, 5000);
+                const timerEl = document.getElementById('nextUpdateTimer');
+                if (timerEl) timerEl.style.display = 'block';
             }
             showConfirmationModal("Price refresh complete.", null);
         }
