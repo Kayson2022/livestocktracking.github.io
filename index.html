@@ -1963,6 +1963,17 @@
                 const price = meta?.regularMarketPrice;
                 if (!isValid(price)) throw new Error('No valid current price');
 
+                // DEBUG: dump all relevant meta fields so we can see what the Worker actually returns
+                console.log(`[META DUMP] ${sym}:`, JSON.stringify({
+                    regularMarketPrice: meta?.regularMarketPrice,
+                    regularMarketChange: meta?.regularMarketChange,
+                    regularMarketChangePercent: meta?.regularMarketChangePercent,
+                    regularMarketPreviousClose: meta?.regularMarketPreviousClose,
+                    chartPreviousClose: meta?.chartPreviousClose,
+                    range: meta?.range,
+                    dataGranularity: meta?.dataGranularity,
+                }));
+
                 // Previous close: derive from regularMarketChange (price - todayChange = yesterday's close).
                 // This is the most accurate method — Yahoo always populates regularMarketChange correctly.
                 // Do NOT use the historical close array from the 6mo chart: with weekly/monthly bars
