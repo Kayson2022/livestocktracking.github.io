@@ -378,7 +378,7 @@
         }
 
         .refresh-message-card {
-            background: var(--accent-color-1); /* Purple background for completion */
+            background: var(--accent-color-1);
             color: white;
             padding: 12px 20px;
             border-radius: 12px;
@@ -392,7 +392,7 @@
             justify-content: center;
             white-space: normal;
             flex-wrap: wrap;
-            max-width: min(600px, 90vw);
+            max-width: min(620px, 92vw);
             text-align: left;
         }
         .refresh-message-card.progress {
@@ -675,7 +675,7 @@
         
         // --- NEW STATE FOR REFRESH LOGIC ---
         let isRefreshing = false; 
-        let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [] }; 
+        let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [], flat: 0 }; 
         let hideBannerTimeoutId = null; 
         // --- END NEW STATE ---
         
@@ -1948,7 +1948,7 @@
             const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
 
             try {
-                // Worker returns { source, data } where data = chart.result[0] (range=6mo)
+                // Step 1: Get current price from your Worker (fast, no CORS issues)
                 const url = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
                 const res = await fetchWithTimeout(url, { cache: 'no-store' }, 8000);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1963,41 +1963,40 @@
                 const price = meta?.regularMarketPrice;
                 if (!isValid(price)) throw new Error('No valid current price');
 
-                // DEBUG: dump all relevant meta fields so we can see what the Worker actually returns
-                console.log(`[META DUMP] ${sym}:`, JSON.stringify({
-                    regularMarketPrice: meta?.regularMarketPrice,
-                    regularMarketChange: meta?.regularMarketChange,
-                    regularMarketChangePercent: meta?.regularMarketChangePercent,
-                    regularMarketPreviousClose: meta?.regularMarketPreviousClose,
-                    chartPreviousClose: meta?.chartPreviousClose,
-                    range: meta?.range,
-                    dataGranularity: meta?.dataGranularity,
-                }));
-
-                // Previous close: derive from regularMarketChange (price - todayChange = yesterday's close).
-                // This is the most accurate method — Yahoo always populates regularMarketChange correctly.
-                // Do NOT use the historical close array from the 6mo chart: with weekly/monthly bars
-                // that gives last week's or last month's close, producing wildly wrong % figures.
-                let previousClosePrice = null;
-                const marketChange = meta?.regularMarketChange; // today's $ change (negative = down day)
-                if (typeof marketChange === 'number' && isFinite(marketChange)) {
-                    const derived = price - marketChange;
-                    if (derived > 0) {
-                        previousClosePrice = derived;
-                        console.log(`[PrevClose] ${sym}: derived prev=$${derived.toFixed(4)} via price(${price}) - change(${marketChange})`);
-                    }
-                }
-                // Only fall back to meta fields if regularMarketChange is missing
-                if (!previousClosePrice) {
-                    const prevCloseMeta = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
-                    if (isValid(prevCloseMeta)) {
-                        previousClosePrice = prevCloseMeta;
-                        console.log(`[PrevClose] ${sym}: used meta prevClose=$${prevCloseMeta}`);
-                    }
-                }
-
                 const name      = meta?.shortName || meta?.longName || null;
                 const quoteType = meta?.instrumentType || null;
+
+                // Step 2: Get accurate prev close from Yahoo's 1d chart directly.
+                // The Worker uses range=6mo which gives a WRONG regularMarketPreviousClose
+                // (it reflects the prior 6mo bar, not yesterday). The 1d range always
+                // gives the real previous trading day close in chartPreviousClose.
+                let previousClosePrice = null;
+                try {
+                    const ydUrl = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+                    const ydRes = await fetchWithTimeout(ydUrl, { cache: 'no-store' }, 6000);
+                    if (ydRes.ok) {
+                        const ydJson = await ydRes.json();
+                        const ydMeta = ydJson?.chart?.result?.[0]?.meta;
+                        // chartPreviousClose on a 5d/1d chart = yesterday's actual close
+                        const pc = ydMeta?.chartPreviousClose || ydMeta?.regularMarketPreviousClose;
+                        if (isValid(pc)) {
+                            previousClosePrice = pc;
+                            console.log(`[PrevClose] ${sym}: ${pc} (Yahoo 5d direct)`);
+                        }
+                    }
+                } catch (pcErr) {
+                    console.warn(`[PrevClose] ${sym}: direct fetch failed, trying meta fallback`);
+                }
+
+                // Fallback: use Worker meta fields if direct fetch failed
+                if (!previousClosePrice) {
+                    const fbPc = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
+                    if (isValid(fbPc)) {
+                        previousClosePrice = fbPc;
+                        console.warn(`[PrevClose] ${sym}: using Worker meta fallback = ${fbPc} (may be inaccurate)`);
+                    }
+                }
+
                 console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice}`);
                 return { currentPrice: price, previousClosePrice, name, quoteType };
 
@@ -2229,7 +2228,7 @@
             
             // --- Start Refresh Process ---
             isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [] };
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [], flat: 0 };
             
             // UI setup
             const refreshButton = document.getElementById('refreshNowBtn');
@@ -2283,31 +2282,26 @@
                         if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                         if (cached?.manualPrice == null || forceRefresh) {
                             priceCache[holding.symbol].currentPrice = priceData.currentPrice;
-                            // previousClosePrice is already correctly derived in fetchPriceFromYahooQuote
-                            // via (currentPrice - regularMarketChange). Trust it directly — do NOT
-                            // overwrite with stale cache values or re-check isGoodPrevClose here.
                             priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice ?? null;
                         }
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
 
-                        // Calculate today's % change using the freshly derived prev close
                         const finalPc  = priceCache[holding.symbol].previousClosePrice;
                         const finalCur = priceCache[holding.symbol].currentPrice;
-                        const hasPrevClose = finalPc != null && finalPc > 0;
-                        const todayDelta = hasPrevClose ? (finalCur - finalPc) : 0;
-                        const todayPct   = hasPrevClose ? ((finalCur - finalPc) / finalPc * 100) : null;
+                        const hasPc    = finalPc != null && finalPc > 0;
+                        const todayDelta = hasPc ? (finalCur - finalPc) : 0;
+                        const todayPct   = hasPc ? ((finalCur - finalPc) / finalPc * 100) : null;
 
-                        console.log(`[Stats] ${holding.symbol}: cur=$${finalCur} prev=$${finalPc} delta=${todayDelta?.toFixed(4)} pct=${todayPct?.toFixed(2)}%`);
+                        console.log(`[Stats] ${holding.symbol}: cur=$${finalCur} prev=$${finalPc} pct=${todayPct?.toFixed(2)}%`);
 
                         if (todayDelta > 0.005) {
                             refreshStats.gained++;
-                            refreshStats.gainers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
+                            refreshStats.gainers.push({ symbol: holding.symbol, pct: todayPct });
                         } else if (todayDelta < -0.005) {
                             refreshStats.lost++;
-                            refreshStats.losers.push({ symbol: holding.symbol, delta: todayDelta, pct: todayPct });
+                            refreshStats.losers.push({ symbol: holding.symbol, pct: todayPct });
                         } else {
-                            // Flat / no prev close data — count as flat, not disappeared
-                            refreshStats.flat = (refreshStats.flat || 0) + 1;
+                            refreshStats.flat++;
                         }
                     } else {
                         refreshStats.failed++;
@@ -2344,7 +2338,8 @@
                 
                 // --- Post-Loop Actions ---
                 const totalFetched = refreshStats.total - refreshStats.failed;
-                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
+                updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers||[], refreshStats.losers||[], refreshStats.flat||0);
+                logActivity(`Refreshed prices for ${totalFetched} Stocks/ETFs.`);
                 await saveDataToFirestore(); // Save updated price cache
                 if (forceRefresh) window._priceCacheFreshFetched = true; // block Firestore from overwriting
                 await updateDisplay(false); // Update UI with new prices (don't refetch history)
@@ -2354,7 +2349,7 @@
                 console.error("Error during refreshAllPrices:", error);
                 updateDataStatus('error', "Refresh Failed");
                 // Update progress to show failure, though stats might be incomplete
-                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
+                updateRefreshProgress('completed', refreshStats.total, refreshStats.total - refreshStats.failed, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers||[], refreshStats.losers||[], refreshStats.flat||0);
                 // Optionally show a user-facing error message here
                 showConfirmationModal(`An error occurred during price refresh: ${error.message}`, null);
 
@@ -2370,15 +2365,10 @@
                  }
                  updateDataStatus(true); // Reset status to 'Synced' unless an error occurred (handled in catch)
 
-                // --- Handle Banner Timeout ---
-                // Banner stays visible until the user clicks ✕ (no auto-hide after completion)
+                // Banner stays visible until user clicks ✕
                 clearTimeout(hideBannerTimeoutId);
-                // Expose state for the dismiss button's inline handler
-                window._hideBannerTimeoutId = null;
-                window._isAutoRefreshEnabled = isAutoRefreshEnabled;
-
+                window._isAutoRefreshOn = isAutoRefreshEnabled;
                 if (isAutoRefreshEnabled) {
-                    // Show timer alongside the banner (don't hide the banner automatically)
                     const timerEl = document.getElementById('nextUpdateTimer');
                     if (timerEl) timerEl.style.display = 'block';
                 }
@@ -2391,61 +2381,53 @@
             const card = document.getElementById('refreshMessageCard');
             const box = document.getElementById('refreshStatusBox');
             const timer = document.getElementById('nextUpdateTimer');
-            
-            // Clear any pending hide operation when a new refresh starts or progresses
-            clearTimeout(hideBannerTimeoutId); 
-
+            clearTimeout(hideBannerTimeoutId);
             box.style.display = 'block';
-            card.style.display = 'flex'; 
+            card.style.display = 'flex';
 
             if (status === 'progress') {
                 card.classList.remove('purple-bg');
                 card.classList.add('progress');
                 timer.style.display = 'none';
-                
-                const currentSymbol = symbol || 'Fetching';
-                const message = `Refreshing ${currentSymbol}... (${current}/${total})`;
-                card.innerHTML = message;
+                card.innerHTML = `Refreshing ${symbol || 'Fetching'}... (${current}/${total})`;
             } else if (status === 'completed') {
                 card.classList.remove('progress');
-                
                 const totalRefreshed = total - failed;
+                const fmt = p => p != null ? (p >= 0 ? '+' : '') + p.toFixed(2) + '%' : '?%';
 
-                // Sort by absolute % move descending (null pct = stale, sort to end)
-                const sortedGainers = [...gainers].sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
-                const sortedLosers  = [...losers].sort((a, b) => (a.pct ?? 999) - (b.pct ?? 999));
+                const sortedG = [...gainers].sort((a,b) => (b.pct??-999)-(a.pct??-999));
+                const sortedL = [...losers].sort((a,b) => (a.pct??999)-(b.pct??999));
 
-                const fmt = (pct) => pct != null ? ((pct >= 0 ? '+' : '') + pct.toFixed(2) + '%') : '?%';
-
-                const gainerTags = sortedGainers.map(g =>
-                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;${g.pct==null?'opacity:0.55;':''}" ${g.pct==null?'title="Prev close data looks stale — % skipped"':''}>
+                const gTags = sortedG.map(g =>
+                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
                         <span style="color:#16A34A;font-weight:600;">${g.symbol}</span>
                         <span style="color:#16A34A;"> ${fmt(g.pct)}</span>
-                    </span>`
-                ).join('');
-
-                const loserTags = sortedLosers.map(l =>
-                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;${l.pct==null?'opacity:0.55;':''}" ${l.pct==null?'title="Prev close data looks stale — % skipped"':''}>
+                    </span>`).join('');
+                const lTags = sortedL.map(l =>
+                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
                         <span style="color:#DC2626;font-weight:600;">${l.symbol}</span>
                         <span style="color:#DC2626;"> ${fmt(l.pct)}</span>
-                    </span>`
-                ).join('');
+                    </span>`).join('');
 
-                const failedLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.8em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
-                const flatLine   = flat   > 0 ? `<div style="margin-top:2px;font-size:0.78em;opacity:0.6;">— ${flat} unchanged (or no prev close data)</div>` : '';
+                const failLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.78em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
+                const flatLine = flat   > 0 ? `<div style="margin-top:2px;font-size:0.75em;opacity:0.6;">— ${flat} flat / no prev close</div>` : '';
 
-                const message = `
+                card.innerHTML = `
                     <div style="width:100%;text-align:left;line-height:1.6;position:relative;padding-right:24px;">
-                        <button onclick="(function(){clearTimeout(window._hideBannerTimeoutId||null);var b=document.getElementById('refreshStatusBox');var t=document.getElementById('nextUpdateTimer');if(b){b.style.display='none';}if(t&&window._isAutoRefreshEnabled){t.style.display='block';}})()" style="position:absolute;top:-4px;right:-4px;background:rgba(255,255,255,0.25);border:none;color:white;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:20px;text-align:center;cursor:pointer;padding:0;font-weight:700;" title="Dismiss">✕</button>
-                        <div style="font-size:0.9em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> asset(s) · ▲${gained} up · ▼${lost} down · —${flat} flat</div>
-                        ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gainerTags}</div>` : ''}
-                        ${lost  > 0 ? `<div style="margin-bottom:3px;"><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${loserTags}</div>` : ''}
-                        ${gained === 0 && lost === 0 && flat > 0 ? `<div style="font-size:0.85em;opacity:0.7;">All flat — no movement vs previous close.</div>` : ''}
-                        ${flatLine}
-                        ${failedLine}
-                    </div>
-                `;
-                card.innerHTML = message;
+                        <button onclick="(function(){var b=document.getElementById('refreshStatusBox');var t=document.getElementById('nextUpdateTimer');if(b)b.style.display='none';if(t&&window._isAutoRefreshOn)t.style.display='block';})()" style="position:absolute;top:-4px;right:-4px;background:rgba(255,255,255,0.25);border:none;color:white;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:20px;text-align:center;cursor:pointer;padding:0;font-weight:700;" title="Dismiss">✕</button>
+                        <div style="font-size:0.88em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> · ▲${gained} up · ▼${lost} down · —${flat} flat</div>
+                        ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gTags}</div>` : ''}
+                        ${lost  > 0 ? `<div style="margin-bottom:3px;"><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${lTags}</div>` : ''}
+                        ${gained===0&&lost===0 ? `<div style="font-size:0.85em;opacity:0.7;">No movement vs prev close.</div>` : ''}
+                        ${flatLine}${failLine}
+                    </div>`;
+
+                // Stay visible until user clicks ✕
+                clearTimeout(hideBannerTimeoutId);
+                window._isAutoRefreshOn = isAutoRefreshEnabled;
+                if (isAutoRefreshEnabled) {
+                    if (timer) timer.style.display = 'block';
+                }
             }
         }
         // --- END NEW FUNCTION ---
@@ -4202,7 +4184,7 @@
             updateDataStatus('loading');
             
             isRefreshing = true;
-            refreshStats = { gained: 0, lost: 0, failed: 0, total: holdingsToRefresh.length, gainers: [], losers: [] }; 
+            refreshStats = { gained: 0, lost: 0, failed: 0, total: holdingsToRefresh.length, gainers: [], losers: [], flat: 0 }; 
             document.getElementById('refreshStatusBox').style.display = 'block'; 
             document.getElementById('nextUpdateTimer').style.display = 'none'; 
 
@@ -4219,17 +4201,16 @@
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
                     
+                    priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
+                    
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-
-                    const pc = priceData.previousClosePrice;
-                    const cur = priceData.currentPrice;
-                    priceDelta = (pc && pc > 0) ? (cur - pc) : (cur - (cached?.currentPrice || cur));
-                    const pct = (pc && pc > 0) ? ((cur - pc) / pc * 100) : 0;
                     
-                    if (priceDelta > 0.0001) { refreshStats.gained++; refreshStats.gainers.push({ symbol: holding.symbol, delta: priceDelta, pct }); }
-                    else if (priceDelta < -0.0001) { refreshStats.lost++; refreshStats.losers.push({ symbol: holding.symbol, delta: priceDelta, pct }); }
+                    const todayPct2 = (pc && pc > 0) ? ((cur - pc) / pc * 100) : null;
+                    if (priceDelta > 0.0001) { refreshStats.gained++; refreshStats.gainers.push({ symbol: holding.symbol, pct: todayPct2 }); }
+                    else if (priceDelta < -0.0001) { refreshStats.lost++; refreshStats.losers.push({ symbol: holding.symbol, pct: todayPct2 }); }
+                    else { refreshStats.flat++; }
                 } else {
                     refreshStats.failed++;
                 }
@@ -4237,7 +4218,7 @@
             }
             
             const totalFetched = refreshStats.total - refreshStats.failed;
-            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers, refreshStats.losers, refreshStats.flat || 0);
+            updateRefreshProgress('completed', refreshStats.total, totalFetched, null, refreshStats.gained, refreshStats.lost, refreshStats.failed, refreshStats.gainers||[], refreshStats.losers||[], refreshStats.flat||0);
             logActivity('Refreshed prices for mutual funds.');
             await saveDataToFirestore();
             await updateDisplay(); 
@@ -4248,10 +4229,8 @@
             
             isRefreshing = false; 
             
-            // Banner stays until user clicks ✕
             clearTimeout(hideBannerTimeoutId);
-            window._hideBannerTimeoutId = null;
-            window._isAutoRefreshEnabled = isAutoRefreshEnabled;
+            window._isAutoRefreshOn = isAutoRefreshEnabled;
             if (isAutoRefreshEnabled) {
                 const timerEl = document.getElementById('nextUpdateTimer');
                 if (timerEl) timerEl.style.display = 'block';
