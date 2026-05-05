@@ -378,22 +378,16 @@
         }
 
         .refresh-message-card {
-            background: var(--accent-color-1);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 12px;
-            font-size: 1em;
-            font-weight: 600;
-            box-shadow: 0 6px 15px rgba(0,0,0,0.25);
+            /* Base styles only — progress/completed override via inline styles */
             margin-bottom: 10px;
-            transition: all 0.3s ease;
+            transition: all 0.25s ease;
             display: flex;
             align-items: flex-start;
             justify-content: center;
-            white-space: normal;
-            flex-wrap: wrap;
-            max-width: min(620px, 92vw);
-            text-align: left;
+            max-width: min(640px, 92vw);
+        }
+        .refresh-message-card.progress {
+            background: rgba(15,15,25,0.92) !important;
         }
         .refresh-message-card.progress {
             background: var(--card-bg-color); /* White background for progress */
@@ -1947,61 +1941,62 @@
             const sym = symbol.toUpperCase().trim();
             const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
 
+            // Single request to Yahoo v8 chart with range=1d via corsproxy.
+            // range=1d gives:
+            //   meta.regularMarketPrice  = current/latest price
+            //   meta.chartPreviousClose  = yesterday's actual close (always accurate)
+            //   meta.regularMarketPreviousClose = same, also reliable on 1d range
+            // This is one call per symbol — no Worker needed for delayed mode.
+            // Fall back to Worker if corsproxy fails.
+
+            const directUrl  = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+            const workerUrl  = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
+
+            let price = null, previousClosePrice = null, name = null, quoteType = null;
+
+            // --- Try direct Yahoo first (most accurate prev close) ---
             try {
-                // Step 1: Get current price from your Worker (fast, no CORS issues)
-                const url = `${YAHOO_PROXY}?symbol=${encodeURIComponent(sym)}`;
-                const res = await fetchWithTimeout(url, { cache: 'no-store' }, 8000);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const json = await res.json();
-
-                const result = json?.data;
-                if (!result) throw new Error('No data in proxy response');
-
-                const meta = result?.meta;
-                if (!meta) throw new Error('No meta');
-
-                const price = meta?.regularMarketPrice;
-                if (!isValid(price)) throw new Error('No valid current price');
-
-                const name      = meta?.shortName || meta?.longName || null;
-                const quoteType = meta?.instrumentType || null;
-
-                // Step 2: Get accurate prev close from Yahoo's 1d chart directly.
-                // The Worker uses range=6mo which gives a WRONG regularMarketPreviousClose
-                // (it reflects the prior 6mo bar, not yesterday). The 1d range always
-                // gives the real previous trading day close in chartPreviousClose.
-                let previousClosePrice = null;
-                try {
-                    const ydUrl = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
-                    const ydRes = await fetchWithTimeout(ydUrl, { cache: 'no-store' }, 6000);
-                    if (ydRes.ok) {
-                        const ydJson = await ydRes.json();
-                        const ydMeta = ydJson?.chart?.result?.[0]?.meta;
-                        // chartPreviousClose on a 5d/1d chart = yesterday's actual close
-                        const pc = ydMeta?.chartPreviousClose || ydMeta?.regularMarketPreviousClose;
-                        if (isValid(pc)) {
-                            previousClosePrice = pc;
-                            console.log(`[PrevClose] ${sym}: ${pc} (Yahoo 5d direct)`);
+                const res = await fetchWithTimeout(directUrl, { cache: 'no-store' }, 7000);
+                if (res.ok) {
+                    const json = await res.json();
+                    const meta = json?.chart?.result?.[0]?.meta;
+                    if (meta) {
+                        const p  = meta.regularMarketPrice;
+                        const pc = meta.chartPreviousClose || meta.regularMarketPreviousClose;
+                        if (isValid(p)) {
+                            price              = p;
+                            previousClosePrice = isValid(pc) ? pc : null;
+                            name               = meta.shortName || meta.longName || null;
+                            quoteType          = meta.instrumentType || null;
+                            console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice} (direct 5d)`);
+                            return { currentPrice: price, previousClosePrice, name, quoteType };
                         }
                     }
-                } catch (pcErr) {
-                    console.warn(`[PrevClose] ${sym}: direct fetch failed, trying meta fallback`);
                 }
+            } catch (e) {
+                console.warn(`[Yahoo direct] ${sym}: ${e.message} — trying Worker fallback`);
+            }
 
-                // Fallback: use Worker meta fields if direct fetch failed
-                if (!previousClosePrice) {
-                    const fbPc = meta?.regularMarketPreviousClose || meta?.chartPreviousClose;
-                    if (isValid(fbPc)) {
-                        previousClosePrice = fbPc;
-                        console.warn(`[PrevClose] ${sym}: using Worker meta fallback = ${fbPc} (may be inaccurate)`);
-                    }
-                }
-
-                console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice}`);
+            // --- Fallback: Worker (fast, but prev close from 6mo range may be wrong) ---
+            try {
+                const res = await fetchWithTimeout(workerUrl, { cache: 'no-store' }, 8000);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const json   = await res.json();
+                const meta   = json?.data?.meta;
+                if (!meta) throw new Error('No meta in Worker response');
+                const p  = meta.regularMarketPrice;
+                if (!isValid(p)) throw new Error('No valid price in Worker response');
+                price     = p;
+                name      = meta.shortName || meta.longName || null;
+                quoteType = meta.instrumentType || null;
+                // Worker's regularMarketPreviousClose is from a 6mo chart — unreliable.
+                // Don't use it; leave previousClosePrice as null so G/L shows as '—'
+                // rather than showing a wrong number.
+                previousClosePrice = null;
+                console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=null (Worker fallback — prev close unavailable)`);
                 return { currentPrice: price, previousClosePrice, name, quoteType };
-
             } catch (err) {
-                console.warn(`Yahoo proxy failed for ${sym}: ${err.message}`);
+                console.warn(`Yahoo all sources failed for ${sym}: ${err.message}`);
                 return { currentPrice: null, previousClosePrice: null };
             }
         }
@@ -2359,18 +2354,50 @@
                 isRefreshing = false; // CRITICAL: Ensure flag is always reset
 
                 // Reset button state
-                 if (refreshButton) { // Add null check
+                if (refreshButton) {
                     refreshButton.textContent = 'Refresh Now';
                     refreshButton.disabled = false;
-                 }
-                 updateDataStatus(true); // Reset status to 'Synced' unless an error occurred (handled in catch)
+                }
+                updateDataStatus(true);
 
                 // Banner stays visible until user clicks ✕
                 clearTimeout(hideBannerTimeoutId);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
+
                 if (isAutoRefreshEnabled) {
-                    const timerEl = document.getElementById('nextUpdateTimer');
-                    if (timerEl) timerEl.style.display = 'block';
+                    // Reset the countdown so it starts fresh from the full interval.
+                    // Without this, the interval keeps ticking from wherever it was,
+                    // and the timer element stays hidden behind the completion banner.
+                    if (countdownIntervalId !== null) clearInterval(countdownIntervalId);
+
+                    const nextUpdateEl = document.getElementById('nextUpdateTimer');
+                    const refreshStatusBoxEl = document.getElementById('refreshStatusBox');
+
+                    function getSmartIntervalFB() {
+                        const now = new Date();
+                        const et  = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
+                        const day = et.getDay();
+                        const t   = et.getHours() * 60 + et.getMinutes();
+                        const isWeekend    = day === 0 || day === 6;
+                        const isMarketOpen = !isWeekend && t >= 570 && t < 960;
+                        return isMarketOpen ? autoRefreshIntervalSeconds : 300;
+                    }
+
+                    let timeLeft = getSmartIntervalFB();
+                    if (refreshStatusBoxEl) refreshStatusBoxEl.style.display = 'block';
+                    if (nextUpdateEl) {
+                        nextUpdateEl.style.display = 'block';
+                        nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+                    }
+
+                    countdownIntervalId = setInterval(() => {
+                        timeLeft--;
+                        if (timeLeft <= 0) {
+                            refreshAllPrices(false);
+                            timeLeft = getSmartIntervalFB();
+                        }
+                        if (nextUpdateEl) nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+                    }, 1000);
                 }
             } // --- End Finally ---
         }
@@ -2386,48 +2413,162 @@
             card.style.display = 'flex';
 
             if (status === 'progress') {
-                card.classList.remove('purple-bg');
-                card.classList.add('progress');
+                card.style.cssText = `
+                    background: rgba(15,15,25,0.92);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid rgba(255,255,255,0.1);
+                    border-radius: 16px;
+                    color: rgba(255,255,255,0.85);
+                    font-size: 0.88em;
+                    font-weight: 500;
+                    padding: 12px 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    white-space: nowrap;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                `;
                 timer.style.display = 'none';
-                card.innerHTML = `Refreshing ${symbol || 'Fetching'}... (${current}/${total})`;
+                card.innerHTML = `
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#60a5fa;box-shadow:0 0 8px #60a5fa;animation:pulse 1s infinite;"></span>
+                    <span>Refreshing <strong style="color:#fff;">${symbol || '...'}</strong></span>
+                    <span style="opacity:0.5;">${current}/${total}</span>
+                    <style>@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}</style>
+                `;
             } else if (status === 'completed') {
-                card.classList.remove('progress');
                 const totalRefreshed = total - failed;
-                const fmt = p => p != null ? (p >= 0 ? '+' : '') + p.toFixed(2) + '%' : '?%';
+                const fmt = p => p != null ? (p >= 0 ? '+' : '') + p.toFixed(2) + '%' : '—';
+                const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 
                 const sortedG = [...gainers].sort((a,b) => (b.pct??-999)-(a.pct??-999));
-                const sortedL = [...losers].sort((a,b) => (a.pct??999)-(b.pct??999));
+                const sortedL = [...losers].sort((a,b)  => (a.pct??999)-(b.pct??999));
 
-                const gTags = sortedG.map(g =>
-                    `<span style="display:inline-block;background:rgba(22,163,74,0.15);border:1px solid rgba(22,163,74,0.4);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
-                        <span style="color:#16A34A;font-weight:600;">${g.symbol}</span>
-                        <span style="color:#16A34A;"> ${fmt(g.pct)}</span>
-                    </span>`).join('');
-                const lTags = sortedL.map(l =>
-                    `<span style="display:inline-block;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.35);border-radius:4px;padding:1px 6px;margin:2px;font-size:0.82em;white-space:nowrap;">
-                        <span style="color:#DC2626;font-weight:600;">${l.symbol}</span>
-                        <span style="color:#DC2626;"> ${fmt(l.pct)}</span>
+                const gTags = sortedG.map(g => `
+                    <span style="
+                        display:inline-flex;align-items:center;gap:4px;
+                        background:rgba(16,185,129,0.15);
+                        border:1px solid rgba(16,185,129,0.35);
+                        border-radius:6px;padding:2px 8px;margin:2px;
+                        font-size:0.8em;white-space:nowrap;
+                    ">
+                        <span style="color:#34d399;font-weight:700;">${g.symbol}</span>
+                        <span style="color:#6ee7b7;font-size:0.9em;">${fmt(g.pct)}</span>
                     </span>`).join('');
 
-                const failLine = failed > 0 ? `<div style="margin-top:4px;font-size:0.78em;opacity:0.7;">⚠ ${failed} failed to fetch</div>` : '';
-                const flatLine = flat   > 0 ? `<div style="margin-top:2px;font-size:0.75em;opacity:0.6;">— ${flat} flat / no prev close</div>` : '';
+                const lTags = sortedL.map(l => `
+                    <span style="
+                        display:inline-flex;align-items:center;gap:4px;
+                        background:rgba(239,68,68,0.15);
+                        border:1px solid rgba(239,68,68,0.35);
+                        border-radius:6px;padding:2px 8px;margin:2px;
+                        font-size:0.8em;white-space:nowrap;
+                    ">
+                        <span style="color:#f87171;font-weight:700;">${l.symbol}</span>
+                        <span style="color:#fca5a5;font-size:0.9em;">${fmt(l.pct)}</span>
+                    </span>`).join('');
+
+                const failLine = failed > 0
+                    ? `<div style="margin-top:6px;font-size:0.75em;color:rgba(255,200,100,0.8);">⚠ ${failed} failed to fetch</div>` : '';
+                const flatLine = flat > 0
+                    ? `<div style="margin-top:2px;font-size:0.72em;color:rgba(255,255,255,0.35);">— ${flat} unchanged</div>` : '';
+
+                card.style.cssText = `
+                    background: linear-gradient(135deg, rgba(10,12,28,0.97) 0%, rgba(18,22,40,0.97) 100%);
+                    backdrop-filter: blur(20px);
+                    -webkit-backdrop-filter: blur(20px);
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-top: 1px solid rgba(255,255,255,0.15);
+                    border-radius: 18px;
+                    color: white;
+                    padding: 16px 20px;
+                    display: flex;
+                    align-items: flex-start;
+                    white-space: normal;
+                    flex-wrap: wrap;
+                    max-width: min(640px, 92vw);
+                    text-align: left;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+                    position: relative;
+                `;
 
                 card.innerHTML = `
-                    <div style="width:100%;text-align:left;line-height:1.6;position:relative;padding-right:24px;">
-                        <button onclick="(function(){var b=document.getElementById('refreshStatusBox');var t=document.getElementById('nextUpdateTimer');if(b)b.style.display='none';if(t&&window._isAutoRefreshOn)t.style.display='block';})()" style="position:absolute;top:-4px;right:-4px;background:rgba(255,255,255,0.25);border:none;color:white;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:20px;text-align:center;cursor:pointer;padding:0;font-weight:700;" title="Dismiss">✕</button>
-                        <div style="font-size:0.88em;margin-bottom:4px;opacity:0.85;">Refreshed <strong>${totalRefreshed}</strong> · ▲${gained} up · ▼${lost} down · —${flat} flat</div>
-                        ${gained > 0 ? `<div style="margin-bottom:3px;"><span class="positive-sync" style="font-size:0.82em;margin-right:4px;">▲ ${gained} UP</span>${gTags}</div>` : ''}
-                        ${lost  > 0 ? `<div style="margin-bottom:3px;"><span class="negative-sync" style="font-size:0.82em;margin-right:4px;">▼ ${lost} DOWN</span>${lTags}</div>` : ''}
-                        ${gained===0&&lost===0 ? `<div style="font-size:0.85em;opacity:0.7;">No movement vs prev close.</div>` : ''}
-                        ${flatLine}${failLine}
-                    </div>`;
+                    <div style="width:100%;position:relative;padding-right:28px;">
 
-                // Stay visible until user clicks ✕
+                        <!-- Dismiss button -->
+                        <button onclick="(function(){
+                            var b=document.getElementById('refreshStatusBox');
+                            var t=document.getElementById('nextUpdateTimer');
+                            if(b)b.style.display='none';
+                            if(t&&window._isAutoRefreshOn)t.style.display='block';
+                        })()" style="
+                            position:absolute;top:-4px;right:-4px;
+                            background:rgba(255,255,255,0.1);
+                            border:1px solid rgba(255,255,255,0.15);
+                            color:rgba(255,255,255,0.6);
+                            border-radius:50%;width:22px;height:22px;
+                            font-size:12px;line-height:22px;text-align:center;
+                            cursor:pointer;padding:0;
+                            transition:all 0.15s;
+                        " onmouseover="this.style.background='rgba(255,255,255,0.2)'"
+                           onmouseout="this.style.background='rgba(255,255,255,0.1)'"
+                           title="Dismiss">✕</button>
+
+                        <!-- Header row -->
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                            <span style="font-size:0.72em;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,0.4);">MARKET SCAN</span>
+                            <span style="font-size:0.72em;color:rgba(255,255,255,0.25);">·</span>
+                            <span style="font-size:0.72em;color:rgba(255,255,255,0.35);">${now}</span>
+                            <span style="font-size:0.72em;color:rgba(255,255,255,0.25);">·</span>
+                            <span style="font-size:0.72em;color:rgba(255,255,255,0.35);">${totalRefreshed} assets</span>
+                        </div>
+
+                        <!-- Summary pills row -->
+                        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                            <span style="
+                                display:inline-flex;align-items:center;gap:5px;
+                                background:rgba(16,185,129,0.18);
+                                border:1px solid rgba(16,185,129,0.4);
+                                border-radius:999px;padding:4px 12px;
+                                font-size:0.82em;font-weight:700;color:#34d399;
+                            ">▲ ${gained} UP</span>
+                            <span style="
+                                display:inline-flex;align-items:center;gap:5px;
+                                background:rgba(239,68,68,0.18);
+                                border:1px solid rgba(239,68,68,0.4);
+                                border-radius:999px;padding:4px 12px;
+                                font-size:0.82em;font-weight:700;color:#f87171;
+                            ">▼ ${lost} DOWN</span>
+                            <span style="
+                                display:inline-flex;align-items:center;gap:5px;
+                                background:rgba(255,255,255,0.06);
+                                border:1px solid rgba(255,255,255,0.12);
+                                border-radius:999px;padding:4px 12px;
+                                font-size:0.82em;font-weight:600;color:rgba(255,255,255,0.4);
+                            ">— ${flat} FLAT</span>
+                        </div>
+
+                        <!-- Gainers -->
+                        ${gained > 0 ? `
+                        <div style="margin-bottom:10px;">
+                            <div style="font-size:0.7em;font-weight:700;letter-spacing:1px;color:#34d399;text-transform:uppercase;margin-bottom:5px;opacity:0.8;">▲ Gainers</div>
+                            <div style="display:flex;flex-wrap:wrap;">${gTags}</div>
+                        </div>` : ''}
+
+                        <!-- Losers -->
+                        ${lost > 0 ? `
+                        <div style="margin-bottom:6px;">
+                            <div style="font-size:0.7em;font-weight:700;letter-spacing:1px;color:#f87171;text-transform:uppercase;margin-bottom:5px;opacity:0.8;">▼ Losers</div>
+                            <div style="display:flex;flex-wrap:wrap;">${lTags}</div>
+                        </div>` : ''}
+
+                        ${gained===0&&lost===0 ? `<div style="font-size:0.85em;color:rgba(255,255,255,0.4);padding:8px 0;">No price movement vs previous close.</div>` : ''}
+                        ${flatLine}${failLine}
+                    </div>
+                `;
+
                 clearTimeout(hideBannerTimeoutId);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
-                if (isAutoRefreshEnabled) {
-                    if (timer) timer.style.display = 'block';
-                }
+                if (isAutoRefreshEnabled && timer) timer.style.display = 'block';
             }
         }
         // --- END NEW FUNCTION ---
@@ -3497,6 +3638,10 @@
         let cachedMainHistory = null;
         let isHistoricalDataLoaded = false;
 
+        // Cached volatility history — built once on first load, reused on every refresh.
+        // Never rebuilt during price refreshes (would fetch Yahoo historical data every cycle).
+        let cachedVolatilityHistory = null;
+
         async function updateDisplay(fetchHistorical = false) {
             if (isUpdatingDisplay) return;
             isUpdatingDisplay = true;
@@ -3508,22 +3653,30 @@
                 // Make holdings available globally for Stock Split modal and other features
                 window.portfolioHoldings = currentHoldings;
 
-                // Volatility uses cached history only - never blocks initial render
-                let volatilityHistory = [];
-                // Always build volatility history for stats display, even if main history chart hasn't been clicked yet
-                console.log('Building volatility history...');
-                volatilityHistory = await buildVolatilityHistoryFromTransactions();
-                console.log('Volatility history built, length:', volatilityHistory.length);
-                console.log('First 5 data points:', volatilityHistory.slice(0, 5));
+                // Volatility history: build once on first load, then reuse silently.
+                // Do NOT rebuild on every refresh — it fetches Yahoo historical data
+                // for every symbol and blocks the price refresh loop.
+                if (cachedVolatilityHistory === null) {
+                    // First load: fetch silently in background, don't block render
+                    buildVolatilityHistoryFromTransactions().then(h => {
+                        cachedVolatilityHistory = h;
+                        // Quietly update just the volatility/sharpe/drawdown stats once ready
+                        const holdings = calculateHoldingsAndCash();
+                        const stats = calculateOverallStats(holdings, cachedVolatilityHistory);
+                        updateStats(stats);
+                    }).catch(e => {
+                        console.warn('Volatility history build failed:', e);
+                        cachedVolatilityHistory = [];
+                    });
+                }
 
+                // Use whatever we have (empty on first render, populated on subsequent ones)
+                const volatilityHistory = cachedVolatilityHistory || [];
                 const stats = calculateOverallStats(currentHoldings, volatilityHistory);
-                console.log('Stats calculated with history length:', volatilityHistory.length);
                 updateUserNameDisplay();
                 updateStats(stats);
 
                 // Pie/donut charts render immediately - no historical data needed
-                // Use filterChart to respect the user's selected range (1W, 1M, etc.)
-                // instead of always drawing the full history
                 if (cachedMainHistory && isHistoricalDataLoaded) {
                     await filterChart(activeChartFilter, cachedMainHistory);
                 } else {
