@@ -4374,18 +4374,20 @@
 
                 if (priceData && priceData.currentPrice !== null) {
                     if (!priceCache[holding.symbol]) priceCache[holding.symbol] = {};
-                    
-                    priceDelta = priceData.currentPrice - (cached?.currentPrice || priceData.currentPrice);
-                    
+
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
-                    
+
+                    // Use previousClosePrice vs currentPrice for gain/loss —
+                    // NOT cached vs current (which gives 0 if cache hasn't changed)
                     const cur2 = priceData.currentPrice;
                     const pc2  = priceData.previousClosePrice;
-                    const todayPct2 = (pc2 && pc2 > 0) ? ((cur2 - pc2) / pc2 * 100) : null;
-                    if (priceDelta > 0.0001) { refreshStats.gained++; refreshStats.gainers.push({ symbol: holding.symbol, pct: todayPct2 }); }
-                    else if (priceDelta < -0.0001) { refreshStats.lost++; refreshStats.losers.push({ symbol: holding.symbol, pct: todayPct2 }); }
+                    const todayDelta2 = (pc2 && pc2 > 0) ? (cur2 - pc2) : 0;
+                    const todayPct2   = (pc2 && pc2 > 0) ? ((cur2 - pc2) / pc2 * 100) : null;
+
+                    if (todayDelta2 > 0.005) { refreshStats.gained++; refreshStats.gainers.push({ symbol: holding.symbol, pct: todayPct2 }); }
+                    else if (todayDelta2 < -0.005) { refreshStats.lost++; refreshStats.losers.push({ symbol: holding.symbol, pct: todayPct2 }); }
                     else { refreshStats.flat++; }
                 } else {
                     refreshStats.failed++;
