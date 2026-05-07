@@ -953,9 +953,10 @@
                     for (const sym in portfolioData.manualPrices) {
                         if (!priceCache[sym]) priceCache[sym] = {};
                         if (priceCache[sym].manualPrice == null) {
-                            priceCache[sym].manualPrice = portfolioData.manualPrices[sym].manualPrice;
+                            priceCache[sym].manualPrice               = portfolioData.manualPrices[sym].manualPrice;
+                            priceCache[sym].manualPreviousClosePrice  = portfolioData.manualPrices[sym].manualPreviousClosePrice ?? null;
                             priceCache[sym].manualPriceEntryTimestamp = portfolioData.manualPrices[sym].manualPriceEntryTimestamp;
-                            console.log(`[ManualPrice] Restored ${sym}: $${priceCache[sym].manualPrice} from portfolioData backup`);
+                            console.log(`[ManualPrice] Restored ${sym}: cur=$${priceCache[sym].manualPrice} prev=$${priceCache[sym].manualPreviousClosePrice} from portfolioData backup`);
                         }
                     }
                 }
@@ -1826,8 +1827,9 @@
             for (const sym in priceCache) {
                 if (priceCache[sym]?.manualPrice != null) {
                     portfolioData.manualPrices[sym] = {
-                        manualPrice: priceCache[sym].manualPrice,
-                        manualPriceEntryTimestamp: priceCache[sym].manualPriceEntryTimestamp || Date.now()
+                        manualPrice:              priceCache[sym].manualPrice,
+                        manualPreviousClosePrice: priceCache[sym].manualPreviousClosePrice ?? null,
+                        manualPriceEntryTimestamp:priceCache[sym].manualPriceEntryTimestamp || Date.now()
                     };
                 }
             }
@@ -3334,12 +3336,30 @@
             if (isWatchlist) {
                 groupStatsHtml = `<div class="group-stat-item"><div class="detail-label">Tracking ${holdings.length} symbols</div></div>`;
             } else {
+                // Arrow indicator for Today's G/L
+                const todayArrow = totalGroupDailyGainLoss > 0.005
+                    ? `<span style="display:inline-block;margin-left:5px;font-size:1em;line-height:1;animation:arrowPulse 1.5s ease-in-out infinite;" title="Up today">▲</span>`
+                    : totalGroupDailyGainLoss < -0.005
+                    ? `<span style="display:inline-block;margin-left:5px;font-size:1em;line-height:1;animation:arrowPulse 1.5s ease-in-out infinite;" title="Down today">▼</span>`
+                    : '';
+
                 groupStatsHtml = `
+                    <style>
+                      @keyframes arrowPulse {
+                        0%,100% { opacity:1; transform:translateY(0); }
+                        50%      { opacity:0.6; transform:translateY(${totalGroupDailyGainLoss >= 0 ? '-' : ''}2px); }
+                      }
+                    </style>
                     <div class="group-stat-item"><div class="detail-label">Value</div><div class="detail-value">${formatCurrency(totalGroupValue)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">Cost Basis</div><div class="detail-value">${formatCurrency(totalGroupInvestedCostBasis)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">G/L</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupGainLoss)}</div></div>
                     <div class="group-stat-item"><div class="detail-label">G/L %</div><div class="detail-value ${totalGroupGainLoss >= 0 ? 'positive' : 'negative'}">${formatPercentage(totalGroupReturnPercentage)}</div></div>
-                    <div class="group-stat-item"><div class="detail-label">Today</div><div class="detail-value ${totalGroupDailyGainLoss >= 0 ? 'positive' : 'negative'}">${formatCurrency(totalGroupDailyGainLoss)}</div></div>
+                    <div class="group-stat-item">
+                        <div class="detail-label">Today</div>
+                        <div class="detail-value ${totalGroupDailyGainLoss >= 0 ? 'positive' : 'negative'}" style="display:flex;align-items:center;">
+                            ${formatCurrency(totalGroupDailyGainLoss)}${todayArrow}
+                        </div>
+                    </div>
                 `;
             }
 
@@ -4514,7 +4534,8 @@
             for (const sym in priceCache) {
                 if (priceCache[sym].manualPrice != null) {
                     savedManualPrices[sym] = {
-                        manualPrice: priceCache[sym].manualPrice,
+                        manualPrice:               priceCache[sym].manualPrice,
+                        manualPreviousClosePrice:  priceCache[sym].manualPreviousClosePrice ?? null,
                         manualPriceEntryTimestamp: priceCache[sym].manualPriceEntryTimestamp || Date.now()
                     };
                 }
@@ -4527,8 +4548,9 @@
             // Restore manual prices so they survive the wipe
             for (const sym in savedManualPrices) {
                 if (!priceCache[sym]) priceCache[sym] = {};
-                priceCache[sym].manualPrice = savedManualPrices[sym].manualPrice;
-                priceCache[sym].manualPriceEntryTimestamp = savedManualPrices[sym].manualPriceEntryTimestamp;
+                priceCache[sym].manualPrice              = savedManualPrices[sym].manualPrice;
+                priceCache[sym].manualPreviousClosePrice = savedManualPrices[sym].manualPreviousClosePrice ?? null;
+                priceCache[sym].manualPriceEntryTimestamp= savedManualPrices[sym].manualPriceEntryTimestamp;
             }
 
             // Also wipe Firestore price cache but re-save manual prices immediately
