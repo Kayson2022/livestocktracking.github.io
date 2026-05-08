@@ -596,6 +596,7 @@
         const FIRESTORE_DATA_DOC = 'portfolioData';
         const FIRESTORE_UI_STATE_DOC = 'uiState';
         const FIRESTORE_PRICE_CACHE_DOC = 'priceCache';
+        const FIRESTORE_SNAPSHOT_HISTORY_DOC = 'snapshotHistory'; // 401k/manual weekly snapshots
         const FIRESTORE_SESSION_DOC = 'sessionManagement'; // Document for session control - ADDED
 
         const THEME_KEY = 'myPortfolioTheme_v4';
@@ -936,6 +937,15 @@
                     uiState = docSnap.data();
                 }
             }).catch(e => console.error("Error loading uiState:", e));
+
+            // Load snapshot history (401k weekly snapshots)
+            getDoc(doc(portfolioColRef, FIRESTORE_SNAPSHOT_HISTORY_DOC)).then(snap => {
+                window._snapshotHistory = snap.exists() ? snap.data() : {};
+                console.log('[SnapshotHistory] Loaded:', Object.keys(window._snapshotHistory).length, 'funds');
+            }).catch(e => {
+                window._snapshotHistory = {};
+                console.warn('[SnapshotHistory] Load failed:', e);
+            });
 
             const priceCacheDocRef = doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC);
             getDoc(priceCacheDocRef).then(docSnap => {
@@ -1850,6 +1860,9 @@
                 batch.set(doc(portfolioColRef, FIRESTORE_DATA_DOC), getCleanObject(portfolioData));
                 batch.set(doc(portfolioColRef, FIRESTORE_UI_STATE_DOC), getCleanObject(uiState));
                 batch.set(doc(portfolioColRef, FIRESTORE_PRICE_CACHE_DOC), getCleanObject(priceCache));
+                if (window._snapshotHistory && Object.keys(window._snapshotHistory).length > 0) {
+                    batch.set(doc(portfolioColRef, FIRESTORE_SNAPSHOT_HISTORY_DOC), window._snapshotHistory);
+                }
                 // Note: Session doc is saved separately by its own functions, not in this batch. - MODIFIED
 
                 await batch.commit();
@@ -3933,8 +3946,29 @@
                                 type: newType, 
                                 accountType: accountType,
                                 platform: platform,
+                                isSnapshot: true, // marks as balance snapshot, not a real purchase
                             };
                             portfolioData.transactions = [...otherTransactions, summaryTransaction];
+
+                            // ── Record snapshot for 401k/manual accounts ──
+                            // Key = "SYMBOL|accountType|platform"
+                            // Store history of values so monthly chart can show
+                            // the DIFF between snapshots instead of the full balance.
+                            const acctLower = (accountType || '').toLowerCase();
+                            if (acctLower.includes('401') || newType === 'Manual (No Price Fetch)' || newType === 'manual') {
+                                if (!window._snapshotHistory) window._snapshotHistory = {};
+                                const snapKey = `${symbol}|${accountType}|${platform}`;
+                                if (!window._snapshotHistory[snapKey]) window._snapshotHistory[snapKey] = [];
+                                const newValue = newTotalShares * newAvgPrice;
+                                window._snapshotHistory[snapKey].push({
+                                    date:   new Date().toISOString().split('T')[0],
+                                    value:  newValue,
+                                    shares: newTotalShares,
+                                    price:  newAvgPrice
+                                });
+                                console.log(`[SnapshotHistory] Recorded ${snapKey}: $${newValue.toFixed(2)}`);
+                            }
+
                             logActivity(`Edited holding (summary override) for ${symbol} in ${accountType} - ${platform}.`);
                             
                             await saveDataToFirestore(); 
@@ -5199,7 +5233,9 @@
                 if (account && t.accountType !== account) return;
                 // Skip cash/money-market transactions
                 if (isCashEquivalentType(t.type)) return;
-
+                // Skip 401k/manual snapshot accounts — handled via diff below
+                const acctType = (t.accountType || '').toLowerCase();
+                if (acctType.includes('401') || t.isSnapshot) return;
                 const m   = d.getMonth();
                 const shares = parseFloat(t.shares) || 0;
                 const price  = parseFloat(t.price)  || 0;
@@ -5207,6 +5243,33 @@
                 if ((t.transactionType || '').toUpperCase() === 'BUY')  buyData[m]  += amt;
                 if ((t.transactionType || '').toUpperCase() === 'SELL') sellData[m] += amt;
             });
+
+            // ── 401k snapshot DIFFS ──────────────────────────────────────
+            // Each fund keeps a snapshot history. The chart shows the VALUE
+            // CHANGE between consecutive weekly snapshots — not the full balance.
+            // First snapshot ever = $0 (opening balance, skip it).
+            if (window._snapshotHistory) {
+                Object.entries(window._snapshotHistory).forEach(([key, snapshots]) => {
+                    if (!snapshots || snapshots.length < 2) return;
+                    // Check if this key belongs to the selected account filter
+                    if (account) {
+                        const keyAcct = key.split('|')[1] || '';
+                        if (keyAcct !== account) return;
+                    }
+                    const yearSnaps   = snapshots.filter(s => new Date(s.date).getFullYear() === year);
+                    if (yearSnaps.length === 0) return;
+                    const prevYearSnaps = snapshots.filter(s => new Date(s.date).getFullYear() < year);
+                    const baseline    = prevYearSnaps.length > 0 ? prevYearSnaps[prevYearSnaps.length - 1].value : null;
+                    yearSnaps.forEach((snap, i) => {
+                        const prevValue = i === 0 ? baseline : yearSnaps[i - 1].value;
+                        if (prevValue === null) return; // first ever entry — opening balance, skip
+                        const diff = snap.value - prevValue;
+                        const m = new Date(snap.date).getMonth();
+                        if (diff > 0)      buyData[m]  += diff;
+                        else if (diff < 0) sellData[m] += Math.abs(diff);
+                    });
+                });
+            }
 
             if (monthlyChartInstance) { monthlyChartInstance.destroy(); monthlyChartInstance = null; }
             // Also clear any orphaned Chart.js instance registered on this canvas
