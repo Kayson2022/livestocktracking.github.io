@@ -11909,7 +11909,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 
     function processCSVImportPro() {
         const incoming = _csvProData.transactions;
-        const existing = portfolioData.transactions || [];
+        const existing = (window.portfolioData || portfolioData || {}).transactions || [];
 
         _csvProNew = [];
         let dupes = 0, skipped = 0;
@@ -12008,8 +12008,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
                 amount:          parseFloat(t.amount) || null,
             }));
 
-            portfolioData.transactions = [
-                ...(portfolioData.transactions || []),
+            const pd = window.portfolioData || portfolioData;
+            pd.transactions = [
+                ...(pd.transactions || []),
                 ...normalized
             ];
 
@@ -12018,7 +12019,11 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             if (typeof updateDisplay === 'function') await updateDisplay();
 
             closeCSVImportProModal();
-            showConfirmationModal(`✅ Successfully imported ${normalized.length} new transactions!`, null);
+            if (typeof showConfirmationModal === 'function') {
+                showConfirmationModal(`✅ Successfully imported ${normalized.length} new transactions!`, null);
+            } else {
+                alert(`✅ Successfully imported ${normalized.length} new transactions!`);
+            }
         } catch(err) {
             btn.disabled = false;
             btn.textContent = '✅ Import New Transactions';
