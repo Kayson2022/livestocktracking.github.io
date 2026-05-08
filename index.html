@@ -12013,9 +12013,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
                 ...normalized
             ];
 
-            logActivity(`Imported ${normalized.length} transactions from CSV Tool.`);
-            await saveDataToFirestore();
-            await updateDisplay();
+            if (typeof logActivity === 'function') logActivity(`Imported ${normalized.length} transactions from CSV Tool.`);
+            if (typeof saveDataToFirestore === 'function') await saveDataToFirestore();
+            if (typeof updateDisplay === 'function') await updateDisplay();
 
             closeCSVImportProModal();
             showConfirmationModal(`✅ Successfully imported ${normalized.length} new transactions!`, null);
