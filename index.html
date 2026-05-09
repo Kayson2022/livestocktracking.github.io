@@ -3280,9 +3280,11 @@
             const searchTerm = currentSearchTerm.toLowerCase();
 
             if (searchTerm) {
-                holdingsToRender = holdingsToRender.filter(h =>
-                    h.symbol.toLowerCase().includes(searchTerm) || h.name.toLowerCase().includes(searchTerm)
-                );
+                holdingsToRender = holdingsToRender.filter(h => {
+                    const sym  = (h.symbol || '').toLowerCase();
+                    const name = (h.name   || '').toLowerCase();
+                    return sym.includes(searchTerm) || name.includes(searchTerm);
+                });
             }
             if (currentFilter !== 'all') {
                 holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
