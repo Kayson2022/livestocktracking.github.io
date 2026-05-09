@@ -4649,20 +4649,34 @@
                     console.warn(`Backup JSON is ${Math.round(jsonStr.length/1024)}kb — truncating to fit EmailJS limit`);
                 }
 
+                // Strip heavy data to stay under EmailJS 50KB limit
+                // Keep only holdings summary + recent transactions (last 50)
+                const slimData = {
+                    exportDate:        data.exportDate,
+                    totalTransactions: data.totalTransactions,
+                    holdings:          (data.holdings || []).map(h => ({
+                        symbol: h.symbol, shares: h.totalShares,
+                        value:  h.currentValue, accountType: h.accountType
+                    })),
+                    // Only last 50 transactions to save space
+                    recentTransactions: (data.transactions || []).slice(-50),
+                    note: 'Slim backup — use Export button in app for full data'
+                };
+                const slimStr = JSON.stringify(slimData);
+                console.log('Slim backup size:', Math.round(slimStr.length/1024) + 'kb');
+
                 await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-                    // Required by Contact Us template
                     to_email:     BACKUP_EMAIL,
                     name:         'Portfolio App',
                     email:        BACKUP_EMAIL,
-                    title:        `Portfolio Backup — ${now}`,
-                    message:      `Backup Date: ${now} | Records: ${data.totalTransactions}`,
-                    // Backup-specific variables
-                    subject:      `Portfolio Backup — ${now}`,
+                    title:        'Portfolio Backup — ' + now,
+                    message:      'Backup Date: ' + now + ' | Records: ' + data.totalTransactions,
+                    subject:      'Portfolio Backup — ' + now,
                     backup_date:  now,
                     record_count: data.totalTransactions,
-                    backup_json:  jsonStr.length > 45000
-                                    ? jsonStr.substring(0, 45000) + '\n... (truncated, use Export button for full data)'
-                                    : jsonStr
+                    backup_json:  slimStr.length > 45000
+                                    ? slimStr.substring(0, 45000) + '\n... (truncated)'
+                                    : slimStr
                 });
 
                 localStorage.setItem(BACKUP_STORAGE_KEY, Date.now().toString());
