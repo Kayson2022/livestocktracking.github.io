@@ -4630,63 +4630,50 @@
         }
 
         async function sendBackupEmail(isManual = false) {
-            if (!EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID || !EMAILJS_PUBLIC_KEY || !BACKUP_EMAIL) {
-                if (isManual) showBackupStatus('fail', '⚠️ EmailJS not configured — see Settings');
-                return false;
-            }
-
-            showBackupStatus('busy', '📤 Sending backup...');
-
+            showBackupStatus('busy', '📤 Sending backup to Telegram...');
             try {
-                emailjs.init(EMAILJS_PUBLIC_KEY);
+                const data    = getBackupData();
+                const now     = new Date().toLocaleString('en-US', {timeZone:'America/Los_Angeles'});
+                const nowFile = new Date().toISOString().split('T')[0];
+                const jsonStr = JSON.stringify(data, null, 2);
+                const sizekb  = Math.round(jsonStr.length / 1024);
 
-                const data = getBackupData();
-                // Compact JSON (no indentation) saves ~30% space vs pretty-print
-                const jsonStr = JSON.stringify(data);
-                const now = new Date().toLocaleString();
-                // Hard cap at 40kb to stay under EmailJS 50kb limit
-                if (jsonStr.length > 40000) {
-                    console.warn(`Backup JSON is ${Math.round(jsonStr.length/1024)}kb — truncating to fit EmailJS limit`);
+                // Send as file via Telegram Bot API directly
+                const TG_TOKEN   = '8693017310:AAHM3RHmxU5LymlAFxgsktl7kLd9nMoEIv0';
+                const TG_CHAT_ID = '8748935089';
+                const fileName   = '401k-backup-' + nowFile + '.json';
+
+                // Create file blob
+                const blob     = new Blob([jsonStr], { type: 'application/json' });
+                const formData = new FormData();
+                formData.append('chat_id', TG_CHAT_ID);
+                formData.append('caption',
+                    '💾 401k Portfolio Backup\n' +
+                    'Date: ' + now + ' PT\n' +
+                    'Transactions: ' + data.totalTransactions + '\n' +
+                    'Size: ' + sizekb + 'KB\n' +
+                    'Save this file to restore your portfolio.'
+                );
+                formData.append('document', blob, fileName);
+
+                const res = await fetch(
+                    'https://api.telegram.org/bot' + TG_TOKEN + '/sendDocument',
+                    { method: 'POST', body: formData }
+                );
+                const result = await res.json();
+
+                if (result.ok) {
+                    localStorage.setItem(BACKUP_STORAGE_KEY, Date.now().toString());
+                    showBackupStatus('ok', '✅ Backup sent to Telegram at ' + new Date().toLocaleTimeString());
+                    logActivity('Backup sent to Telegram (' + sizekb + 'KB)');
+                    console.log('Telegram backup sent ✅', sizekb + 'KB');
+                    return true;
+                } else {
+                    throw new Error(result.description || 'Telegram error');
                 }
-
-                // Strip heavy data to stay under EmailJS 50KB limit
-                // Keep only holdings summary + recent transactions (last 50)
-                const slimData = {
-                    exportDate:        data.exportDate,
-                    totalTransactions: data.totalTransactions,
-                    holdings:          (data.holdings || []).map(h => ({
-                        symbol: h.symbol, shares: h.totalShares,
-                        value:  h.currentValue, accountType: h.accountType
-                    })),
-                    // Only last 50 transactions to save space
-                    recentTransactions: (data.transactions || []).slice(-50),
-                    note: 'Slim backup — use Export button in app for full data'
-                };
-                const slimStr = JSON.stringify(slimData);
-                console.log('Slim backup size:', Math.round(slimStr.length/1024) + 'kb');
-
-                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-                    to_email:     BACKUP_EMAIL,
-                    name:         'Portfolio App',
-                    email:        BACKUP_EMAIL,
-                    title:        'Portfolio Backup — ' + now,
-                    message:      'Backup Date: ' + now + ' | Records: ' + data.totalTransactions,
-                    subject:      'Portfolio Backup — ' + now,
-                    backup_date:  now,
-                    record_count: data.totalTransactions,
-                    backup_json:  slimStr.length > 45000
-                                    ? slimStr.substring(0, 45000) + '\n... (truncated)'
-                                    : slimStr
-                });
-
-                localStorage.setItem(BACKUP_STORAGE_KEY, Date.now().toString());
-                showBackupStatus('ok', `✅ Backed up at ${new Date().toLocaleTimeString()}`);
-                logActivity(`Auto-backup sent to ${BACKUP_EMAIL}`);
-                console.log('Auto-backup email sent ✅');
-                return true;
             } catch (e) {
-                console.error('Backup email failed:', e);
-                showBackupStatus('fail', '❌ Backup failed — check console');
+                console.error('Telegram backup failed:', e);
+                showBackupStatus('fail', '❌ Backup failed: ' + e.message);
                 return false;
             }
         }
@@ -4702,7 +4689,6 @@
         }
 
         function startAutoBackup() {
-            if (!EMAILJS_SERVICE_ID) return;
             // Always respect user preference first
             if (localStorage.getItem('autoBackupDisabled401') === 'true') {
                 updateBackupToggleBtn401(false);
