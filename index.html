@@ -6234,6 +6234,7 @@
             <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
             <button class="btn" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;" onclick="openCSVImportModal()">📊 Import from CSV Tool</button>
+            <button class="btn" style="background:linear-gradient(135deg,#e17055,#d63031);color:#fff;border:none;" onclick="window.cleanupBadImports()">🧹 Clean Bad Imports</button>
             <input type="file" id="csvJsonFileInput" accept=".json" style="display: none;">
             <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button class="btn" onclick="document.getElementById('restorePanel').style.display=document.getElementById('restorePanel').style.display==='none'?'block':'none'" style="background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:#fff;border:none;">📥 Restore from Email Backup</button>
@@ -11980,11 +11981,16 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         let dupes = 0, skipped = 0;
 
         incoming.forEach(t => {
-            // Validate required fields
-            if (!t.symbol || !t.date || (!t.shares && !t.amount)) {
-                skipped++;
-                return;
-            }
+            // Validate required fields — must have symbol, date, and shares or amount
+            const sym = (t.symbol || '').trim();
+            if (!sym) { skipped++; return; }
+            if (!t.date) { skipped++; return; }
+            const shares = parseFloat((String(t.shares||'')).replace(/,/g,'')) || 0;
+            const amount = parseFloat((String(t.amount||'')).replace(/,/g,'').replace('$','')) || 0;
+            const txType = (t.transactionType || t.type || '').toUpperCase();
+            const isDividend = txType === 'DIVIDEND' || txType === 'DISTRIBUTION' || txType === 'REINVESTMENT';
+            if (!isDividend && shares <= 0) { skipped++; return; }
+            if (isDividend && shares <= 0 && amount <= 0) { skipped++; return; }
             // Smart duplicate check
             const isDupe = existing.some(ex =>
                 (ex.symbol || '').toUpperCase() === (t.symbol || '').toUpperCase() &&
@@ -12058,41 +12064,156 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         btn.disabled = true;
 
         try {
-            // Normalize and merge into portfolioData
-            const normalized = _csvProNew.map((t, i) => ({
-                id:              t.id || (Date.now() + i),
-                date:            t.date,
-                symbol:          (t.symbol || '').toUpperCase(),
-                type:            t.type || t.symbol,  // holding type
-                transactionType: (t.transactionType || t.type || 'BUY').toUpperCase(),
-                shares:          parseFloat(t.shares) || 0,
-                price:           parseFloat(t.price)  || 0,
-                accountType:     t.accountType || 'Regular Brokerage',
-                notes:           t.notes || `Imported from CSV Tool`,
-                dividend:        0,
-                amount:          parseFloat(t.amount) || null,
-            }));
-
             const pd = window.portfolioData || portfolioData;
-            pd.transactions = [
-                ...(pd.transactions || []),
-                ...normalized
-            ];
 
-            if (typeof logActivity === 'function') logActivity(`Imported ${normalized.length} transactions from CSV Tool.`);
+            // ── Normalize & validate each transaction ──────────────
+            const normalized = [];
+            const rejected   = [];
+
+            _csvProNew.forEach(function(t, i) {
+                // Must have a valid symbol
+                const sym = (t.symbol || '').trim().toUpperCase();
+                if (!sym) { rejected.push('Row ' + i + ': empty symbol'); return; }
+
+                // Must have a valid date (YYYY-MM-DD or M/D/YYYY)
+                let dateStr = (t.date || '').trim();
+                if (!dateStr) { rejected.push(sym + ': missing date'); return; }
+                // Normalize M/D/YYYY → YYYY-MM-DD
+                if (dateStr.includes('/')) {
+                    const parts = dateStr.split('/');
+                    if (parts.length === 3) {
+                        const m = parts[0].padStart(2,'0');
+                        const d = parts[1].padStart(2,'0');
+                        const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+                        dateStr = y + '-' + m + '-' + d;
+                    }
+                }
+                // Validate date is real
+                const dateObj = new Date(dateStr);
+                if (isNaN(dateObj.getTime())) { rejected.push(sym + ': invalid date ' + dateStr); return; }
+
+                // Must have valid shares or amount
+                const shares = parseFloat((String(t.shares || '')).replace(/,/g,'')) || 0;
+                const price  = parseFloat((String(t.price  || '')).replace(/,/g,'').replace('$','')) || 0;
+                const txType = (t.transactionType || t.type || 'BUY').toUpperCase();
+
+                // For DIVIDEND/DISTRIBUTION — allow 0 shares if amount > 0
+                const amount = parseFloat((String(t.amount || '')).replace(/,/g,'').replace('$','')) || 0;
+                const isDividend = txType === 'DIVIDEND' || txType === 'DISTRIBUTION' || txType === 'REINVESTMENT';
+                if (!isDividend && shares <= 0) { rejected.push(sym + ': zero shares on ' + txType); return; }
+                if (isDividend && shares <= 0 && amount <= 0) { rejected.push(sym + ': zero dividend'); return; }
+
+                // Price must be positive for non-dividend
+                if (!isDividend && price <= 0) { rejected.push(sym + ': zero price'); return; }
+
+                // Determine investment type for the app
+                const knownETFs  = ['VOO','VTI','QQQ','SPY','IVV','VGT','SCHG','SLV','GLD','VEA','VWO','BND','AGG','VNQ'];
+                const knownMFs   = ['FXAIX','FSELX','VTSAX','VFIAX','VTIAX','FSKAX','SWPPX'];
+                let invType = t.type || '';
+                if (!invType || invType === sym) {
+                    if (knownMFs.includes(sym))  invType = 'Mutual Fund';
+                    else if (knownETFs.includes(sym)) invType = 'ETF';
+                    else invType = 'Stock';
+                }
+
+                normalized.push({
+                    id:              Date.now() + i + Math.random(),
+                    date:            dateStr,
+                    symbol:          sym,
+                    name:            (t.name || t.investmentName || sym),
+                    type:            invType,
+                    transactionType: txType,
+                    shares:          shares,
+                    price:           price > 0 ? price : (shares > 0 && amount !== 0 ? Math.abs(amount / shares) : 0),
+                    accountType:     t.accountType || 'Regular Brokerage',
+                    platform:        t.platform || 'Vanguard',
+                    notes:           'Imported from CSV Tool ' + new Date().toLocaleDateString(),
+                    dividend:        isDividend ? Math.abs(amount) : 0,
+                    amount:          amount || null,
+                    isSnapshot:      false,
+                });
+            });
+
+            if (rejected.length) {
+                console.warn('[Import] Rejected', rejected.length, 'rows:', rejected.slice(0,10));
+            }
+
+            if (!normalized.length) {
+                btn.disabled = false;
+                btn.textContent = 'Import Transactions';
+                alert('No valid transactions to import after validation.
+
+Rejected ' + rejected.length + ' rows:
+' + rejected.slice(0,5).join('
+'));
+                return;
+            }
+
+            // ── Merge — keep existing, add new ────────────────────
+            const existing = pd.transactions || [];
+            pd.transactions = [...existing, ...normalized];
+
+            // ── Save & refresh ─────────────────────────────────────
+            if (typeof logActivity === 'function') {
+                logActivity('Imported ' + normalized.length + ' transactions from CSV Tool (' + rejected.length + ' skipped).');
+            }
             if (typeof saveDataToFirestore === 'function') await saveDataToFirestore();
-            if (typeof updateDisplay === 'function') await updateDisplay();
+            if (typeof updateDisplay       === 'function') await updateDisplay();
 
             closeCSVImportProModal();
+
+            const msg = 'Imported ' + normalized.length + ' transactions!' +
+                (rejected.length ? '
+
+Skipped ' + rejected.length + ' invalid rows (check console for details).' : '');
             if (typeof showConfirmationModal === 'function') {
-                showConfirmationModal(`✅ Successfully imported ${normalized.length} new transactions!`, null);
+                showConfirmationModal('✅ ' + msg, null);
             } else {
-                alert(`✅ Successfully imported ${normalized.length} new transactions!`);
+                alert(msg);
             }
+
         } catch(err) {
+            console.error('[Import] Error:', err);
             btn.disabled = false;
-            btn.textContent = '✅ Import New Transactions';
+            btn.textContent = 'Import Transactions';
             alert('Import failed: ' + err.message);
+        }
+    };
+
+    // ── Clean up bad imported transactions ─────────────────────
+    window.cleanupBadImports = async function() {
+        const pd = window.portfolioData || portfolioData;
+        const before = (pd.transactions || []).length;
+
+        pd.transactions = (pd.transactions || []).filter(t => {
+            const sym    = (t.symbol || '').trim();
+            const shares = parseFloat(t.shares) || 0;
+            const price  = parseFloat(t.price)  || 0;
+            const date   = (t.date || '').trim();
+            const txType = (t.transactionType || '').toUpperCase();
+            const isDividend = txType === 'DIVIDEND' || txType === 'DISTRIBUTION' || txType === 'REINVESTMENT';
+
+            // Remove if no symbol
+            if (!sym) return false;
+            // Remove if no date
+            if (!date) return false;
+            // Remove if invalid date
+            if (isNaN(new Date(date).getTime())) return false;
+            // Remove non-dividend with 0 shares
+            if (!isDividend && shares <= 0) return false;
+            // Remove if price and amount both 0 (invalid)
+            if (price <= 0 && !isDividend && (parseFloat(t.amount)||0) === 0) return false;
+
+            return true;
+        });
+
+        const removed = before - pd.transactions.length;
+        if (removed > 0) {
+            if (typeof saveDataToFirestore === 'function') await saveDataToFirestore();
+            if (typeof updateDisplay       === 'function') await updateDisplay();
+            alert('Cleaned up ' + removed + ' invalid transactions. Portfolio restored.');
+        } else {
+            alert('No invalid transactions found — data looks clean!');
         }
     };
 
@@ -12105,222 +12226,184 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 </script>
 
 
-<script>
-// ═══════════════════════════════════════════════════════════════
-//  TELEGRAM ALERT SYSTEM — 401k App
-//  Browser → Cloudflare Worker → Telegram
-// ═══════════════════════════════════════════════════════════════
-(function() {
-    'use strict';
-
-    const WORKER_URL  = 'https://yahoo-proxy.giolamchieu1975.workers.dev/telegram';
-    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
-
-    async function sendTelegram(message) {
-        try {
-            await fetch(WORKER_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message })
-            });
-        } catch(e) {
-            console.warn('[Telegram] Send failed:', e.message);
-        }
-    }
-
-    function getCooldowns() {
-        try { return JSON.parse(localStorage.getItem('tg_401k_cooldowns') || '{}'); }
-        catch { return {}; }
-    }
-
-    function saveCooldowns(cd) {
-        localStorage.setItem('tg_401k_cooldowns', JSON.stringify(cd));
-    }
-
-    function isOnCooldown(key) {
-        const cd  = getCooldowns();
-        const now = Date.now();
-        Object.keys(cd).forEach(k => { if (now - cd[k] > COOLDOWN_MS) delete cd[k]; });
-        saveCooldowns(cd);
-        return !!cd[key];
-    }
-
-    function setCooldown(key) {
-        const cd = getCooldowns();
-        cd[key]  = Date.now();
-        saveCooldowns(cd);
-    }
-
-    function fmt(n) {
-        return '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-    }
-
-    // Track all-time high
-    function getATH() {
-        return parseFloat(localStorage.getItem('tg_401k_ath') || '0');
-    }
-    function setATH(val) {
-        localStorage.setItem('tg_401k_ath', val.toString());
-    }
-
-    // Track YTD baseline
-    function getYTDBaseline() {
-        const key = `tg_401k_ytd_${new Date().getFullYear()}`;
-        return parseFloat(localStorage.getItem(key) || '0');
-    }
-    function setYTDBaseline(val) {
-        const key = `tg_401k_ytd_${new Date().getFullYear()}`;
-        if (!localStorage.getItem(key)) localStorage.setItem(key, val.toString());
-    }
-
-    // ── Check portfolio-level alerts ─────────────────────────────
-    async function checkPortfolioAlerts() {
-        // Get current portfolio value from the DOM
-        const totalEl = document.getElementById('totalPortfolioValue') ||
-                        document.getElementById('stat-total-value') ||
-                        document.querySelector('[id*="total"][id*="value"]');
-
-        // Try to get from portfolioData
-        if (typeof portfolioData === 'undefined') return;
-        const holdings = calculateHoldingsAndCash ? calculateHoldingsAndCash() : null;
-        if (!holdings) return;
-
-        const totalValue = holdings.reduce((s, h) => {
-            const price  = (priceCache[h.symbol]?.manualPrice || priceCache[h.symbol]?.currentPrice || h.currentPrice || 0);
-            return s + (price * h.totalShares);
-        }, 0);
-
-        if (!totalValue || totalValue < 1000) return;
-
-        const prevClose = holdings.reduce((s, h) => {
-            const pc = priceCache[h.symbol]?.previousClosePrice || 0;
-            return s + (pc * h.totalShares);
-        }, 0);
-
-        // ── Daily move alerts ──
-        if (prevClose > 0) {
-            const dayPct   = ((totalValue - prevClose) / prevClose) * 100;
-            const daySign  = dayPct >= 0 ? '+' : '';
-            const dayEmoji = dayPct >= 0 ? '📈' : '📉';
-
-            // Check 1%, 2%, 3% thresholds
-            for (const thresh of [1, 2, 3]) {
-                if (Math.abs(dayPct) >= thresh) {
-                    const key = `daily_${thresh}pct_${dayPct>0?'up':'down'}_${new Date().toDateString()}`;
-                    if (!isOnCooldown(key)) {
-                        await sendTelegram(
-                            `${dayEmoji} <b>PORTFOLIO ${dayPct>0?'UP':'DOWN'} ${thresh}%+</b>
-` +
-                            `Daily P/L: ${daySign}${dayPct.toFixed(2)}%
-` +
-                            `Value: ${fmt(totalValue)}
-` +
-                            `Change: ${daySign}${fmt(totalValue - prevClose)}
-` +
-                            `<i>401k App Alert</i>`
-                        );
-                        setCooldown(key);
-                        break; // Only fire highest threshold once
-                    }
-                }
-            }
-        }
-
-        // ── All-time high ──
-        const ath = getATH();
-        if (totalValue > ath) {
-            setATH(totalValue);
-            if (ath > 0) { // Don't alert on first run
-                const key = `ath_${Math.floor(totalValue/1000)}_${new Date().toDateString()}`;
-                if (!isOnCooldown(key)) {
-                    await sendTelegram(
-                        `🏆 <b>NEW ALL-TIME HIGH!</b>
-` +
-                        `Portfolio: ${fmt(totalValue)}
-` +
-                        `Previous ATH: ${fmt(ath)}
-` +
-                        `<i>401k App — Keep going! 🚀</i>`
-                    );
-                    setCooldown(key);
-                }
-            }
-        }
-
-        // ── YTD milestone (every 5%) ──
-        const ytdBaseline = getYTDBaseline();
-        if (ytdBaseline > 0) {
-            const ytdPct  = ((totalValue - ytdBaseline) / ytdBaseline) * 100;
-            const milestone = Math.floor(ytdPct / 5) * 5; // Round down to nearest 5%
-            if (milestone > 0) {
-                const key = `ytd_${milestone}pct_${new Date().getFullYear()}`;
-                if (!isOnCooldown(key)) {
-                    await sendTelegram(
-                        `📊 <b>YTD MILESTONE — +${milestone}%</b>
-` +
-                        `Portfolio: ${fmt(totalValue)}
-` +
-                        `Year start: ${fmt(ytdBaseline)}
-` +
-                        `YTD gain: +${fmt(totalValue - ytdBaseline)} (+${ytdPct.toFixed(2)}%)
-` +
-                        `<i>401k App Alert</i>`
-                    );
-                    setCooldown(key);
-                }
-            }
-        } else {
-            setYTDBaseline(totalValue);
-        }
-    }
-
-    // ── Main runner ──────────────────────────────────────────────
-    let _lastRun = 0;
-    const INTERVAL = 5 * 60 * 1000;
-
-    async function runAlerts() {
-        const now = Date.now();
-        if (now - _lastRun < INTERVAL) return;
-        _lastRun = now;
-
-        // Only during market hours ET
-        const et  = new Date(new Date().toLocaleString('en-US', {timeZone:'America/New_York'}));
-        const h   = et.getHours(), m = et.getMinutes(), day = et.getDay();
-        const min = h * 60 + m;
-        if (!(day >= 1 && day <= 5 && min >= 570 && min < 960)) return;
-
-        await checkPortfolioAlerts();
-    }
-
-    // Hook into refresh cycle
-    const origRefresh = window.refreshAllPrices;
-    if (origRefresh) {
-        window.refreshAllPrices = async function(...args) {
-            const result = await origRefresh.apply(this, args);
-            setTimeout(runAlerts, 3000);
-            return result;
-        };
-    }
-
-    setInterval(runAlerts, INTERVAL);
-    window.addEventListener('load', () => setTimeout(runAlerts, 6000));
-
-    // Test function
-    window.testTelegramAlert = async function() {
-        await sendTelegram(
-            `✅ <b>Telegram Alert Test</b>
-` +
-            `Your 401k App alerts are working!
-` +
-            `Time: ${new Date().toLocaleString('en-US', {timeZone:'America/Los_Angeles'})} PT`
-        );
-        alert('Test message sent! Check Telegram.');
-    };
-
-    console.log('[TelegramAlerts] 401k App alert system loaded ✅');
-
-})();
-</script>
 
 </body>
 </html>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  TELEGRAM ALERT SYSTEM — 401k App (ES5 safe)
+// ═══════════════════════════════════════════════════
+(function() {
+var WORKER      = 'https://yahoo-proxy.giolamchieu1975.workers.dev/telegram';
+var COOLDOWN_MS = 86400000;
+var INTERVAL_MS = 300000;
+
+function sendTg(msg) {
+    return fetch(WORKER, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg })
+    }).catch(function(e) { console.warn('[TG401k]', e.message); });
+}
+
+function getCd() {
+    try { return JSON.parse(localStorage.getItem('tg_401k_cd') || '{}'); } catch(e) { return {}; }
+}
+
+function isCD(key) {
+    var cd = getCd(), now = Date.now();
+    Object.keys(cd).forEach(function(k) { if (now - cd[k] > COOLDOWN_MS) delete cd[k]; });
+    localStorage.setItem('tg_401k_cd', JSON.stringify(cd));
+    return !!cd[key];
+}
+
+function setCD(key) {
+    var cd = getCd(); cd[key] = Date.now();
+    localStorage.setItem('tg_401k_cd', JSON.stringify(cd));
+}
+
+function fmt(n) {
+    return '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getATH() { return parseFloat(localStorage.getItem('tg_401k_ath') || '0'); }
+function setATH(v) { localStorage.setItem('tg_401k_ath', String(v)); }
+
+function getYTDBase() {
+    var key = 'tg_401k_ytd_' + new Date().getFullYear();
+    return parseFloat(localStorage.getItem(key) || '0');
+}
+function setYTDBase(v) {
+    var key = 'tg_401k_ytd_' + new Date().getFullYear();
+    if (!localStorage.getItem(key)) localStorage.setItem(key, String(v));
+}
+
+function today() { return new Date().toDateString(); }
+
+function isMarketHours() {
+    var et  = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    var day = et.getDay(), min = et.getHours() * 60 + et.getMinutes();
+    return day >= 1 && day <= 5 && min >= 570 && min < 960;
+}
+
+async function checkPortfolioAlerts() {
+    if (typeof portfolioData === 'undefined') return;
+    if (typeof priceCache === 'undefined') return;
+
+    var totalValue = 0, prevClose = 0;
+
+    // Calculate from holdings
+    var symbols = {};
+    (portfolioData.transactions || []).forEach(function(t) {
+        var sym = (t.symbol || '').toUpperCase();
+        if (!sym) return;
+        if (!symbols[sym]) symbols[sym] = 0;
+        var txType = (t.transactionType || '').toUpperCase();
+        var shares = parseFloat(t.shares) || 0;
+        if (txType === 'BUY')  symbols[sym] += shares;
+        if (txType === 'SELL') symbols[sym] -= shares;
+    });
+
+    Object.keys(symbols).forEach(function(sym) {
+        var shares = symbols[sym];
+        if (shares <= 0) return;
+        var cache = priceCache[sym] || {};
+        var price = cache.manualPrice || cache.currentPrice || 0;
+        var prev  = cache.previousClosePrice || cache.manualPreviousClosePrice || price;
+        totalValue += shares * price;
+        prevClose  += shares * prev;
+    });
+
+    if (totalValue < 1000) return;
+
+    // ── Daily move alerts ──
+    if (prevClose > 0) {
+        var dayPct   = ((totalValue - prevClose) / prevClose) * 100;
+        var daySign  = dayPct >= 0 ? '+' : '';
+        var dayEmoji = dayPct >= 0 ? '📈' : '📉';
+        var dir      = dayPct >= 0 ? 'UP' : 'DOWN';
+
+        [1, 2, 3].forEach(function(thresh) {
+            if (Math.abs(dayPct) >= thresh) {
+                var key = 'daily_' + thresh + 'pct_' + (dayPct > 0 ? 'up' : 'dn') + '_' + today();
+                if (!isCD(key)) {
+                    sendTg(dayEmoji + ' PORTFOLIO ' + dir + ' ' + thresh + '%+\n' +
+                        'Daily P/L: ' + daySign + dayPct.toFixed(2) + '%\n' +
+                        'Value: ' + fmt(totalValue) + '\n' +
+                        'Change: ' + daySign + fmt(totalValue - prevClose) + '\n' +
+                        '401k App Alert');
+                    setCD(key);
+                }
+            }
+        });
+    }
+
+    // ── All-time high ──
+    var ath = getATH();
+    if (totalValue > ath) {
+        setATH(totalValue);
+        if (ath > 0) {
+            var athKey = 'ath_' + Math.floor(totalValue / 1000) + '_' + today();
+            if (!isCD(athKey)) {
+                sendTg('🏆 NEW ALL-TIME HIGH!\n' +
+                    'Portfolio: ' + fmt(totalValue) + '\n' +
+                    'Previous ATH: ' + fmt(ath) + '\n' +
+                    '401k App - Keep going!');
+                setCD(athKey);
+            }
+        }
+    }
+
+    // ── YTD milestone every 5% ──
+    var ytdBase = getYTDBase();
+    if (ytdBase > 0) {
+        var ytdPct     = ((totalValue - ytdBase) / ytdBase) * 100;
+        var milestone  = Math.floor(ytdPct / 5) * 5;
+        if (milestone > 0) {
+            var ytdKey = 'ytd_' + milestone + 'pct_' + new Date().getFullYear();
+            if (!isCD(ytdKey)) {
+                sendTg('📊 YTD MILESTONE +' + milestone + '%\n' +
+                    'Portfolio: ' + fmt(totalValue) + '\n' +
+                    'Year start: ' + fmt(ytdBase) + '\n' +
+                    'YTD gain: +' + fmt(totalValue - ytdBase) + ' (+' + ytdPct.toFixed(2) + '%)\n' +
+                    '401k App Alert');
+                setCD(ytdKey);
+            }
+        }
+    } else {
+        setYTDBase(totalValue);
+    }
+}
+
+var lastRun = 0;
+async function runAlerts() {
+    if (!isMarketHours()) return;
+    var now = Date.now();
+    if (now - lastRun < INTERVAL_MS) return;
+    lastRun = now;
+    await checkPortfolioAlerts();
+}
+
+// Hook into refresh
+var origRefresh = window.refreshAllPrices;
+if (origRefresh) {
+    window.refreshAllPrices = async function() {
+        var result = await origRefresh.apply(this, arguments);
+        setTimeout(runAlerts, 3000);
+        return result;
+    };
+}
+
+setInterval(runAlerts, INTERVAL_MS);
+window.addEventListener('load', function() { setTimeout(runAlerts, 6000); });
+
+window.testTelegramAlert = async function() {
+    await sendTg('Test from 401k App - ' +
+        new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }) + ' PT');
+    alert('Sent! Check Telegram.');
+};
+
+console.log('[TG401k] Alert system loaded OK');
+})();
+</script>
