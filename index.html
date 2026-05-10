@@ -12141,11 +12141,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             if (!normalized.length) {
                 btn.disabled = false;
                 btn.textContent = 'Import Transactions';
-                alert('No valid transactions to import after validation.
-
-Rejected ' + rejected.length + ' rows:
-' + rejected.slice(0,5).join('
-'));
+                alert('No valid transactions to import after validation.\n\nRejected ' + rejected.length + ' rows:\n' + rejected.slice(0,5).join('\n'));
                 return;
             }
 
@@ -12163,9 +12159,7 @@ Rejected ' + rejected.length + ' rows:
             closeCSVImportProModal();
 
             const msg = 'Imported ' + normalized.length + ' transactions!' +
-                (rejected.length ? '
-
-Skipped ' + rejected.length + ' invalid rows (check console for details).' : '');
+                (rejected.length ? '\n\nSkipped ' + rejected.length + ' invalid rows (check console for details).' : '');
             if (typeof showConfirmationModal === 'function') {
                 showConfirmationModal('✅ ' + msg, null);
             } else {
