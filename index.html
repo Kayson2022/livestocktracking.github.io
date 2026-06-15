@@ -11,6 +11,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -650,6 +651,7 @@
         let autoRefreshIntervalSeconds = 300;
         let currentSort = 'default';
         let currentFilter = 'all';
+        let currentGainLoss = 'all';
         let currentSearchTerm = '';
         let activeChartFilter = 'All';
         let validationTimeout = null;
@@ -700,6 +702,8 @@
 
             const filterPlatformEl = document.getElementById('filterPlatform');
             if (filterPlatformEl) filterPlatformEl.addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
+            const filterGLEl = document.getElementById('filterGainLoss');
+            if (filterGLEl) filterGLEl.addEventListener('change', e => { currentGainLoss = e.target.value; updateDisplay(); });
              else console.error("Element with ID 'filterPlatform' not found!");
 
             const searchInputEl = document.getElementById('searchInput');
@@ -3297,6 +3301,23 @@
             if (currentFilter !== 'all') {
                 holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
             }
+            // Gain/Loss filter — total or today, gainers or losers
+            if (currentGainLoss !== 'all') {
+                holdingsToRender = holdingsToRender.filter(h => {
+                    const shares = Number(h.totalShares) || 0;
+                    const cp = h.currentPrice;
+                    if (cp == null || shares === 0) return false;
+                    if (currentGainLoss === 'gain-total' || currentGainLoss === 'loss-total') {
+                        const gl = (cp * shares) - (Number(h.totalCost) || 0);
+                        return currentGainLoss === 'gain-total' ? gl > 0 : gl < 0;
+                    } else {
+                        const pc = h.previousClosePrice;
+                        if (pc == null || pc <= 0) return false;
+                        const todayGL = (cp - pc) * shares;
+                        return currentGainLoss === 'gain-today' ? todayGL > 0 : todayGL < 0;
+                    }
+                });
+            }
 
             const groupedByAccount = {};
             holdingsToRender.forEach(h => {
@@ -4110,6 +4131,8 @@
             while (select.options.length > 1) select.remove(1);
             platforms.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; select.appendChild(o); });
             select.value = currentFilter;
+            const glSel = document.getElementById('filterGainLoss');
+            if (glSel) glSel.value = currentGainLoss;
         }
 
         // Safe chart helper: always destroy any existing Chart on a canvas before creating a new one
@@ -6123,6 +6146,15 @@
                         <div class="form-group">
                             <select id="filterPlatform">
                                 <option value="all">Filter: All Platforms</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <select id="filterGainLoss">
+                                <option value="all">Show: All Holdings</option>
+                                <option value="gain-total">Show: Gainers (total)</option>
+                                <option value="loss-total">Show: Losers (total)</option>
+                                <option value="gain-today">Show: Gainers (today)</option>
+                                <option value="loss-today">Show: Losers (today)</option>
                             </select>
                         </div>
                     </div>
