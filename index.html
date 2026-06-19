@@ -12,10 +12,78 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>
+    /* ════ GLOBAL LIVE THOUSANDS SEPARATOR ═══════════════════════════════
+       Consistent rule app-wide: any number >= 1000 shows comma separators,
+       both in input boxes (as you type) and in the value attribute read back.
+       Only formats integers part; decimals (prices, fractional shares) and
+       numbers under 1000 display unchanged. Math always reads the de-comma'd
+       value via _stRawNum(). */
+    (function() {
+      function commafy(raw) {
+        if (raw === '' || raw == null) return '';
+        var neg = String(raw).trim().startsWith('-');
+        var s = String(raw).replace(/,/g, '').replace(/^-/, '');
+        if (s === '' || isNaN(s)) return raw;
+        var parts = s.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return (neg ? '-' : '') + parts.join('.');
+      }
+      function formatEl(el) {
+        var caret = el.selectionStart;
+        var before = el.value.slice(0, caret).replace(/[^0-9.]/g, '').length;
+        var raw = el.value.replace(/,/g, '');
+        if (raw === '' || isNaN(raw)) { el.dataset.raw = raw; return; }
+        el.dataset.raw = raw;
+        el.value = commafy(raw);
+        // restore caret position by digit count
+        var seen = 0, pos = 0;
+        for (; pos < el.value.length; pos++) {
+          if (/[0-9.]/.test(el.value[pos])) { seen++; if (seen >= before) { pos++; break; } }
+        }
+        try { el.setSelectionRange(pos, pos); } catch(e) {}
+      }
+      // Global helper for code that reads input values for math
+      window._stRawNum = function(idOrEl) {
+        var el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+        if (!el) return '';
+        return (el.value || '').replace(/,/g, '');
+      };
+      // Live-format any st-comma input as the user types
+      document.addEventListener('input', function(e) {
+        var el = e.target;
+        if (el && el.classList && el.classList.contains('st-comma')) formatEl(el);
+      }, true);
+      // Auto-tag: turn dollar/amount number inputs into comma-formatting text
+      // inputs once they exist in the DOM. Skip price/share/percent/ratio/year.
+      var SKIP = /price|share|yield|growth|ratio|interval|pe$|pc$|percent|rate|age|year|dividend|freq/i;
+      function autoTag() {
+        document.querySelectorAll('input[type="number"]').forEach(function(el){
+          var id = el.id || '';
+          if (SKIP.test(id)) return;            // leave prices, shares, %, ratios
+          if (el.classList.contains('st-comma')) return;
+          el.setAttribute('type','text');
+          el.setAttribute('inputmode','decimal');
+          el.classList.add('st-comma');
+          if (el.value) formatEl(el);
+        });
+        document.querySelectorAll('input.st-comma').forEach(function(el){
+          if (el !== document.activeElement && el.value && el.value.indexOf(',')===-1
+              && !isNaN(el.value.replace(/,/g,'')) && Number(el.value.replace(/,/g,'')) >= 1000) {
+            formatEl(el);
+          }
+        });
+      }
+      window._stAutoTagCommas = autoTag;
+      setInterval(autoTag, 700);
+      document.addEventListener('DOMContentLoaded', autoTag);
+    })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment App</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
@@ -1170,7 +1238,7 @@
             const newRecurring = {
                 id: Date.now(),
                 symbol: symbol,
-                amount: parseFloat(document.getElementById('recurringAmount').value),
+                amount: parseFloat(String(document.getElementById('recurringAmount').value||'').replace(/,/g,'')),
                 frequency: document.getElementById('recurringFrequency').value,
                 startDate: document.getElementById('recurringStartDate').value,
                 accountType: document.getElementById('recurringAccountType').value,
@@ -2707,9 +2775,9 @@
                 lastEditedField = 'amount';
             }
 
-            const shares = parseFloat(sharesInput.value);
-            const price = parseFloat(priceInput.value);
-            const amount = parseFloat(amountInput.value);
+            const shares = parseFloat(String(sharesInput.value||'').replace(/,/g,''));
+            const price = parseFloat(String(priceInput.value||'').replace(/,/g,''));
+            const amount = parseFloat(String(amountInput.value||'').replace(/,/g,''));
 
             if (lastEditedField === 'shares') {
                 if (!isNaN(shares) && !isNaN(price) && price > 0) {
@@ -2848,7 +2916,7 @@
             let logMessage = '';
 
             if (transactionType === 'DEPOSIT' || transactionType === 'WITHDRAWAL') {
-                const amount = parseFloat(document.getElementById('amount').value);
+                const amount = parseFloat(String(document.getElementById('amount').value||'').replace(/,/g,''));
                 if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid amount.", null); return; }
 
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
@@ -2862,15 +2930,15 @@
                 logMessage = `Logged ${transactionType}: ${formatCurrency(amount)} for ${symbol}.`;
             } else { 
                 const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-                const shares = parseFloat(document.getElementById('shares').value);
-                const price = parseFloat(document.getElementById('price').value);
+                const shares = parseFloat(String(document.getElementById('shares').value||'').replace(/,/g,''));
+                const price = parseFloat(String(document.getElementById('price').value||'').replace(/,/g,''));
                 const cost = shares * price;
                 if ((transactionType === 'BUY' || transactionType === 'SELL') && (!symbol || isNaN(shares) || shares <= 0 || isNaN(price) || price < 0)) {
                     showConfirmationModal("Symbol, Shares, and Price must be valid positive numbers.", null); return;
                 }
 
                 if(transactionType === 'DIVIDEND') {
-                     const amount = parseFloat(document.getElementById('amount').value);
+                     const amount = parseFloat(String(document.getElementById('amount').value||'').replace(/,/g,''));
                      if (isNaN(amount) || amount <= 0) { showConfirmationModal("Please enter a valid dividend amount.", null); return; }
 
                      const cashFund = currentHoldings.find(h => h.accountType === accountType && h.platform === platform && isCashEquivalentType(h.type));
@@ -2890,7 +2958,7 @@
                 } else { // BUY or SELL
                     Object.assign(mainTransaction, {
                         symbol: symbol, name: document.getElementById('name').value.trim() || symbol, shares: shares, price: price,
-                        dividend: parseFloat(document.getElementById('dividend').value) || 0, type: type
+                        dividend: parseFloat(String(document.getElementById('dividend').value||'').replace(/,/g,'')) || 0, type: type
                     });
                     transactionsToAdd.push(mainTransaction);
                     logMessage = `Logged ${transactionType}: ${shares.toFixed(4)} shares of ${symbol} at ${formatCurrency(price)}.`;
@@ -3018,7 +3086,7 @@
         function preview401kSplit() {
             const idx     = document.getElementById('split401kSym').value;
             const type    = document.getElementById('split401kType').value;
-            const ratio   = parseFloat(document.getElementById('split401kRatio').value) || 0;
+            const ratio   = parseFloat(String(document.getElementById('split401kRatio').value||'').replace(/,/g,'')) || 0;
             const preview = document.getElementById('split401kPreview');
             if (idx === '' || !ratio || ratio < 2 || !window.portfolioHoldings) {
                 preview.style.display = 'none'; return;
@@ -3042,7 +3110,7 @@
         async function apply401kSplit() {
             const idx   = document.getElementById('split401kSym').value;
             const type  = document.getElementById('split401kType').value;
-            const ratio = parseFloat(document.getElementById('split401kRatio').value);
+            const ratio = parseFloat(String(document.getElementById('split401kRatio').value||'').replace(/,/g,''));
             if (idx === '' || !ratio || ratio < 2) {
                 alert('Please select a holding and enter a valid ratio (≥ 2)'); return;
             }
@@ -3876,12 +3944,12 @@
             const type = transaction.transactionType.toUpperCase();
 
             if (type === 'DEPOSIT' || type === 'WITHDRAWAL' || type === 'DIVIDEND') {
-                const amount = parseFloat(document.getElementById('editAmount').value);
+                const amount = parseFloat(String(document.getElementById('editAmount').value||'').replace(/,/g,''));
                 transaction.shares = amount;
                 transaction.price = 1;
             } else {
-                transaction.shares = parseFloat(document.getElementById('editShares').value);
-                transaction.price = parseFloat(document.getElementById('editPrice').value);
+                transaction.shares = parseFloat(String(document.getElementById('editShares').value||'').replace(/,/g,''));
+                transaction.price = parseFloat(String(document.getElementById('editPrice').value||'').replace(/,/g,''));
             }
 
             logActivity(`Edited transaction for ${transaction.symbol}.`);
@@ -3941,11 +4009,11 @@
             const currentHoldings = calculateHoldingsAndCash();
             const holding = currentHoldings.find(h => h.symbol === symbol && h.accountType === accountType && h.platform === platform);
             
-            const newTotalShares = parseFloat(document.getElementById('editHoldingTotalShares').value);
-            const newAvgPrice = parseFloat(document.getElementById('editHoldingAvgPrice').value);
+            const newTotalShares = parseFloat(String(document.getElementById('editHoldingTotalShares').value||'').replace(/,/g,''));
+            const newAvgPrice = parseFloat(String(document.getElementById('editHoldingAvgPrice').value||'').replace(/,/g,''));
             
-            const newManualPrice = parseFloat(document.getElementById('editHoldingManualPrice').value);
-            const newManualPC = parseFloat(document.getElementById('editHoldingManualPC').value);
+            const newManualPrice = parseFloat(String(document.getElementById('editHoldingManualPrice').value||'').replace(/,/g,''));
+            const newManualPC = parseFloat(String(document.getElementById('editHoldingManualPC').value||'').replace(/,/g,''));
 
             if (!priceCache[symbol]) priceCache[symbol] = {};
 
@@ -5735,7 +5803,7 @@
                             document.getElementById('autoLockCustom').style.display='flex';
                         } else {
                             document.getElementById('autoLockCustom').style.display='none';
-                            localStorage.setItem('al_timeout_secs', parseFloat(this.value) * 60);
+                            localStorage.setItem('al_timeout_secs', parseFloat(String(this.value||'').replace(/,/g,'')) * 60);
                             window._resetLockTimer && window._resetLockTimer();
                         }"
                     style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--card-bg-color);color:var(--text-color);margin-bottom:6px;">
@@ -10657,11 +10725,11 @@ function renderDRIP() {
 }
 
 function runDRIP() {
-    const startValue  = parseFloat(document.getElementById('dripStartValue').value) || 0;
-    const yieldPct    = parseFloat(document.getElementById('dripYield').value) || 0;
-    const growthPct   = parseFloat(document.getElementById('dripGrowth').value) || 7;
-    const monthlyAdd  = parseFloat(document.getElementById('dripMonthly').value) || 0;
-    const taxRate     = parseFloat(document.getElementById('dripTax').value) || 15;
+    const startValue  = parseFloat(String(document.getElementById('dripStartValue').value||'').replace(/,/g,'')) || 0;
+    const yieldPct    = parseFloat(String(document.getElementById('dripYield').value||'').replace(/,/g,'')) || 0;
+    const growthPct   = parseFloat(String(document.getElementById('dripGrowth').value||'').replace(/,/g,'')) || 7;
+    const monthlyAdd  = parseFloat(String(document.getElementById('dripMonthly').value||'').replace(/,/g,'')) || 0;
+    const taxRate     = parseFloat(String(document.getElementById('dripTax').value||'').replace(/,/g,'')) || 15;
     const years       = parseInt(document.getElementById('dripYears').value) || 10;
 
     if (startValue <= 0 || yieldPct <= 0) {
@@ -11549,20 +11617,20 @@ function renderTarget62(result, chartCanvasId, tableId, summaryId) {
 
 // ── Target 62 App Runner ──────────────────────────────────────────────────
 function runT62App() {
-  const worth = parseFloat(document.getElementById('t62aWorth').value);
+  const worth = parseFloat(String(document.getElementById('t62aWorth').value||'').replace(/,/g,''));
   // Try to read total value from the stat card if not entered
   const totalEl = document.getElementById('totalValue');
   const liveVal = totalEl ? parseFloat((totalEl.textContent||'').replace(/[^0-9.]/g,'')) || 0 : 0;
   const inputs = {
-    currentAge:        parseFloat(document.getElementById('t62aAge').value),
-    targetAge:         parseFloat(document.getElementById('t62aTarget').value),
+    currentAge:        parseFloat(String(document.getElementById('t62aAge').value||'').replace(/,/g,'')),
+    targetAge:         parseFloat(String(document.getElementById('t62aTarget').value||'').replace(/,/g,'')),
     currentNetWorth:   worth > 0 ? worth : liveVal,
-    annual401kContrib: parseFloat(document.getElementById('t62aContrib401k').value) || 0,
-    brokerageMonthly:  parseFloat(document.getElementById('t62aContribBrok').value) || 0,
-    expectedReturn:    (parseFloat(document.getElementById('t62aReturn').value) || 7) / 100,
-    goal:              parseFloat(document.getElementById('t62aGoal').value) || 3000000,
-    ssMonthlyPIA:      parseFloat(document.getElementById('t62aSS').value) || 0,
-    inflationRate:     (parseFloat(document.getElementById('t62aInflation').value) || 3) / 100,
+    annual401kContrib: parseFloat(String(document.getElementById('t62aContrib401k').value||'').replace(/,/g,'')) || 0,
+    brokerageMonthly:  parseFloat(String(document.getElementById('t62aContribBrok').value||'').replace(/,/g,'')) || 0,
+    expectedReturn:    (parseFloat(String(document.getElementById('t62aReturn').value||'').replace(/,/g,'')) || 7) / 100,
+    goal:              parseFloat(String(document.getElementById('t62aGoal').value||'').replace(/,/g,'')) || 3000000,
+    ssMonthlyPIA:      parseFloat(String(document.getElementById('t62aSS').value||'').replace(/,/g,'')) || 0,
+    inflationRate:     (parseFloat(String(document.getElementById('t62aInflation').value||'').replace(/,/g,'')) || 3) / 100,
   };
   if (!inputs.currentNetWorth) {
     document.getElementById('t62SummaryApp').innerHTML =
@@ -11836,7 +11904,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     }
   };
   window.setAutoLockCustom = function() {
-    var val  = parseFloat(document.getElementById('autoLockCustomVal').value);
+    var val  = parseFloat(String(document.getElementById('autoLockCustomVal').value||'').replace(/,/g,''));
     var unit = document.getElementById('autoLockCustomUnit').value;
     if (!val || val <= 0) { alert('Enter a valid number.'); return; }
     var secs = unit === 'seconds' ? val : val * 60;
