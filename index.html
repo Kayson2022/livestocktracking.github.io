@@ -61,11 +61,23 @@
       }, true);
       // Auto-tag: turn dollar/amount number inputs into comma-formatting text
       // inputs once they exist in the DOM. Skip price/share/percent/ratio/year.
-      var SKIP = /price|share|yield|growth|ratio|interval|pe$|pc$|percent|rate|age|year|dividend|freq/i;
+      // Explicit allowlist: exact IDs of large-dollar inputs that should get
+      // comma separators. Anything not listed stays plain (prices, shares,
+      // percentages, ages, ratios, etc.). Substring matching caused bugs
+      // ("brokerage" contains "age"), so we match exact IDs only.
+      var COMMA_IDS = {
+        'totalAmount':1, 'amount':1, 'editAmount':1, 'recurringAmount':1,
+        'dripStartValue':1,
+        'wpBal401k':1, 'wpBalRoth':1, 'wpBalBrokerage':1,
+        'wpAnnualSpend':1, 'wpAnnualContrib':1, 'wpSocialSecurity':1,
+        'rothBalance':1, 'c529Balance':1, 'c529Goal':1,
+        't62aWorth':1, 't62aGoal':1, 't62aContrib401k':1, 't62aContribRoth':1,
+        't62aContribBrok':1
+      };
       function autoTag() {
         document.querySelectorAll('input[type="number"]').forEach(function(el){
           var id = el.id || '';
-          if (SKIP.test(id)) return;            // leave prices, shares, %, ratios
+          if (!COMMA_IDS[id]) return;           // only allowlisted dollar fields
           if (el.classList.contains('st-comma')) return;
           el.setAttribute('type','text');
           el.setAttribute('inputmode','decimal');
@@ -5524,7 +5536,7 @@
 
         function addAlert401k() {
             const symbol = document.getElementById('alertSymbolSel')?.value;
-            const price  = parseFloat(document.getElementById('alertPriceInput')?.value);
+            const price  = parseFloat(String(document.getElementById('alertPriceInput')?.value||'').replace(/,/g,''));
             const type   = document.getElementById('alertTypeSel')?.value;
             if (!symbol || isNaN(price) || price <= 0) {
                 alert('Please select a symbol and enter a valid price.'); return;
@@ -7166,7 +7178,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   /* ── Read live portfolio value — field overrides auto-fill ── */
   function getLivePortfolioValue() {
     // User-entered value takes priority
-    const fieldVal = parseFloat(document.getElementById('goalCurrent')?.value);
+    const fieldVal = parseFloat(String(document.getElementById('goalCurrent')?.value||'').replace(/,/g,''));
     if (!isNaN(fieldVal) && fieldVal > 0) return fieldVal;
     // Fall back to live stat card
     const el = document.getElementById('totalValue');
@@ -7178,7 +7190,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   }
 
   function getWiCurrentValue() {
-    const fieldVal = parseFloat(document.getElementById('wiCurrent')?.value);
+    const fieldVal = parseFloat(String(document.getElementById('wiCurrent')?.value||'').replace(/,/g,''));
     if (!isNaN(fieldVal) && fieldVal >= 0) return fieldVal;
     const el = document.getElementById('totalValue');
     if (el) {
@@ -7213,9 +7225,9 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
 
   /* ── Render goal results into the widget ── */
   function renderGoal() {
-    const target  = parseFloat(document.getElementById('goalTarget')?.value)  || 0;
-    const annualR = parseFloat(document.getElementById('goalReturn')?.value)   || 7;
-    const monthly = parseFloat(document.getElementById('goalMonthly')?.value)  || 0;
+    const target  = parseFloat(String(document.getElementById('goalTarget')?.value||'').replace(/,/g,''))  || 0;
+    const annualR = parseFloat(String(document.getElementById('goalReturn')?.value||'').replace(/,/g,''))   || 7;
+    const monthly = parseFloat(String(document.getElementById('goalMonthly')?.value||'').replace(/,/g,''))  || 0;
     const current = getLivePortfolioValue();
 
     if (!target) {
@@ -7258,10 +7270,10 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
   /* ── What-If Simulator ── */
   window.runWhatIf = function() {
     const current = getWiCurrentValue();
-    const monthly = parseFloat(document.getElementById('wiMonthly')?.value) || 0;
-    const annual  = parseFloat(document.getElementById('wiReturn')?.value)  || 7;
-    const years   = parseFloat(document.getElementById('wiYears')?.value)   || 20;
-    const target  = parseFloat(document.getElementById('wiTarget')?.value)  || 0;
+    const monthly = parseFloat(String(document.getElementById('wiMonthly')?.value||'').replace(/,/g,'')) || 0;
+    const annual  = parseFloat(String(document.getElementById('wiReturn')?.value||'').replace(/,/g,''))  || 7;
+    const years   = parseFloat(String(document.getElementById('wiYears')?.value||'').replace(/,/g,''))   || 20;
+    const target  = parseFloat(String(document.getElementById('wiTarget')?.value||'').replace(/,/g,''))  || 0;
 
     document.getElementById('wiMonthlyVal').textContent = fc(monthly);
     document.getElementById('wiReturnVal').textContent  = annual.toFixed(1) + '%';
@@ -9399,8 +9411,8 @@ window.runCostBasisOptimizer = function runCostBasisOptimizer() {
   if (!el) return;
 
   const symbolKey = document.getElementById('cbSymbolSelect')?.value || '';
-  const sharesToSell = parseFloat(document.getElementById('cbSharesToSell')?.value);
-  const salePrice    = parseFloat(document.getElementById('cbSalePrice')?.value);
+  const sharesToSell = parseFloat(String(document.getElementById('cbSharesToSell')?.value||'').replace(/,/g,''));
+  const salePrice    = parseFloat(String(document.getElementById('cbSalePrice')?.value||'').replace(/,/g,''));
   const bracketVal   = document.getElementById('cbTaxBracket')?.value || '0.22|0.15';
   const [stRate, ltRate] = bracketVal.split('|').map(Number);
 
@@ -9627,16 +9639,16 @@ window.runWithdrawalPlanner = function runWithdrawalPlanner() {
   if (!el) return;
 
   // Read inputs
-  const currentAge   = parseInt(document.getElementById('wpCurrentAge')?.value)  || 45;
-  const retireAge    = parseInt(document.getElementById('wpRetireAge')?.value)    || 65;
-  const annualSpend  = parseFloat(document.getElementById('wpAnnualSpend')?.value)  || 80000;
-  const returnRate   = parseFloat(document.getElementById('wpReturnRate')?.value)   / 100 || 0.06;
-  const inflRate     = parseFloat(document.getElementById('wpInflation')?.value)    / 100 || 0.025;
-  const annualContrib= parseFloat(document.getElementById('wpAnnualContrib')?.value)|| 0;
-  const bal401k      = parseFloat(document.getElementById('wpBal401k')?.value)      || 0;
-  const balRoth      = parseFloat(document.getElementById('wpBalRoth')?.value)      || 0;
-  const balBrokerage = parseFloat(document.getElementById('wpBalBrokerage')?.value) || 0;
-  const socialSec    = parseFloat(document.getElementById('wpSocialSecurity')?.value)|| 0;
+  const currentAge   = parseInt(String(document.getElementById('wpCurrentAge')?.value||'').replace(/,/g,''))  || 45;
+  const retireAge    = parseInt(String(document.getElementById('wpRetireAge')?.value||'').replace(/,/g,''))    || 65;
+  const annualSpend  = parseFloat(String(document.getElementById('wpAnnualSpend')?.value||'').replace(/,/g,''))  || 80000;
+  const returnRate   = parseFloat(String(document.getElementById('wpReturnRate')?.value||'').replace(/,/g,''))   / 100 || 0.06;
+  const inflRate     = parseFloat(String(document.getElementById('wpInflation')?.value||'').replace(/,/g,''))    / 100 || 0.025;
+  const annualContrib= parseFloat(String(document.getElementById('wpAnnualContrib')?.value||'').replace(/,/g,''))|| 0;
+  const bal401k      = parseFloat(String(document.getElementById('wpBal401k')?.value||'').replace(/,/g,''))      || 0;
+  const balRoth      = parseFloat(String(document.getElementById('wpBalRoth')?.value||'').replace(/,/g,''))      || 0;
+  const balBrokerage = parseFloat(String(document.getElementById('wpBalBrokerage')?.value||'').replace(/,/g,'')) || 0;
+  const socialSec    = parseFloat(String(document.getElementById('wpSocialSecurity')?.value||'').replace(/,/g,''))|| 0;
 
   const yearsToRetire  = Math.max(0, retireAge - currentAge);
   const projectionYears = 35; // Show 35 years into retirement
@@ -9959,12 +9971,12 @@ window.runRothAnalyzer = function runRothAnalyzer() {
   const el = document.getElementById('rothResults');
   if (!el) return;
 
-  const balance     = parseFloat(document.getElementById('rothBalance')?.value)     || 0;
-  const currentAge  = parseInt(document.getElementById('rothCurrentAge')?.value)    || 50;
-  const currentRate = parseFloat(document.getElementById('rothCurrentRate')?.value) / 100 || 0.22;
-  const retireRate  = parseFloat(document.getElementById('rothRetireRate')?.value)  / 100 || 0.25;
-  const retireAge   = parseInt(document.getElementById('rothRetireAge')?.value)     || 65;
-  const returnRate  = parseFloat(document.getElementById('rothReturnRate')?.value)  / 100 || 0.07;
+  const balance     = parseFloat(String(document.getElementById('rothBalance')?.value||'').replace(/,/g,''))     || 0;
+  const currentAge  = parseInt(String(document.getElementById('rothCurrentAge')?.value||'').replace(/,/g,''))    || 50;
+  const currentRate = parseFloat(String(document.getElementById('rothCurrentRate')?.value||'').replace(/,/g,'')) / 100 || 0.22;
+  const retireRate  = parseFloat(String(document.getElementById('rothRetireRate')?.value||'').replace(/,/g,''))  / 100 || 0.25;
+  const retireAge   = parseInt(String(document.getElementById('rothRetireAge')?.value||'').replace(/,/g,''))     || 65;
+  const returnRate  = parseFloat(String(document.getElementById('rothReturnRate')?.value||'').replace(/,/g,''))  / 100 || 0.07;
 
   if (balance <= 0) { el.innerHTML = '<p style="color:var(--text-color-secondary);padding:10px;">Please enter a balance to convert.</p>'; return; }
 
@@ -10119,13 +10131,13 @@ window.addEventListener('load', () => setTimeout(injectRothButton, 1900));
 window.run529Projector = function() {
   const el = document.getElementById('c529Results');
   if (!el) return;
-  const balance    = parseFloat(document.getElementById('c529Balance')?.value) || 0;
-  const childAge   = parseInt(document.getElementById('c529ChildAge')?.value) || 8;
-  const collegeAge = parseInt(document.getElementById('c529CollegeAge')?.value) || 18;
-  const annual     = parseFloat(document.getElementById('c529Annual')?.value) || 5000;
-  const ret        = parseFloat(document.getElementById('c529Return')?.value) / 100 || 0.06;
-  const tuition    = parseFloat(document.getElementById('c529Tuition')?.value) || 35000;
-  const inflation  = parseFloat(document.getElementById('c529Inflation')?.value) / 100 || 0.05;
+  const balance    = parseFloat(String(document.getElementById('c529Balance')?.value||'').replace(/,/g,'')) || 0;
+  const childAge   = parseInt(String(document.getElementById('c529ChildAge')?.value||'').replace(/,/g,'')) || 8;
+  const collegeAge = parseInt(String(document.getElementById('c529CollegeAge')?.value||'').replace(/,/g,'')) || 18;
+  const annual     = parseFloat(String(document.getElementById('c529Annual')?.value||'').replace(/,/g,'')) || 5000;
+  const ret        = parseFloat(String(document.getElementById('c529Return')?.value||'').replace(/,/g,'')) / 100 || 0.06;
+  const tuition    = parseFloat(String(document.getElementById('c529Tuition')?.value||'').replace(/,/g,'')) || 35000;
+  const inflation  = parseFloat(String(document.getElementById('c529Inflation')?.value||'').replace(/,/g,'')) / 100 || 0.05;
   const years      = Math.max(1, collegeAge - childAge);
   const fc  = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0);
   const fc2 = n => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n||0);
@@ -10226,7 +10238,7 @@ window.addEventListener('load', () => setTimeout(inject529Button, 2000));
 window.runTaxPlan = function() {
   const el = document.getElementById('taxPlanResults');
   if (!el) return;
-  const stRate = parseFloat(document.getElementById('taxPlanBracket')?.value) || 0.22;
+  const stRate = parseFloat(String(document.getElementById('taxPlanBracket')?.value||'').replace(/,/g,'')) || 0.22;
   const ltRate = stRate <= 0.12 ? 0 : stRate <= 0.35 ? 0.15 : 0.20;
   const txns   = (window.portfolioData?.transactions || []);
   const year   = new Date().getFullYear();
@@ -10344,13 +10356,13 @@ window.addEventListener('load', () => setTimeout(injectTaxPlanButton, 2100));
 window.runPaycheckCalc = function() {
   const el = document.getElementById('paycheckResults');
   if (!el) return;
-  const salary     = parseFloat(document.getElementById('pcSalary')?.value) || 0;
-  const rate       = parseFloat(document.getElementById('pcRate')?.value) / 100 || 0.10;
-  const freq       = parseInt(document.getElementById('pcFreq')?.value) || 26;
-  const match      = parseFloat(document.getElementById('pcMatch')?.value) / 100 || 0.03;
-  const already    = parseFloat(document.getElementById('pcContributed')?.value) || 0;
-  const taxRate    = parseFloat(document.getElementById('pcTaxBracket')?.value) || 0.22;
-  const rothPct    = Math.min(100, Math.max(0, parseFloat(document.getElementById('pcRothPct')?.value) || 0)) / 100;
+  const salary     = parseFloat(String(document.getElementById('pcSalary')?.value||'').replace(/,/g,'')) || 0;
+  const rate       = parseFloat(String(document.getElementById('pcRate')?.value||'').replace(/,/g,'')) / 100 || 0.10;
+  const freq       = parseInt(String(document.getElementById('pcFreq')?.value||'').replace(/,/g,'')) || 26;
+  const match      = parseFloat(String(document.getElementById('pcMatch')?.value||'').replace(/,/g,'')) / 100 || 0.03;
+  const already    = parseFloat(String(document.getElementById('pcContributed')?.value||'').replace(/,/g,'')) || 0;
+  const taxRate    = parseFloat(String(document.getElementById('pcTaxBracket')?.value||'').replace(/,/g,'')) || 0.22;
+  const rothPct    = Math.min(100, Math.max(0, parseFloat(String(document.getElementById('pcRothPct')?.value||'').replace(/,/g,'')) || 0)) / 100;
   const tradPct    = 1 - rothPct;
   const ageBracket = localStorage.getItem('userAgeBracket') || 'under50';
 
@@ -10569,11 +10581,11 @@ window.addEventListener('load', () => setTimeout(injectPaycheckButton, 2200));
 window.runHSATracker = function() {
   const el = document.getElementById('hsaResults');
   if (!el) return;
-  const balance  = parseFloat(document.getElementById('hsaBalance')?.value) || 0;
-  const annual   = parseFloat(document.getElementById('hsaAnnualContrib')?.value) || 4300;
-  const age      = parseInt(document.getElementById('hsaCurrentAge')?.value) || 40;
-  const ret      = parseFloat(document.getElementById('hsaReturn')?.value) / 100 || 0.07;
-  const taxRate  = parseFloat(document.getElementById('hsaTaxRate')?.value) / 100 || 0.22;
+  const balance  = parseFloat(String(document.getElementById('hsaBalance')?.value||'').replace(/,/g,'')) || 0;
+  const annual   = parseFloat(String(document.getElementById('hsaAnnualContrib')?.value||'').replace(/,/g,'')) || 4300;
+  const age      = parseInt(String(document.getElementById('hsaCurrentAge')?.value||'').replace(/,/g,'')) || 40;
+  const ret      = parseFloat(String(document.getElementById('hsaReturn')?.value||'').replace(/,/g,'')) / 100 || 0.07;
+  const taxRate  = parseFloat(String(document.getElementById('hsaTaxRate')?.value||'').replace(/,/g,'')) / 100 || 0.22;
   const coverage = document.getElementById('hsaCoverage')?.value || 'individual';
   const limit    = coverage === 'family' ? 8550 : 4300;
   const yearsTo65= Math.max(1, 65 - age);
