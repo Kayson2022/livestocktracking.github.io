@@ -13,6 +13,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -733,6 +734,7 @@
         let currentFilter = 'all';
         let currentGainLoss = 'all';
         let currentSearchTerm = '';
+        let currentAssetType = 'all'; // Stock / ETF / Mutual Fund filter
         let activeChartFilter = 'All';
         let validationTimeout = null;
         let lastEditedField = 'shares';
@@ -782,6 +784,8 @@
 
             const filterPlatformEl = document.getElementById('filterPlatform');
             if (filterPlatformEl) filterPlatformEl.addEventListener('change', e => { currentFilter = e.target.value; updateDisplay(); });
+            const filterAssetTypeEl = document.getElementById('filterAssetType');
+            if (filterAssetTypeEl) filterAssetTypeEl.addEventListener('change', e => { currentAssetType = e.target.value; updateDisplay(); });
             const filterGLEl = document.getElementById('filterGainLoss');
             if (filterGLEl) filterGLEl.addEventListener('change', e => { currentGainLoss = e.target.value; updateDisplay(); });
              else console.error("Element with ID 'filterPlatform' not found!");
@@ -3378,8 +3382,16 @@
                     return sym.includes(searchTerm) || name.includes(searchTerm);
                 });
             }
+            if (currentAssetType !== 'all') {
+                holdingsToRender = holdingsToRender.filter(h => h.type === currentAssetType);
+            }
             if (currentFilter !== 'all') {
-                holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
+                if (currentFilter.startsWith('AT::')) {
+                    const wantAcctType = currentFilter.slice(4);
+                    holdingsToRender = holdingsToRender.filter(h => h.accountType === wantAcctType);
+                } else {
+                    holdingsToRender = holdingsToRender.filter(h => h.platform === currentFilter);
+                }
             }
             // Gain/Loss filter — total or today, gainers or losers
             if (currentGainLoss !== 'all') {
@@ -4203,14 +4215,43 @@
         function populatePlatformFilter() {
             const select = document.getElementById('filterPlatform');
             if(!portfolioData.transactions) return;
-            
-            // --- MODIFICATION: Show all platforms associated with ALL holdings (reverted to include MF, 401k/529 platforms) ---
+
             const platforms = new Set(portfolioData.transactions.map(t => t.platform).filter(Boolean));
-            // --- END MODIFICATION ---
+            // Account types (Roth IRA, Regular Brokerage, 401(k), etc.), aggregated
+            // across every broker -- lets you pick "Roth IRA" once instead of
+            // selecting each broker's Roth variant individually. Prefixed 'AT::'
+            // so these values can never collide with a real platform/broker name.
+            const acctTypes = new Set(portfolioData.transactions.map(t => t.accountType).filter(Boolean));
 
             while (select.options.length > 1) select.remove(1);
-            platforms.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; select.appendChild(o); });
-            select.value = currentFilter;
+
+            if (acctTypes.size) {
+                const grp = document.createElement('optgroup');
+                grp.label = 'By Account Type (all brokers)';
+                [...acctTypes].sort().forEach(a => {
+                    const o = document.createElement('option');
+                    o.value = 'AT::' + a; o.textContent = a + ' (All Brokers)';
+                    grp.appendChild(o);
+                });
+                select.appendChild(grp);
+            }
+            if (platforms.size) {
+                const grp2 = document.createElement('optgroup');
+                grp2.label = 'By Broker';
+                [...platforms].sort().forEach(p => {
+                    const o = document.createElement('option'); o.value = p; o.textContent = p;
+                    grp2.appendChild(o);
+                });
+                select.appendChild(grp2);
+            }
+
+            // Re-select the previous choice if it still exists, else reset to All.
+            const stillValid = [...select.options].some(o => o.value === currentFilter);
+            select.value = stillValid ? currentFilter : 'all';
+            if (!stillValid) currentFilter = 'all';
+
+            const atSel = document.getElementById('filterAssetType');
+            if (atSel) atSel.value = currentAssetType;
             const glSel = document.getElementById('filterGainLoss');
             if (glSel) glSel.value = currentGainLoss;
         }
@@ -6224,8 +6265,16 @@
                             </select>
                         </div>
                         <div class="form-group">
+                            <select id="filterAssetType">
+                                <option value="all">Type: All (Stocks/ETFs/Funds)</option>
+                                <option value="Stock">Type: Stocks only</option>
+                                <option value="ETF">Type: ETFs only</option>
+                                <option value="Mutual Fund">Type: Mutual Funds only</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <select id="filterPlatform">
-                                <option value="all">Filter: All Platforms</option>
+                                <option value="all">Filter: All Accounts</option>
                             </select>
                         </div>
                         <div class="form-group">
