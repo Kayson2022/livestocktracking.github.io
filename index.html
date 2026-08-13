@@ -6384,7 +6384,6 @@
             <button class="btn" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;" onclick="openCSVImportModal()">📊 Import from CSV Tool</button>
             <button class="btn" style="background:linear-gradient(135deg,#e17055,#d63031);color:#fff;border:none;" onclick="window.cleanupBadImports()">🧹 Clean Bad Imports</button>
             <input type="file" id="csvJsonFileInput" accept=".json" style="display: none;">
-            <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button class="btn" onclick="document.getElementById('restorePanel').style.display=document.getElementById('restorePanel').style.display==='none'?'block':'none'" style="background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:#fff;border:none;">📥 Restore from Email Backup</button>
             <div id="restorePanel" style="display:none; margin-top:12px; width:100%;">
                 <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">Paste the full JSON content from your backup email below, then click Restore:</p>
@@ -12819,7 +12818,8 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   // match exactly; the date only needs to be within one day.
   const fpKey = t => [ String(t.symbol||'').toUpperCase(),
                        Math.round((parseFloat(t.shares)||0)*10000)/10000,
-                       String(t.accountType||t.account||'') ].join('|');
+                       String(t.accountType||t.account||''),
+                       String(t.transactionType||'').toUpperCase() ].join('|');
   const dayNum = d => {
     const s = String(d||'').slice(0,10);
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -12943,7 +12943,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         else if(!rawShares || rawShares<=0){ status='skip'; reason='missing/zero shares'; }
         else if(price===null || price<=0){ status='skip'; reason='missing/zero price'; }
         else {
-          const key = fpKey({symbol,shares:rawShares,accountType:account});
+          const key = fpKey({symbol,shares:rawShares,accountType:account,transactionType:type});
           const day = dayNum(date);
           if(indexHas(have, key, day)){ status='dup'; reason='already in your app'; }
           else if(indexHas(seen, key, day)){ status='dup'; reason='duplicate row in file'; }
@@ -13063,6 +13063,51 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     render();
   };
 
+  // ---- REPAIR: fix transactions imported with a wrong/mismatched platform ----
+  // The host app keys positions by `symbol|||accountType|||platform`, so a
+  // transaction saved with the wrong platform forms a PHANTOM separate position
+  // and SELLs silently fail to reduce your real holdings.
+  window.repairImportedPlatform = function(){
+    const txs = existingTx();
+    const bad = txs.filter(t => t.source === 'safe-csv-import' && t.platform === 'Imported');
+    if(!bad.length){ alert('No transactions found with platform "Imported". Nothing to repair.'); return; }
+
+    const known = ['Fidelity','Vanguard','Charles Schwab','Merrill Edge'];
+    const target = prompt(
+      `Found ${bad.length} imported transaction(s) saved with platform "Imported".\n\n` +
+      `Because the app groups holdings by platform, these are sitting in a separate\n` +
+      `phantom position and any SELLs among them did NOT reduce your real shares.\n\n` +
+      `Type the correct platform to move them to:\n${known.join(' / ')}`,
+      'Fidelity');
+    if(!target) return;
+    if(!known.includes(target)){ alert(`"${target}" is not one of: ${known.join(', ')}`); return; }
+    if(!confirm(`Move ${bad.length} transaction(s) from "Imported" to "${target}"?\n\nA backup is saved first.`)) return;
+
+    backupNow();
+    bad.forEach(t => { t.platform = target; });
+    try{ if(typeof logActivity==='function') logActivity(`Repaired ${bad.length} imported transactions: platform "Imported" -> "${target}".`);}catch(e){}
+    try{ if(typeof saveDataToFirestore==='function') saveDataToFirestore(); }catch(e){}
+    try{ if(typeof updateDisplay==='function') updateDisplay(); }catch(e){}
+    alert(`Repaired ${bad.length} transaction(s) to platform "${target}".\nCheck your share counts now — they should be correct.`);
+  };
+
+  // ---- REMOVE: delete every transaction added by this importer -------------
+  window.removeAllSafeImports = function(){
+    if(!window.portfolioData || !Array.isArray(window.portfolioData.transactions)){
+      alert('Could not find the transaction list.'); return; }
+    const before = window.portfolioData.transactions.length;
+    const keep = window.portfolioData.transactions.filter(t => t.source !== 'safe-csv-import');
+    const removing = before - keep.length;
+    if(!removing){ alert('No transactions from this importer were found.'); return; }
+    if(!confirm(`Remove ALL ${removing} transaction(s) added by Compare & Add?\n\nYour manually-entered transactions are NOT affected.\nA backup is saved first.`)) return;
+    backupNow();
+    window.portfolioData.transactions = keep;
+    try{ if(typeof logActivity==='function') logActivity(`Removed ${removing} safe-import transactions.`);}catch(e){}
+    try{ if(typeof saveDataToFirestore==='function') saveDataToFirestore(); }catch(e){}
+    try{ if(typeof updateDisplay==='function') updateDisplay(); }catch(e){}
+    alert(`Removed ${removing} imported transaction(s).\nBefore: ${before} -> After: ${keep.length}`);
+  };
+
   // ---- widget shell -------------------------------------------------------
   function ensure(){
     if(document.getElementById('safeImportWidget')) return;
@@ -13086,8 +13131,11 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             <option>Regular Brokerage</option><option>401(k)</option><option>Roth IRA</option><option>Traditional IRA</option><option>HSA</option><option>529</option>
           </select></div>
         <div style="display:flex;flex-direction:column;gap:3px;">
-          <label style="font-size:.64rem;text-transform:uppercase;letter-spacing:.4px;color:${C.dim};font-weight:600;">Platform label</label>
-          <input id="siPlatform" value="Imported" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid ${C.bd};border-radius:7px;background:${C.bg};color:${C.tx};font-size:.85rem;"/></div>
+          <label style="font-size:.64rem;text-transform:uppercase;letter-spacing:.4px;color:${C.dim};font-weight:600;">Platform <span style="text-transform:none;opacity:.75;">(must match your existing holdings)</span></label>
+          <select id="siPlatform" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid ${C.bd};border-radius:7px;background:${C.bg};color:${C.tx};font-size:.85rem;">
+            <option value="Fidelity">Fidelity</option><option value="Vanguard">Vanguard</option>
+            <option value="Charles Schwab">Charles Schwab</option><option value="Merrill Edge">Merrill Edge</option>
+          </select></div>
       </div>
       <div id="siDrop" style="border:2px dashed ${C.bd};border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:${C.bg};">
         <div style="font-size:1.6rem;">📄</div>
@@ -13096,9 +13144,13 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         <input type="file" id="siFile" accept=".csv,text/csv" style="display:none;"/>
       </div>
       <div id="siPreview"></div>
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid ${C.bd};">
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid ${C.bd};display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button onclick="window.restoreImportBackup()" style="padding:6px 14px;background:transparent;color:${C.amb};border:1px solid ${C.amb};border-radius:7px;cursor:pointer;font-size:.78rem;">↩ Restore backup</button>
-        <span style="font-size:.7rem;color:${C.dim};margin-left:8px;">Undoes the most recent import.</span>
+        <button onclick="window.repairImportedPlatform()" style="padding:6px 14px;background:transparent;color:${C.blu};border:1px solid ${C.blu};border-radius:7px;cursor:pointer;font-size:.78rem;">🔧 Fix "Imported" platform</button>
+        <button onclick="window.removeAllSafeImports()" style="padding:6px 14px;background:transparent;color:${C.red};border:1px solid ${C.red};border-radius:7px;cursor:pointer;font-size:.78rem;">🗑 Remove all my imports</button>
+      </div>
+      <div style="margin-top:6px;font-size:.7rem;color:${C.dim};line-height:1.5;">
+        <strong>Fix "Imported" platform</strong> — if an earlier import saved transactions under the platform "Imported", they sit in a separate phantom position and SELLs won't reduce your real shares. This moves them to the correct platform.
       </div>`;
     const anchor=document.getElementById('taxPlannerWidget')||document.querySelector('main')||document.body;
     anchor.parentNode?anchor.parentNode.insertBefore(w,anchor.nextSibling):document.body.appendChild(w);
