@@ -13,6 +13,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12708,6 +12709,22 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   };
   const norm = s => String(s||'').trim().toLowerCase().replace(/[_"']/g,' ').replace(/\s+/g,' ');
 
+  // SECURITY / CORRECTNESS: never treat an account-NUMBER column as the account
+  // name. Both Fidelity and Vanguard export an "Account Number" column; matching
+  // it would classify every row as "Regular Brokerage" (no keyword found) and
+  // would put an account number into stored data. Excluded outright.
+  const isAccountNumberCol = h => {
+    const n = norm(h);
+    return /(number|num\b|no\.|acct #|account #|#)/.test(n);
+  };
+  // Does a column's values look like account numbers rather than names?
+  const looksLikeAccountNumbers = vals => {
+    const s = vals.filter(v=>String(v||'').trim()!=='').slice(0,25);
+    if(!s.length) return false;
+    const numeric = s.filter(v=>/^[\dXx*\-\s]+$/.test(String(v).trim())).length;
+    return numeric / s.length > 0.7;
+  };
+
   // Map a raw Fidelity/broker account label to the app's account-type buckets.
   function classifyAccount(raw){
     const s = norm(raw);
@@ -12736,19 +12753,22 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 
   function detectColumns(headers){
     const map = {}; const used = new Set();
+    // Exact-match pass
     for (const field in ALIASES){
       for (const h of headers){
         const nh = norm(h);
         if (used.has(h)) continue;
+        if (field==='account' && isAccountNumberCol(h)) continue;   // never an account-number column
         if (ALIASES[field].some(a => nh === a)) { map[field]=h; used.add(h); break; }
       }
     }
-    // second pass: allow "contains" matching for anything still unmapped
+    // "Contains" pass for anything still unmapped
     for (const field in ALIASES){
       if (map[field]) continue;
       for (const h of headers){
         const nh = norm(h);
         if (used.has(h)) continue;
+        if (field==='account' && isAccountNumberCol(h)) continue;   // never an account-number column
         if (ALIASES[field].some(a => nh.includes(a))) { map[field]=h; used.add(h); break; }
       }
     }
@@ -12854,6 +12874,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 
   // ---- state --------------------------------------------------------------
   let parsedRows = [];   // {date,symbol,transactionType,shares,price,status,reason,checked}
+  let accountWarning = "";
 
   window.__safeImportHandleFile = function(file){
     if(!file) return;
@@ -12874,6 +12895,20 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       const have = buildIndex(existingTx());
       const seen = new Map();
       const fallbackAccount = document.getElementById('siAccount')?.value || 'Regular Brokerage';
+
+      // Runtime guard: if the detected account column actually holds account NUMBERS
+      // (or no account column was found at all), we cannot classify accounts. Warn
+      // loudly rather than silently filing everything as one account type.
+      accountWarning = '';
+      if(map.account){
+        const vals = res.data.slice(0,25).map(r=>r[map.account]);
+        if(looksLikeAccountNumbers(vals)){
+          accountWarning = `The column "${map.account}" appears to contain account numbers, not account names, so account types can't be detected. All rows are being assigned to "${fallbackAccount}" — change the fallback above and re-drop the file if that's wrong.`;
+          map.account = null;   // ignore it; also keeps account numbers out of stored data
+        }
+      } else {
+        accountWarning = `No account-name column was found in this file, so all rows are being assigned to "${fallbackAccount}". If this export mixes accounts (401k, Roth, brokerage), import them one account at a time.`;
+      }
 
       parsedRows = res.data.map(r=>{
         const date = parseDate(r[map.date]);
@@ -12959,6 +12994,8 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       </tr>`;}).join('');
 
     box.innerHTML = `
+      ${accountWarning?`<div style="margin:14px 0 0;padding:11px 14px;border:1px solid ${C.amb};border-radius:9px;background:rgba(224,164,88,.10);color:${C.tx};font-size:.79rem;line-height:1.5;">
+        <strong style="color:${C.amb};">⚠ Account types could not be detected.</strong> ${accountWarning}</div>`:''}
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0;">
         ${pill('New to add',nNew,C.grn)}${pill('Already have',nDup,C.dim)}${pill('Skipped',nSkip,C.amb)}
       </div>
