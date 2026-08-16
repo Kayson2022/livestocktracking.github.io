@@ -12243,6 +12243,39 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             const normalized = [];
             const rejected   = [];
 
+            // ── AUTO-RESOLVE platform/account from YOUR EXISTING data ──────
+            // The app keys holdings by symbol|||accountType|||platform. A wrong
+            // platform creates a phantom position and SELLs silently fail. So we
+            // never guess a default: we look up how this symbol is already held.
+            // Ambiguous or unknown -> the row is REJECTED, not imported.
+            const _existingTx = (pd.transactions || []);
+            const _placementBySymbol = {};
+            _existingTx.forEach(function(ex){
+                const s = (ex.symbol || '').trim().toUpperCase();
+                if (!s) return;
+                const combo = (ex.accountType || '') + '|||' + (ex.platform || '');
+                if (!_placementBySymbol[s]) _placementBySymbol[s] = {};
+                _placementBySymbol[s][combo] = (_placementBySymbol[s][combo] || 0) + 1;
+            });
+            function _resolvePlacement(sym, t){
+                // 1. If the file explicitly says both, trust it.
+                if (t.accountType && t.platform)
+                    return { accountType: t.accountType, platform: t.platform, how: 'from file' };
+                const combos = _placementBySymbol[sym] ? Object.keys(_placementBySymbol[sym]) : [];
+                // 2. Filter by whichever field the file DID provide.
+                let candidates = combos;
+                if (t.accountType) candidates = combos.filter(function(c){ return c.split('|||')[0] === t.accountType; });
+                if (t.platform)    candidates = candidates.filter(function(c){ return c.split('|||')[1] === t.platform; });
+                // 3. Exactly one existing placement -> safe to reuse it.
+                if (candidates.length === 1) {
+                    const p = candidates[0].split('|||');
+                    return { accountType: t.accountType || p[0], platform: t.platform || p[1], how: 'matched your existing holding' };
+                }
+                if (candidates.length > 1)
+                    return { error: 'held in ' + candidates.length + ' different account/platform combos - file must specify which' };
+                return { error: 'not currently held, and file does not specify accountType + platform' };
+            }
+
             _csvProNew.forEach(function(t, i) {
                 // Must have a valid symbol
                 const sym = (t.symbol || '').trim().toUpperCase();
@@ -12289,6 +12322,10 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
                     else invType = 'Stock';
                 }
 
+                // Resolve WHERE this transaction belongs - never guess a default.
+                const _pl = _resolvePlacement(sym, t);
+                if (_pl.error) { rejected.push(sym + ' ' + dateStr + ': ' + _pl.error); return; }
+
                 normalized.push({
                     id:              Date.now() + i + Math.random(),
                     date:            dateStr,
@@ -12298,8 +12335,8 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
                     transactionType: txType,
                     shares:          shares,
                     price:           price > 0 ? price : (shares > 0 && amount !== 0 ? Math.abs(amount / shares) : 0),
-                    accountType:     t.accountType || 'Regular Brokerage',
-                    platform:        t.platform || 'Vanguard',
+                    accountType:     _pl.accountType,
+                    platform:        _pl.platform,
                     notes:           'Imported from CSV Tool ' + new Date().toLocaleDateString(),
                     dividend:        isDividend ? Math.abs(amount) : 0,
                     amount:          amount || null,
@@ -12318,6 +12355,12 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
                 return;
             }
 
+            // ── SAFETY: snapshot before any write, so this is undoable ──
+            if (typeof window.takeVerifiedSnapshot === 'function') {
+                try { await window.takeVerifiedSnapshot('Auto-saved before JSON import'); }
+                catch(e) { console.warn('Pre-import snapshot failed', e); }
+            }
+
             // ── Merge — keep existing, add new ────────────────────
             const existing = pd.transactions || [];
             pd.transactions = [...existing, ...normalized];
@@ -12332,7 +12375,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             closeCSVImportProModal();
 
             const msg = 'Imported ' + normalized.length + ' transactions!' +
-                (rejected.length ? '\n\nSkipped ' + rejected.length + ' invalid rows (check console for details).' : '');
+                (rejected.length ? '\n\nSKIPPED ' + rejected.length + ' row(s) that could not be placed safely:\n' +
+                    rejected.slice(0,8).join('\n') + (rejected.length>8 ? '\n...and ' + (rejected.length-8) + ' more' : '') +
+                    '\n\nThese were left out on purpose - importing them could have created phantom positions.' : '');
             if (typeof showConfirmationModal === 'function') {
                 showConfirmationModal('✅ ' + msg, null);
             } else {
@@ -12708,7 +12753,16 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     el.innerHTML = `<div style="color:${C.dim};font-size:.8rem;">Loading from cloud…</div>`;
     const all = await fetchAllSnapshots();
     if(!all.length){ el.innerHTML = `<div style="color:${C.dim};font-size:.82rem;padding:10px 0;">No cloud snapshots yet. Click "Take verified snapshot" to create one.</div>`; return; }
-    el.innerHTML = all.map(s=>`
+    const COLLAPSE_AT = 3;
+    const showAll = window.__bcShowAll === true;
+    const shown = showAll ? all : all.slice(0, COLLAPSE_AT);
+    const hidden = all.length - shown.length;
+    const toggleHTML = all.length > COLLAPSE_AT
+      ? `<div onclick="window.__bcShowAll=${showAll?'false':'true'};window.__bcRerender();"
+             style="text-align:center;padding:7px;border:1px dashed ${C.bd};border-radius:8px;cursor:pointer;color:${C.dim};font-size:.76rem;margin-top:2px;">
+           ${showAll ? '▲ Show fewer' : `▼ Show ${hidden} older snapshot${hidden===1?'':'s'}`}
+         </div>` : '';
+    el.innerHTML = shown.map(s=>`
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${C.bd};border-radius:9px;margin-bottom:8px;background:${C.bg};">
         <div>
           <div style="color:${C.tx};font-weight:700;font-size:.85rem;">☁ ${s.label}</div>
@@ -12719,8 +12773,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
           <button onclick="window.restoreSnapshot('${s.id}')" title="Preview & restore" style="padding:6px 10px;background:transparent;color:${C.amb};border:1px solid ${C.amb};border-radius:6px;cursor:pointer;font-size:.74rem;">↩ Restore</button>
           <button onclick="window.deleteSnapshot('${s.id}')" title="Remove from cloud list" style="padding:6px 10px;background:transparent;color:${C.dim};border:1px solid ${C.bd};border-radius:6px;cursor:pointer;font-size:.74rem;">✕</button>
         </div>
-      </div>`).join('');
+      </div>`).join('') + toggleHTML;
   }
+  window.__bcRerender = function(){ renderList(); };
 
   // ---- widget shell ---------------------------------------------------------
   function ensure(){
@@ -12776,6 +12831,360 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const b=document.createElement('span'); b.id='_bcBtn'; b.className='density-toggle';
     b.title='Backup & Restore Center (cloud-synced)'; b.textContent='🛡️☁️ Backup Center';
     b.addEventListener('click',window.openBackupCenter); g.appendChild(b);
+  }
+  setTimeout(injectBtn,3000);
+  window.addEventListener('load',()=>setTimeout(injectBtn,2200));
+})();
+
+</script>
+
+<!-- ===== BROKER CSV -> JSON CONVERTER (read-only) ===== -->
+<script>
+/* ============================================================================
+ *  BROKER CSV → JSON CONVERTER   (READ-ONLY — never touches your database)
+ *  ---------------------------------------------------------------------------
+ *  Produces a .json file you then feed to "Import from JSON Backup", which has
+ *  the auto-resolver, duplicate check, preview and pre-import snapshot.
+ *
+ *  This module has NO access to portfolioData and performs NO writes.
+ *  Worst case it produces a bad file, which the importer then validates.
+ *
+ *  You choose the platform explicitly — nothing is guessed from headers.
+ * ========================================================================== */
+(function(){
+  if (window.__csvConverterLoaded) return; window.__csvConverterLoaded = true;
+
+  const C = { bg:'#0d1117', card:'#161b22', bd:'#30363d', tx:'#e6edf3',
+              dim:'#9aa7b4', grn:'#3fb950', red:'#e74c3c', amb:'#e0a458', blu:'#58a6ff' };
+
+  const norm = s => String(s||'').trim().toLowerCase().replace(/[_"']/g,' ').replace(/\s+/g,' ');
+  const num = v => { const n = parseFloat(String(v??'').replace(/[$,()\s]/g,'')); return isNaN(n)?null:Math.abs(n); };
+
+  function parseDate(v){
+    if(!v) return null;
+    const s = String(v).trim();
+    let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if(m){ let y=+m[3]; if(y<100) y+=2000; return `${y}-${String(+m[1]).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`; }
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(s);
+    return isNaN(d) ? null : d.toISOString().split('T')[0];
+  }
+
+  function cleanSymbol(v){
+    if(!v) return null;
+    let s = String(v).trim().toUpperCase();
+    const m = s.match(/\(([A-Z.]{1,6})\)\s*$/);
+    if(m) return m[1];
+    s = s.split(/\s+/)[0].replace(/[^A-Z.\-]/g,'');
+    return (s.length>=1 && s.length<=6) ? s : null;
+  }
+
+  // Map a broker's account label to the app's account types.
+  function classifyAccount(raw){
+    const s = norm(raw);
+    if(!s) return null;
+    if(/401/.test(s)) return '401(k)';
+    if(/roth/.test(s)) return 'Roth IRA';
+    if(/529/.test(s)) return '529';
+    if(/\bhsa\b/.test(s)) return 'HSA';
+    if(/\bira\b/.test(s)) return 'Traditional IRA';
+    if(/individual|joint|brokerage|tod|taxable/.test(s)) return 'Regular Brokerage';
+    return null;   // unknown -> let the importer's resolver decide
+  }
+
+  // BUY / SELL / null(skip, with reason)
+  function classifyAction(raw){
+    const s = norm(raw);
+    if(!s) return {t:null, why:'no action given'};
+    if(/transferred|change in market value|^sweep in$|^sweep out$|sweep into|sweep out of/.test(s))
+      return {t:null, why:'not a trade (transfer/sweep/valuation)'};
+    if(/dividend received|^dividend$/.test(s))
+      return {t:null, why:'dividend cash (no share change)'};
+    if(/you sold|^sold$|^sell$|exchange out|redemption|redeem/.test(s)) return {t:'SELL'};
+    if(/reinvestment|dividend reinvestment/.test(s)) return {t:'BUY'};
+    if(/you bought|^bought$|^buy$|contribution|exchange in/.test(s)) return {t:'BUY'};
+    return {t:null, why:'unrecognised action "'+String(raw).slice(0,40)+'"'};
+  }
+
+  // ---- EXPLICIT per-platform column maps (no header guessing) -------------
+  // Each entry lists candidate header names, first match wins. An account-NUMBER
+  // column is never used as an account name.
+  const PLATFORMS = {
+    'Fidelity': {
+      date:    ['run date','trade date','date'],
+      action:  ['action','transaction type'],
+      symbol:  ['symbol'],
+      descr:   ['description','security description'],
+      shares:  ['quantity','shares'],
+      price:   ['price','price ($)'],
+      amount:  ['amount','amount ($)'],
+      account: ['account','account name','account type'],
+    },
+    'Vanguard': {
+      date:    ['trade date','settlement date','date'],
+      action:  ['transaction type','transaction description'],
+      symbol:  ['symbol'],
+      descr:   ['investment name','description'],
+      shares:  ['shares','quantity'],
+      price:   ['share price','price'],
+      amount:  ['principal amount','net amount','amount'],
+      account: ['account type','account name'],
+    },
+    'Charles Schwab': {
+      date:    ['date','trade date'],
+      action:  ['action','transaction type'],
+      symbol:  ['symbol'],
+      descr:   ['description'],
+      shares:  ['quantity','shares'],
+      price:   ['price'],
+      amount:  ['amount','total'],
+      account: ['account','account name'],
+    },
+    'Merrill Edge': {
+      date:    ['trade date','date','settlement date'],
+      action:  ['description','transaction type','action'],
+      symbol:  ['symbol'],
+      descr:   ['description','security description'],
+      shares:  ['quantity','shares'],
+      price:   ['price'],
+      amount:  ['amount','net amount'],
+      account: ['account','account registration','account name'],
+    },
+  };
+
+  const isAcctNumberCol = h => /(number|num\b|no\.|acct #|account #|#)/.test(norm(h));
+
+  function mapColumns(headers, spec){
+    const map = {};
+    for(const field in spec){
+      for(const cand of spec[field]){
+        const hit = headers.find(h => {
+          if(field==='account' && isAcctNumberCol(h)) return false;   // never an account-number column
+          return norm(h) === cand;
+        });
+        if(hit){ map[field]=hit; break; }
+      }
+    }
+    return map;
+  }
+
+  let converted = [];    // rows ready for JSON
+  let skippedRows = [];  // {reason, sample}
+  let chosenPlatform = null;
+
+  window.__convHandleFile = function(file){
+    const platEl = document.getElementById('convPlatform');
+    chosenPlatform = platEl ? platEl.value : '';
+    const out = document.getElementById('convResult');
+    if(!chosenPlatform){
+      out.innerHTML = `<div style="color:${C.red};padding:12px;">Choose the platform this file came from first.</div>`;
+      return;
+    }
+    if(!file) return;
+    if(typeof Papa === 'undefined'){
+      out.innerHTML = `<div style="color:${C.red};padding:12px;">CSV parser not available on this page.</div>`;
+      return;
+    }
+
+    Papa.parse(file, { header:true, skipEmptyLines:true, complete: res => {
+      const headers = (res.meta && res.meta.fields) ? res.meta.fields : [];
+      const spec = PLATFORMS[chosenPlatform];
+      const map = mapColumns(headers, spec);
+
+      const missing = ['date','shares'].filter(f=>!map[f]);
+      if(missing.length || (!map.symbol && !map.descr)){
+        out.innerHTML = `<div style="padding:14px;border:1px solid ${C.red};border-radius:9px;background:rgba(231,76,60,.08);color:${C.tx};">
+          <strong style="color:${C.red};">This doesn't look like a ${chosenPlatform} transaction export.</strong><br>
+          <span style="font-size:.8rem;color:${C.dim};">Missing expected columns: ${missing.concat(!map.symbol&&!map.descr?['symbol/description']:[]).join(', ')}<br>
+          Found headers: ${headers.map(h=>'<code>'+h+'</code>').join(', ')||'(none)'}<br><br>
+          Tip: make sure this is the <strong>transaction / activity history</strong> export, not the positions/holdings export.</span></div>`;
+        return;
+      }
+
+      const include401k = document.getElementById('convInclude401k')?.checked;
+      converted = []; skippedRows = [];
+
+      res.data.forEach(r=>{
+        const date = parseDate(r[map.date]);
+        let symbol = map.symbol ? cleanSymbol(r[map.symbol]) : null;
+        let usedDescr = false;
+        if(!symbol && map.descr){
+          const d = String(r[map.descr]||'').trim();
+          if(d && !/no description/i.test(d)){ symbol = d.toUpperCase(); usedDescr = true; }
+        }
+        const shares = num(r[map.shares]);
+        let price = map.price ? num(r[map.price]) : null;
+        const amount = map.amount ? num(r[map.amount]) : null;
+        if((price===null||price===0) && amount && shares) price = amount/shares;
+
+        const cls = classifyAction(map.action ? r[map.action] : '');
+        const acct = map.account ? classifyAccount(r[map.account]) : null;
+
+        if(!date)                { skippedRows.push({reason:'no valid date'}); return; }
+        if(!cls.t)               { skippedRows.push({reason:cls.why}); return; }
+        if(!symbol)              { skippedRows.push({reason:'no symbol or fund name'}); return; }
+        if(!shares || shares<=0) { skippedRows.push({reason:'zero/missing shares'}); return; }
+        if(price===null||price<=0){skippedRows.push({reason:'zero/missing price'}); return; }
+        if(acct === '401(k)' && !include401k){
+          skippedRows.push({reason:'401(k) row (tick the box above to include)'}); return; }
+
+        const row = {
+          date, symbol,
+          transactionType: cls.t,
+          shares, price,
+          platform: chosenPlatform,        // explicit, from YOUR dropdown choice
+        };
+        // Only include accountType when the file states it clearly. Otherwise
+        // leave it out so the importer's resolver can match your existing holding.
+        if(acct) row.accountType = acct;
+        if(usedDescr) row.name = symbol;
+        converted.push(row);
+      });
+
+      render();
+    }, error: e => {
+      out.innerHTML = `<div style="color:${C.red};padding:12px;">Could not read file: ${e.message}</div>`;
+    }});
+  };
+
+  function render(){
+    const out = document.getElementById('convResult');
+    const byReason = {};
+    skippedRows.forEach(s=>{ byReason[s.reason]=(byReason[s.reason]||0)+1; });
+
+    const acctCounts = {};
+    converted.forEach(r=>{ const k=r.accountType||'(resolve on import)'; acctCounts[k]=(acctCounts[k]||0)+1; });
+
+    const rowsHTML = converted.slice(0,60).map(r=>`
+      <tr style="border-bottom:.5px solid ${C.bd};font-size:.75rem;">
+        <td style="padding:4px 6px;color:${C.tx};">${r.date}</td>
+        <td style="padding:4px 6px;color:${C.blu};font-size:.7rem;">${r.accountType||'—'}</td>
+        <td style="padding:4px 6px;color:${C.tx};font-weight:600;">${r.symbol.length>20?r.symbol.slice(0,18)+'…':r.symbol}</td>
+        <td style="padding:4px 6px;color:${r.transactionType==='SELL'?C.red:C.tx};">${r.transactionType}</td>
+        <td style="padding:4px 6px;text-align:right;color:${C.tx};">${r.shares.toLocaleString('en-US',{maximumFractionDigits:4})}</td>
+        <td style="padding:4px 6px;text-align:right;color:${C.tx};">$${r.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`).join('');
+
+    out.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0;">
+        <div style="flex:1;min-width:120px;background:${C.bg};border:1px solid ${C.bd};border-radius:9px;padding:10px 12px;">
+          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.5px;color:${C.dim};font-weight:600;">Converted</div>
+          <div style="font-size:1.1rem;font-weight:800;color:${C.grn};">${converted.length}</div></div>
+        <div style="flex:1;min-width:120px;background:${C.bg};border:1px solid ${C.bd};border-radius:9px;padding:10px 12px;">
+          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.5px;color:${C.dim};font-weight:600;">Skipped</div>
+          <div style="font-size:1.1rem;font-weight:800;color:${C.amb};">${skippedRows.length}</div></div>
+        <div style="flex:2;min-width:180px;background:${C.bg};border:1px solid ${C.bd};border-radius:9px;padding:10px 12px;">
+          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.5px;color:${C.dim};font-weight:600;">Accounts found</div>
+          <div style="font-size:.8rem;color:${C.tx};">${Object.entries(acctCounts).map(([k,v])=>`${k}: ${v}`).join(' · ')||'—'}</div></div>
+      </div>
+
+      ${Object.keys(byReason).length?`<div style="font-size:.76rem;color:${C.dim};margin-bottom:10px;line-height:1.6;">
+        <strong style="color:${C.tx};">Skipped rows:</strong> ${Object.entries(byReason).map(([k,v])=>`${v} × ${k}`).join(' · ')}</div>`:''}
+
+      ${converted.length?`
+      <div style="max-height:300px;overflow:auto;border:1px solid ${C.bd};border-radius:8px;margin-bottom:12px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="font-size:.65rem;color:${C.dim};border-bottom:2px solid ${C.bd};position:sticky;top:0;background:${C.card};">
+            <th style="padding:5px 6px;text-align:left;color:${C.dim};">Date</th>
+            <th style="padding:5px 6px;text-align:left;color:${C.dim};">Account</th>
+            <th style="padding:5px 6px;text-align:left;color:${C.dim};">Symbol</th>
+            <th style="padding:5px 6px;text-align:left;color:${C.dim};">Type</th>
+            <th style="padding:5px 6px;text-align:right;color:${C.dim};">Shares</th>
+            <th style="padding:5px 6px;text-align:right;color:${C.dim};">Price</th></tr></thead>
+          <tbody>${rowsHTML}</tbody></table>
+      </div>${converted.length>60?`<div style="font-size:.72rem;color:${C.dim};margin-bottom:10px;">…and ${converted.length-60} more rows (all included in the download).</div>`:''}
+      <button onclick="window.__convDownload()" style="padding:9px 20px;background:${C.grn};color:#04260f;border:none;border-radius:8px;font-weight:800;font-size:.9rem;cursor:pointer;">
+        ⬇ Download JSON (${converted.length} transactions)</button>
+      <div style="margin-top:10px;font-size:.72rem;color:${C.dim};line-height:1.6;">
+        Next: open <strong>📊 Import from JSON Backup</strong> and drop this file in. That step checks for duplicates,
+        resolves each holding against your existing data, and saves a snapshot before writing anything.</div>`
+      : `<div style="color:${C.amb};font-size:.84rem;">No transactions could be converted from this file. Check the skip reasons above — and make sure you exported the <strong>transaction history</strong>, not the positions list.</div>`}`;
+  }
+
+  window.__convDownload = function(){
+    if(!converted.length) return;
+    const payload = {
+      metadata: {
+        exportDate: new Date().toISOString(),
+        targetApp: 'Portfolio Tracker',
+        source: chosenPlatform + ' CSV (converted)',
+        transactionCount: converted.length,
+      },
+      transactions: converted,
+    };
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${chosenPlatform.replace(/\s+/g,'_').toLowerCase()}_converted_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  };
+
+  function ensure(){
+    if(document.getElementById('csvConverterWidget')) return;
+    const w = document.createElement('div');
+    w.id='csvConverterWidget';
+    w.style.cssText=`display:none;margin:18px 0;padding:20px;border:1px solid ${C.bd};border-radius:14px;background:${C.card};color:${C.tx};`;
+    w.innerHTML=`
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <h3 style="font-size:1.1rem;font-weight:700;color:${C.tx};margin:0;">📄 Broker CSV → JSON Converter</h3>
+        <span onclick="document.getElementById('csvConverterWidget').style.display='none'" style="cursor:pointer;color:${C.dim};font-size:1.3rem;line-height:1;">×</span>
+      </div>
+      <p style="font-size:.78rem;color:${C.dim};margin:0 0 4px;line-height:1.55;">
+        Converts a broker transaction export into a JSON file your app can import.
+        <strong style="color:${C.tx};">This tool never touches your data</strong> — it only produces a file for you to review.</p>
+      <p style="font-size:.72rem;color:${C.dim};margin:0 0 14px;">The CSV is read in your browser only and never uploaded anywhere.</p>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <label style="font-size:.64rem;text-transform:uppercase;letter-spacing:.4px;color:${C.dim};font-weight:600;">1. Which platform is this CSV from?</label>
+          <select id="convPlatform" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid ${C.bd};border-radius:7px;background:${C.bg};color:${C.tx};font-size:.85rem;">
+            <option value="">— choose —</option>
+            <option value="Fidelity">Fidelity</option>
+            <option value="Vanguard">Vanguard</option>
+            <option value="Charles Schwab">Charles Schwab</option>
+            <option value="Merrill Edge">Merrill Edge</option>
+          </select></div>
+        <div style="display:flex;align-items:flex-end;">
+          <label style="font-size:.78rem;color:${C.dim};display:flex;align-items:center;gap:7px;cursor:pointer;">
+            <input type="checkbox" id="convInclude401k"/>
+            Include 401(k) fund rows <span style="opacity:.7;">(off by default)</span></label></div>
+      </div>
+
+      <div id="convDrop" style="border:2px dashed ${C.bd};border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:${C.bg};">
+        <div style="font-size:1.6rem;">📄</div>
+        <div style="color:${C.tx};font-weight:600;margin-top:4px;">2. Click or drop your broker CSV here</div>
+        <div style="color:${C.dim};font-size:.74rem;margin-top:3px;">Use the <strong>transaction / activity history</strong> export — not the positions list</div>
+        <input type="file" id="convFile" accept=".csv,.txt,text/csv" style="display:none;"/>
+      </div>
+      <div id="convResult"></div>`;
+    document.body.appendChild(w);
+
+    const drop=w.querySelector('#convDrop'), inp=w.querySelector('#convFile');
+    drop.addEventListener('click',()=>inp.click());
+    inp.addEventListener('change',e=>window.__convHandleFile(e.target.files[0]));
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor=C.grn;}));
+    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.style.borderColor=C.bd;}));
+    drop.addEventListener('drop',e=>{e.preventDefault();window.__convHandleFile(e.dataTransfer.files[0]);});
+  }
+
+  window.openCsvConverter = function(){
+    ensure();
+    const w=document.getElementById('csvConverterWidget');
+    const open=w.style.display!=='none';
+    w.style.display=open?'none':'block';
+    if(!open) w.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+
+  function injectBtn(){
+    const g=document.getElementById('_enhControlsInjected');
+    if(!g||document.getElementById('_convBtn'))return;
+    const b=document.createElement('span'); b.id='_convBtn'; b.className='density-toggle';
+    b.title='Convert a broker CSV into an importable JSON file';
+    b.textContent='📄 CSV → JSON';
+    b.addEventListener('click',window.openCsvConverter); g.appendChild(b);
   }
   setTimeout(injectBtn,3000);
   window.addEventListener('load',()=>setTimeout(injectBtn,2200));
