@@ -13,6 +13,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -673,7 +674,7 @@
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc, getDocs, deleteDoc, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
         const FIRESTORE_DATA_DOC = 'portfolioData';
@@ -706,6 +707,17 @@
 
         let firebaseApp, db, auth, userId;
         let unsubscribePortfolio, unsubscribeUiState, unsubscribePriceCache, unsubscribeSession; 
+
+        // --- BRIDGE for injected add-on modules (Backup Center etc). ---------
+        // db/userId and the app's own helpers live inside this module scope and
+        // are invisible to injected <script> blocks. This closure exposes only
+        // what add-ons need, read at call time so it stays correct as auth loads.
+        window.__getFirebaseHandles = function(){
+            return { db, userId, auth, doc, setDoc, getDoc, getDocs, deleteDoc, collection,
+                     saveDataToFirestore: (typeof saveDataToFirestore==='function') ? saveDataToFirestore : null,
+                     logActivity:         (typeof logActivity==='function')         ? logActivity         : null,
+                     updateDisplay:       (typeof updateDisplay==='function')       ? updateDisplay       : null };
+        };
 
         let portfolioData = {
              username: '',
@@ -6378,12 +6390,10 @@
         <div id="dataTransfer" class="card-panel">
             <h2>Data Transfer & Management</h2>
             <button class="btn" onclick="exportCSV()">Export Transactions (CSV)</button>
-            <button class="btn" onclick="triggerCsvImport()">Import Transactions (CSV)</button>
             <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
-            <button class="btn" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;" onclick="openCSVImportModal()">📊 Import from CSV Tool</button>
+            <button class="btn" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;" onclick="openCSVImportModal()">📊 Import from JSON Backup</button>
             <button class="btn" style="background:linear-gradient(135deg,#e17055,#d63031);color:#fff;border:none;" onclick="window.cleanupBadImports()">🧹 Clean Bad Imports</button>
             <input type="file" id="csvJsonFileInput" accept=".json" style="display: none;">
-            <button class="btn btn-secondary" id="refreshMFBtn" onclick="refreshMutualFunds()">Refresh Mutual Funds</button>
             <button class="btn" onclick="document.getElementById('restorePanel').style.display=document.getElementById('restorePanel').style.display==='none'?'block':'none'" style="background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:#fff;border:none;">📥 Restore from Email Backup</button>
             <div id="restorePanel" style="display:none; margin-top:12px; width:100%;">
                 <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">Paste the full JSON content from your backup email below, then click Restore:</p>
@@ -11453,6 +11463,11 @@ function renderTarget62(result, chartCanvasId, tableId, summaryId) {
     const { goalHitA, goalHitB, finalA, finalB, withdrawA, withdrawB,
             ssAge62, ssFRA, ssAge70, inputs, irsMaxAtTarget } = result;
 
+    const _goalAmt = (inputs && (inputs.goal || inputs.retirementGoal || inputs.goalAmount)) || 3000000;
+    const fmtGoal = n => n >= 1e6 ? '$' + (n/1e6).toFixed(1).replace(/\.0$/,'') + 'M'
+                      : n >= 1e3 ? '$' + Math.round(n/1e3) + 'K'
+                      : '$' + Math.round(n);
+
     const goalAHtml = goalHitA
       ? `<span style="color:#27ae60;font-weight:700;">✓ Age ${goalHitA.age} (${goalHitA.year})</span>`
       : `<span style="color:#e74c3c;">Not reached by age ${inputs.targetAge||62}</span>`;
@@ -11467,14 +11482,14 @@ function renderTarget62(result, chartCanvasId, tableId, summaryId) {
           <div style="font-size:0.7rem;letter-spacing:1px;opacity:0.7;margin-bottom:6px;">SCENARIO A — CURRENT PACE</div>
           <div style="font-size:1.5rem;font-weight:800;">${fmt$0(finalA)}</div>
           <div style="font-size:0.75rem;opacity:0.7;margin:4px 0;">at age ${inputs.targetAge||62}</div>
-          <div style="font-size:0.8rem;">$3M goal: ${goalAHtml}</div>
+          <div style="font-size:0.8rem;">${fmtGoal(_goalAmt)} goal: ${goalAHtml}</div>
           <div style="font-size:0.75rem;opacity:0.7;margin-top:6px;">4% rule: ${fmt$(withdrawA)}/mo</div>
         </div>
         <div style="background:rgba(52,152,219,0.08);border:1px solid rgba(52,152,219,0.25);border-radius:12px;padding:16px;">
           <div style="font-size:0.7rem;letter-spacing:1px;opacity:0.7;margin-bottom:6px;">SCENARIO B — MAX CONTRIBUTIONS</div>
           <div style="font-size:1.5rem;font-weight:800;color:#3498db;">${fmt$0(finalB)}</div>
           <div style="font-size:0.75rem;opacity:0.7;margin:4px 0;">at age ${inputs.targetAge||62} · IRS max = ${fmt$0(irsMaxAtTarget)}/yr</div>
-          <div style="font-size:0.8rem;">$3M goal: ${goalBHtml}</div>
+          <div style="font-size:0.8rem;">${fmtGoal(_goalAmt)} goal: ${goalBHtml}</div>
           <div style="font-size:0.75rem;opacity:0.7;margin-top:6px;">4% rule: ${fmt$(withdrawB)}/mo</div>
         </div>
       </div>
@@ -11549,7 +11564,7 @@ function renderTarget62(result, chartCanvasId, tableId, summaryId) {
             tension: 0.3,
           },
           {
-            label: '$3M Goal',
+            label: (function(){ var g=(goalLine&&goalLine.length)?goalLine[0]:0; if(!g) return '$3M Goal'; return (g>=1e6 ? '$'+(g/1e6).toFixed(1).replace(/\.0$/,'')+'M' : '$'+Math.round(g/1e3)+'K') + ' Goal'; })(),
             data: goalLine,
             borderColor: '#f39c12',
             borderWidth: 1.5,
@@ -12337,6 +12352,17 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         const pd = window.portfolioData || portfolioData;
         const before = (pd.transactions || []).length;
 
+        // SAFETY: this deletes transactions with no undo of its own. Take a
+        // Backup Center snapshot first so the operation is reversible.
+        if (typeof window.takeVerifiedSnapshot === 'function') {
+            try {
+                const s = await window.takeVerifiedSnapshot('Auto-saved before Clean Bad Imports');
+                if (!s && !confirm('Could not save a safety snapshot first.\n\nRun Clean Bad Imports anyway, with NO undo available?')) return;
+            } catch(e) {
+                if (!confirm('Could not save a safety snapshot first.\n\nRun Clean Bad Imports anyway, with NO undo available?')) return;
+            }
+        }
+
         pd.transactions = (pd.transactions || []).filter(t => {
             const sym    = (t.symbol || '').trim();
             const shares = parseFloat(t.shares) || 0;
@@ -12380,30 +12406,45 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 
 
 
-<!-- ===== BACKUP & RESTORE CENTER (injected) ===== -->
+<!-- ===== BACKUP & RESTORE CENTER (cloud-synced) ===== -->
 <script>
 /* ============================================================================
- *  BACKUP & RESTORE CENTER  —  standalone, independent of the CSV importer.
+ *  BACKUP & RESTORE CENTER  —  cloud-synced via Firestore.
  *  ---------------------------------------------------------------------------
- *  Design goals (fixing every weakness of the earlier single-snapshot backup):
+ *  Storage: users/{userId}/backupSnapshots/{snapshotId}
+ *  Deliberately an ISOLATED subcollection, separate from the app's own
+ *  'portfolio' data path, so a bug in this module can never write into your
+ *  live data. Snapshots sync automatically across any device you're signed
+ *  into, because they live in the same Firestore project as your portfolio.
+ *  ---------------------------------------------------------------------------
+ *  Safety design (fixing every weakness of the old single-snapshot backup):
  *   1. MULTIPLE named snapshots kept (last 8), never silently overwritten.
  *   2. HYDRATION GUARD: refuses to snapshot until the transaction count is
  *      stable across two checks — protects against snapshotting mid-load.
- *   3. Every snapshot is downloadable as a real file immediately — not
- *      trapped in localStorage, which can be cleared or lost.
+ *   3. Cloud-stored, so available from any device you sign into — plus an
+ *      optional local file download for an extra offline copy.
  *   4. Every restore shows a BEFORE/AFTER diff and requires typing RESTORE
  *      to confirm — no accidental one-click data loss.
- *   5. After restore, shows a verification summary so you can confirm
- *      correctness in the same screen, without hunting through the app.
- *  This module writes nothing on its own except when you explicitly restore.
+ *   5. Restoring auto-saves your PRE-restore state first — a restore is
+ *      itself undoable.
  * ========================================================================== */
 (function(){
   if (window.__backupCenterLoaded) return; window.__backupCenterLoaded = true;
 
   const C = { bg:'#0d1117', card:'#161b22', bd:'#30363d', tx:'#e6edf3',
               dim:'#9aa7b4', grn:'#3fb950', red:'#e74c3c', amb:'#e0a458', blu:'#58a6ff' };
-  const KEY = '__backupCenterSnapshots';
   const MAX_SNAPSHOTS = 8;
+  const COLLECTION_NAME = 'backupSnapshots';   // isolated from the app's own 'portfolio' path
+
+  function getHandles(){
+    return (typeof window.__getFirebaseHandles === 'function') ? window.__getFirebaseHandles() : null;
+  }
+  function fsReady(){
+    const h = getHandles();
+    return !!(h && h.db && h.userId && h.doc && h.setDoc && h.getDoc && h.getDocs && h.collection);
+  }
+  function colRef(){ const h=getHandles(); return h.collection(h.db, 'users', h.userId, COLLECTION_NAME); }
+  function docRef(id){ const h=getHandles(); return h.doc(h.db, 'users', h.userId, COLLECTION_NAME, id); }
 
   function getTx(){
     try{
@@ -12436,10 +12477,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     });
   }
 
-  // ---- Build a verification summary: per (symbol|account|platform) net shares
+  // ---- Verification summary: per (symbol|account|platform) net shares -----
   function summarize(list){
     const byKey = {};
-    let totalTx = list.length;
     [...list].sort((a,b)=> new Date(a.date) - new Date(b.date)).forEach(t=>{
       const key = `${t.symbol}|||${t.accountType||''}|||${t.platform||''}`;
       const sh = parseFloat(t.shares)||0;
@@ -12448,32 +12488,53 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       if (ty === 'BUY') byKey[key] += sh;
       else if (ty === 'SELL') byKey[key] -= sh;
     });
-    return { totalTx, byKey, when: new Date().toISOString() };
+    return { totalTx: list.length, byKey };
   }
 
-  function loadSnapshots(){
-    try{ return JSON.parse(localStorage.getItem(KEY) || '[]'); }catch(e){ return []; }
+  // ---- Firestore read/write helpers ----------------------------------------
+  async function fetchAllSnapshots(){
+    if(!fsReady()) return [];
+    try{
+      const snap = await getHandles().getDocs(colRef());
+      const out = [];
+      snap.forEach(d => out.push(d.data()));
+      out.sort((a,b) => new Date(b.when) - new Date(a.when));
+      return out;
+    }catch(e){ console.warn('Could not load backups from cloud:', e); return []; }
   }
-  function saveSnapshots(list){
-    try{ localStorage.setItem(KEY, JSON.stringify(list.slice(0, MAX_SNAPSHOTS))); return true; }
-    catch(e){ return false; }
+  async function writeSnapshot(snap){
+    if(!fsReady()) throw new Error('Cloud storage not available (not signed in, or app still loading).');
+    await getHandles().setDoc(docRef(snap.id), snap);
+  }
+  async function deleteSnapshotDoc(id){
+    if(!fsReady()) throw new Error('Cloud storage not available.');
+    const h=getHandles(); if(h && h.deleteDoc) await h.deleteDoc(docRef(id));
+  }
+  async function pruneOldSnapshots(){
+    const all = await fetchAllSnapshots();
+    if(all.length <= MAX_SNAPSHOTS) return;
+    const toRemove = all.slice(MAX_SNAPSHOTS);
+    for(const s of toRemove){ try{ await deleteSnapshotDoc(s.id); }catch(e){} }
   }
 
-  // ---- Take a verified snapshot --------------------------------------------
+  // ---- Take a verified snapshot, written straight to the cloud ------------
   window.takeVerifiedSnapshot = async function(label){
     const status = document.getElementById('bcStatus');
-    if(status) status.textContent = 'Checking data is fully loaded…';
+    const setStatus = (msg, color) => { if(status){ status.textContent = msg; status.style.color = color || C.dim; } };
+
+    if(!fsReady()){
+      setStatus('⚠ Cloud storage isn\'t ready yet (still signing in / loading). Wait a moment and try again.', C.red);
+      return null;
+    }
+    setStatus('Checking your data has fully finished loading…');
     const check = await waitForStableData();
     if(!check.ok){
-      const msg = `Could not confirm your data has finished loading (count kept changing, or app data wasn't found). Snapshot NOT taken — this protects you from backing up an incomplete state. Try again in a few seconds.`;
-      if(status){ status.textContent = msg; status.style.color = C.red; }
-      else alert(msg);
+      setStatus('Could not confirm your data finished loading — snapshot NOT taken, to avoid backing up an incomplete state. Try again in a few seconds.', C.red);
       return null;
     }
     const list = getTx();
     if(list === null){
-      const msg = 'Could not find the app\'s transaction data at all. Snapshot NOT taken.';
-      if(status){ status.textContent = msg; status.style.color = C.red; } else alert(msg);
+      setStatus('Could not find the app\'s transaction data. Snapshot NOT taken.', C.red);
       return null;
     }
     const snap = {
@@ -12484,22 +12545,23 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       summary: summarize(list),
       transactions: JSON.parse(JSON.stringify(list)),
     };
-    const all = loadSnapshots();
-    all.unshift(snap);
-    const ok = saveSnapshots(all);
-    if(status){
-      status.style.color = ok ? C.grn : C.amb;
-      status.textContent = ok
-        ? `✓ Snapshot saved — ${snap.count} transactions, verified stable.`
-        : `Snapshot captured (${snap.count} tx) but localStorage save failed — download it now as a file instead.`;
+    setStatus('Saving verified snapshot to the cloud…');
+    try{
+      await writeSnapshot(snap);
+      await pruneOldSnapshots();
+      setStatus(`✓ Snapshot saved to the cloud — ${snap.count} transactions, verified stable. Available on any device you sign into.`, C.grn);
+    }catch(e){
+      setStatus('⚠ Cloud save failed: '+e.message+'. Nothing was written.', C.red);
+      return null;
     }
-    renderList();
+    await renderList();
     return snap;
   };
 
-  // ---- Download a snapshot as a real file ----------------------------------
-  window.downloadSnapshot = function(id){
-    const snap = loadSnapshots().find(s=>s.id===id);
+  // ---- Download a snapshot as a local file too (belt-and-suspenders) ------
+  window.downloadSnapshot = async function(id){
+    const all = await fetchAllSnapshots();
+    const snap = all.find(s=>s.id===id);
     if(!snap){ alert('Snapshot not found.'); return; }
     const blob = new Blob([JSON.stringify(snap,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -12509,11 +12571,11 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     setTimeout(()=>URL.revokeObjectURL(url), 2000);
   };
 
-  // ---- Load a snapshot from an uploaded file (doesn't restore yet) --------
+  // ---- Load a snapshot from an uploaded file, push it to the cloud too ----
   window.__bcHandleFileUpload = function(file){
     if(!file) return;
     const reader = new FileReader();
-    reader.onload = e => {
+    reader.onload = async e => {
       try{
         const snap = JSON.parse(e.target.result);
         if(!snap || !Array.isArray(snap.transactions)){
@@ -12522,13 +12584,12 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         if(!snap.id) snap.id = 'file-'+Date.now();
         if(!snap.summary) snap.summary = summarize(snap.transactions);
         if(!snap.count) snap.count = snap.transactions.length;
-        const all = loadSnapshots();
-        all.unshift(snap);
-        saveSnapshots(all);
-        renderList();
-        alert(`Loaded backup from file: ${snap.count} transactions, dated ${new Date(snap.when||Date.now()).toLocaleString()}.\nIt now appears in the list below — review the diff before restoring.`);
+        if(!snap.label) snap.label = 'Loaded from file';
+        await writeSnapshot(snap);
+        await renderList();
+        alert(`Loaded backup from file into the cloud list: ${snap.count} transactions, dated ${new Date(snap.when||Date.now()).toLocaleString()}.\nReview the diff before restoring.`);
       }catch(err){
-        alert('Could not read this file as JSON: '+err.message);
+        alert('Could not read this file: '+err.message);
       }
     };
     reader.readAsText(file);
@@ -12541,8 +12602,8 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const rows = [];
     const keys = new Set([...Object.keys(snap.summary.byKey), ...Object.keys(curSummary.byKey)]);
     keys.forEach(k=>{
-      const before = curSummary.byKey[k] || 0;   // "before restore" = current state
-      const after  = snap.summary.byKey[k] || 0;  // "after restore"  = snapshot state
+      const before = curSummary.byKey[k] || 0;
+      const after  = snap.summary.byKey[k] || 0;
       if(Math.abs(before-after) > 0.0001){
         const [symbol,account,platform] = k.split('|||');
         rows.push({symbol,account,platform,before,after});
@@ -12552,9 +12613,10 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     return { txBefore: curSummary.totalTx, txAfter: snap.count, rows };
   }
 
-  // ---- Restore: requires typed confirmation + shows diff first ------------
-  window.restoreSnapshot = function(id){
-    const snap = loadSnapshots().find(s=>s.id===id);
+  // ---- Restore: shows diff, requires typed confirmation --------------------
+  window.restoreSnapshot = async function(id){
+    const all = await fetchAllSnapshots();
+    const snap = all.find(s=>s.id===id);
     if(!snap){ alert('Snapshot not found.'); return; }
     if(!window.portfolioData){ alert('Could not find the app\'s data object. Cannot restore.'); return; }
 
@@ -12591,7 +12653,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
               <th style="padding:5px 6px;text-align:right;color:${C.dim};">After restore</th></tr></thead>
             <tbody>${rowsHTML}</tbody></table>
           </div>${diff.rows.length>25?`<div style="font-size:.72rem;color:${C.dim};margin-bottom:10px;">…and ${diff.rows.length-25} more holdings would change.</div>`:''}`
-          : `<div style="color:${C.dim};font-size:.82rem;margin-bottom:12px;">No holding-level differences detected — this snapshot matches your current data closely (only transaction metadata may differ).</div>`}
+          : `<div style="color:${C.dim};font-size:.82rem;margin-bottom:12px;">No holding-level differences detected.</div>`}
         <label style="font-size:.78rem;color:${C.tx};display:block;margin-bottom:6px;">Type <strong>RESTORE</strong> to confirm you understand this will REPLACE all ${diff.txBefore} current transactions with ${diff.txAfter} from this backup:</label>
         <input id="bcConfirmInput" placeholder="Type RESTORE" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid ${C.bd};border-radius:7px;background:${C.bg};color:${C.tx};font-size:.85rem;margin-bottom:10px;"/>
         <div style="display:flex;gap:8px;">
@@ -12601,55 +12663,61 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       </div>`;
     box.scrollIntoView({behavior:'smooth',block:'center'});
 
-    document.getElementById('bcConfirmBtn').onclick = () => {
+    document.getElementById('bcConfirmBtn').onclick = async () => {
       const val = document.getElementById('bcConfirmInput').value.trim();
       if(val !== 'RESTORE'){ alert('Type RESTORE exactly (all caps) to confirm.'); return; }
 
-      // Snapshot the CURRENT state first, so a bad restore is itself undoable.
+      // Auto-save current state to the cloud FIRST, so the restore is itself undoable.
       const preRestore = { id:'pre-restore-'+Date.now(), when:new Date().toISOString(),
         label:'Auto-saved just before restoring "'+snap.label+'"',
         count:(getTx()||[]).length, summary:summarize(getTx()||[]),
         transactions: JSON.parse(JSON.stringify(getTx()||[])) };
-      const all = loadSnapshots(); all.unshift(preRestore); saveSnapshots(all);
+      try{ await writeSnapshot(preRestore); }catch(e){
+        if(!confirm('Could not save a pre-restore safety snapshot to the cloud ('+e.message+').\n\nContinue restoring anyway WITHOUT that safety net?')) return;
+      }
 
       window.portfolioData.transactions = JSON.parse(JSON.stringify(snap.transactions));
-      try{ if(typeof logActivity==='function') logActivity(`Restored backup "${snap.label}" (${snap.count} tx). Pre-restore state auto-saved.`);}catch(e){}
-      try{ if(typeof saveDataToFirestore==='function') saveDataToFirestore(); }catch(e){}
-      try{ if(typeof updateDisplay==='function') updateDisplay(); }catch(e){}
+      try{ const h=getHandles();
+        if(h && h.logActivity) h.logActivity(`Restored backup "${snap.label}" (${snap.count} tx). Pre-restore state auto-saved to cloud.`);
+        if(h && h.saveDataToFirestore) await h.saveDataToFirestore();
+        if(h && h.updateDisplay) h.updateDisplay();
+      }catch(e){ console.warn('Post-restore hooks failed:', e); }
 
       const after = getTx()||[];
       box.innerHTML = `<div style="border:1px solid ${C.grn};border-radius:10px;padding:14px;background:rgba(63,185,80,.08);margin-top:10px;">
         <div style="font-weight:800;color:${C.grn};margin-bottom:6px;">✓ Restore complete</div>
         <div style="font-size:.82rem;color:${C.tx};">Transaction count is now <strong>${after.length}</strong> (expected ${snap.count}).
         ${after.length===snap.count?'✓ Matches.':'⚠ Does not match — please check manually.'}<br>
-        A snapshot of your PRE-restore state was auto-saved as "${preRestore.label}" in case this was a mistake.</div>
+        A snapshot of your PRE-restore state was auto-saved to the cloud as "${preRestore.label}" in case this was a mistake.</div>
       </div>`;
-      renderList();
+      await pruneOldSnapshots();
+      await renderList();
     };
   };
 
-  // ---- delete a snapshot from the list (does not touch app data) ----------
-  window.deleteSnapshot = function(id){
-    if(!confirm('Remove this snapshot from the list? (This only removes the backup copy, not your live data.)')) return;
-    saveSnapshots(loadSnapshots().filter(s=>s.id!==id));
-    renderList();
+  // ---- delete a snapshot (from the cloud list only, not your live data) ---
+  window.deleteSnapshot = async function(id){
+    if(!confirm('Remove this snapshot from the cloud backup list? (This only removes the backup copy, not your live data.)')) return;
+    try{ await deleteSnapshotDoc(id); await renderList(); }
+    catch(e){ alert('Could not delete: '+e.message); }
   };
 
-  function renderList(){
+  async function renderList(){
     const el = document.getElementById('bcList');
     if(!el) return;
-    const all = loadSnapshots();
-    if(!all.length){ el.innerHTML = `<div style="color:${C.dim};font-size:.82rem;padding:10px 0;">No snapshots yet. Click "Take verified snapshot" to create one.</div>`; return; }
+    el.innerHTML = `<div style="color:${C.dim};font-size:.8rem;">Loading from cloud…</div>`;
+    const all = await fetchAllSnapshots();
+    if(!all.length){ el.innerHTML = `<div style="color:${C.dim};font-size:.82rem;padding:10px 0;">No cloud snapshots yet. Click "Take verified snapshot" to create one.</div>`; return; }
     el.innerHTML = all.map(s=>`
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${C.bd};border-radius:9px;margin-bottom:8px;background:${C.bg};">
         <div>
-          <div style="color:${C.tx};font-weight:700;font-size:.85rem;">${s.label}</div>
+          <div style="color:${C.tx};font-weight:700;font-size:.85rem;">☁ ${s.label}</div>
           <div style="color:${C.dim};font-size:.72rem;">${new Date(s.when).toLocaleString()} · ${s.count} transactions</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button onclick="window.downloadSnapshot('${s.id}')" title="Download as file" style="padding:6px 10px;background:transparent;color:${C.blu};border:1px solid ${C.blu};border-radius:6px;cursor:pointer;font-size:.74rem;">⬇ Download</button>
+          <button onclick="window.downloadSnapshot('${s.id}')" title="Also save as a local file" style="padding:6px 10px;background:transparent;color:${C.blu};border:1px solid ${C.blu};border-radius:6px;cursor:pointer;font-size:.74rem;">⬇ Download</button>
           <button onclick="window.restoreSnapshot('${s.id}')" title="Preview & restore" style="padding:6px 10px;background:transparent;color:${C.amb};border:1px solid ${C.amb};border-radius:6px;cursor:pointer;font-size:.74rem;">↩ Restore</button>
-          <button onclick="window.deleteSnapshot('${s.id}')" title="Remove from list" style="padding:6px 10px;background:transparent;color:${C.dim};border:1px solid ${C.bd};border-radius:6px;cursor:pointer;font-size:.74rem;">✕</button>
+          <button onclick="window.deleteSnapshot('${s.id}')" title="Remove from cloud list" style="padding:6px 10px;background:transparent;color:${C.dim};border:1px solid ${C.bd};border-radius:6px;cursor:pointer;font-size:.74rem;">✕</button>
         </div>
       </div>`).join('');
   }
@@ -12662,11 +12730,12 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     w.style.cssText=`display:none;margin:18px 0;padding:20px;border:1px solid ${C.bd};border-radius:14px;background:${C.card};color:${C.tx};`;
     w.innerHTML=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-        <h3 style="font-size:1.1rem;font-weight:700;color:${C.tx};margin:0;">🛡️ Backup &amp; Restore Center</h3>
+        <h3 style="font-size:1.1rem;font-weight:700;color:${C.tx};margin:0;">🛡️☁️ Backup &amp; Restore Center</h3>
         <span onclick="document.getElementById('backupCenterWidget').style.display='none'" style="cursor:pointer;color:${C.dim};font-size:1.3rem;line-height:1;">×</span>
       </div>
       <p style="font-size:.78rem;color:${C.dim};margin:0 0 14px;line-height:1.55;">
-        Keeps up to ${MAX_SNAPSHOTS} verified snapshots. A snapshot only saves after confirming your data has
+        Snapshots save to the <strong>cloud</strong> (same Firestore account as your portfolio), so they're available on
+        any device you sign into — up to ${MAX_SNAPSHOTS} kept. A snapshot only saves after confirming your data has
         fully finished loading. Every restore shows exactly what will change and requires typing <strong>RESTORE</strong> to confirm —
         and auto-saves your pre-restore state too, so a restore can itself be undone.</p>
 
@@ -12678,12 +12747,12 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       <div id="bcStatus" style="font-size:.78rem;color:${C.dim};min-height:1.2em;margin-bottom:14px;"></div>
 
       <div style="border-top:1px solid ${C.bd};padding-top:12px;margin-bottom:6px;">
-        <div style="font-weight:700;font-size:.9rem;color:${C.tx};margin-bottom:8px;">Saved snapshots</div>
+        <div style="font-weight:700;font-size:.9rem;color:${C.tx};margin-bottom:8px;">☁ Cloud snapshots (synced across devices)</div>
         <div id="bcList"></div>
       </div>
 
       <div style="border-top:1px solid ${C.bd};padding-top:12px;margin-top:8px;">
-        <label style="font-size:.78rem;color:${C.dim};">Load a previously downloaded backup file:</label><br>
+        <label style="font-size:.78rem;color:${C.dim};">Load a previously downloaded backup file into the cloud list:</label><br>
         <input type="file" id="bcFileInput" accept=".json" style="margin-top:6px;color:${C.tx};font-size:.8rem;"/>
       </div>
 
@@ -12698,14 +12767,14 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const w=document.getElementById('backupCenterWidget');
     const open=w.style.display!=='none';
     w.style.display=open?'none':'block';
-    if(!open) w.scrollIntoView({behavior:'smooth',block:'start'});
+    if(!open){ renderList(); w.scrollIntoView({behavior:'smooth',block:'start'}); }
   };
 
   function injectBtn(){
     const g=document.getElementById('_enhControlsInjected');
     if(!g||document.getElementById('_bcBtn'))return;
     const b=document.createElement('span'); b.id='_bcBtn'; b.className='density-toggle';
-    b.title='Backup & Restore Center'; b.textContent='🛡️ Backup Center';
+    b.title='Backup & Restore Center (cloud-synced)'; b.textContent='🛡️☁️ Backup Center';
     b.addEventListener('click',window.openBackupCenter); g.appendChild(b);
   }
   setTimeout(injectBtn,3000);
