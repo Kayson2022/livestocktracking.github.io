@@ -14,6 +14,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -800,6 +801,11 @@
 
             const searchInputEl = document.getElementById('searchInput');
             if (searchInputEl) searchInputEl.addEventListener('input', e => { currentSearchTerm = e.target.value; updateDisplay(); });
+            const assetTypeEl = document.getElementById('assetTypeFilter');
+            if (assetTypeEl) assetTypeEl.addEventListener('change', e => {
+                window.currentAssetType = e.target.value;
+                updateDisplay();
+            });
              else console.error("Element with ID 'searchInput' not found!");
 
             const csvFileInputEl = document.getElementById('csvFileInput');
@@ -3399,6 +3405,18 @@
                     const sym  = (h.symbol || '').toLowerCase();
                     const name = (h.name   || '').toLowerCase();
                     return sym.includes(searchTerm) || name.includes(searchTerm);
+                });
+            }
+            // --- Asset-type filter (Stocks / ETFs / Mutual Funds) -------------
+            // Holding.type values in this app: Stock, ETF, Market Index, 401k,
+            // Bond, Mutual Fund. Map those onto the three user-facing buckets.
+            if (window.currentAssetType && window.currentAssetType !== 'all') {
+                holdingsToRender = holdingsToRender.filter(h => {
+                    const t = String(h.type || '').toLowerCase();
+                    if (window.currentAssetType === 'etf')   return t.includes('etf');
+                    if (window.currentAssetType === 'fund')  return t.includes('mutual') || t.includes('fund');
+                    if (window.currentAssetType === 'stock') return t.includes('stock') || t === '' ;
+                    return true;
                 });
             }
             if (currentFilter !== 'all') {
@@ -6251,6 +6269,14 @@
                     <div class="controls-bar">
                         <div class="form-group">
                             <input type="search" id="searchInput" placeholder="Search by Symbol or Name...">
+                        </div>
+                        <div class="form-group">
+                            <select id="assetTypeFilter" title="Filter by asset type">
+                                <option value="all">All Types</option>
+                                <option value="stock">Stocks only</option>
+                                <option value="etf">ETFs only</option>
+                                <option value="fund">Mutual Funds only</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <select id="sortOptions">
