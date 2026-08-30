@@ -3414,9 +3414,14 @@
             if (window.currentAssetType && window.currentAssetType !== 'all') {
                 holdingsToRender = holdingsToRender.filter(h => {
                     const t = String(h.type || '').toLowerCase();
+                    const sym = String(h.symbol || '').toLowerCase().replace(/[^a-z]/g, '');
+                    const isCashH = t === 'cash' || t === 'money market'
+                        || sym === 'cash' || sym.includes('cash')
+                        || (sym.includes('money') && sym.includes('market'));
+                    if (window.currentAssetType === 'cash')  return isCashH;
                     if (window.currentAssetType === 'etf')   return t.includes('etf');
-                    if (window.currentAssetType === 'fund')  return t.includes('mutual') || t.includes('fund');
-                    if (window.currentAssetType === 'stock') return t.includes('stock') || t === '' ;
+                    if (window.currentAssetType === 'fund')  return (t.includes('mutual') || t.includes('fund')) && !isCashH;
+                    if (window.currentAssetType === 'stock') return (t.includes('stock') || t === '') && !isCashH;
                     return true;
                 });
             }
@@ -6305,6 +6310,7 @@
                                 <option value="stock">Stocks only</option>
                                 <option value="etf">ETFs only</option>
                                 <option value="fund">Mutual Funds only</option>
+                                <option value="cash">Cash only</option>
                             </select>
                         </div>
                         <div class="form-group">
