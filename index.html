@@ -16,6 +16,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -692,6 +693,8 @@
         const ALPHA_VANTAGE_API_KEY_STORAGE = 'myPortfolioAlphaVantageKey_v4';
         const FMP_API_KEY_STORAGE = 'myPortfolioFmpKey_v4';
         const REFRESH_INTERVAL_KEY = 'myPortfolioRefreshInterval_v4';
+        const PREMARKET_INTERVAL_KEY  = 'myPortfolioPreMarketInterval_v1';
+        const AFTERHOURS_INTERVAL_KEY = 'myPortfolioAfterHoursInterval_v1';
         const FINNHUB_PROXY = "https://finnhub-proxy.giolamchieu1975.workers.dev";
 		const CORS_PROXY = "https://api.allorigins.win/raw?url=";
 
@@ -743,6 +746,11 @@
         let isAutoRefreshEnabled = true;
         let isStatsVisible = true;
         let autoRefreshIntervalSeconds = 300;
+        // Pre-market and after-hours default to 120s: those sessions move
+        // less than the regular session, so refreshing as fast as 72s spends
+        // API quota without showing much new.
+        let preMarketIntervalSeconds  = 120;
+        let afterHoursIntervalSeconds = 120;
         let currentSort = 'default';
         let currentFilter = 'all';
         let currentGainLoss = 'all';
@@ -2018,6 +2026,24 @@
         function loadAutoRefreshInterval() {
             const storedInterval = localStorage.getItem(REFRESH_INTERVAL_KEY);
             autoRefreshIntervalSeconds = storedInterval ? parseInt(storedInterval, 10) : 300;
+            const pre  = localStorage.getItem(PREMARKET_INTERVAL_KEY);
+            const post = localStorage.getItem(AFTERHOURS_INTERVAL_KEY);
+            preMarketIntervalSeconds  = pre  ? parseInt(pre, 10)  : 120;
+            afterHoursIntervalSeconds = post ? parseInt(post, 10) : 120;
+        }
+
+        // Single source of truth for how often to refresh, in ET minutes:
+        //   04:00-09:30 pre-market, 09:30-16:00 regular, 16:00-20:00 after-hours.
+        // Outside those windows nothing trades, so 300s is plenty.
+        function intervalForNow() {
+            const et  = new Date(new Date().toLocaleString('en-US', {timeZone: 'America/New_York'}));
+            const day = et.getDay();
+            if (day === 0 || day === 6) return 300;
+            const t = et.getHours() * 60 + et.getMinutes();
+            if (t >= 570 && t < 960)  return autoRefreshIntervalSeconds;
+            if (t >= 240 && t < 570)  return preMarketIntervalSeconds;
+            if (t >= 960 && t < 1200) return afterHoursIntervalSeconds;
+            return 300;
         }
 
         function getIrsLimits() {
@@ -2051,7 +2077,21 @@
                 showConfirmationModal("Invalid interval. Please enter a number that is 30 or greater.", null);
                 return;
             }
+            // Blank pre/after-hours fields keep the current value rather than
+            // resetting to a default, so clearing a box is never destructive.
+            const _preRaw  = document.getElementById('preMarketIntervalInput').value.trim();
+            const _postRaw = document.getElementById('afterHoursIntervalInput').value.trim();
+            const _pre  = _preRaw  === '' ? preMarketIntervalSeconds  : parseInt(_preRaw, 10);
+            const _post = _postRaw === '' ? afterHoursIntervalSeconds : parseInt(_postRaw, 10);
+            if (isNaN(_pre) || _pre < 30 || isNaN(_post) || _post < 30) {
+                showConfirmationModal("Pre-market and after-hours intervals must be 30 or greater.", null);
+                return;
+            }
             autoRefreshIntervalSeconds = newInterval;
+            preMarketIntervalSeconds  = _pre;
+            afterHoursIntervalSeconds = _post;
+            localStorage.setItem(PREMARKET_INTERVAL_KEY,  preMarketIntervalSeconds);
+            localStorage.setItem(AFTERHOURS_INTERVAL_KEY, afterHoursIntervalSeconds);
             localStorage.setItem(FINNHUB_API_KEY_STORAGE, FINNHUB_API_KEY);
             localStorage.setItem(ALPHA_VANTAGE_API_KEY_STORAGE, ALPHA_VANTAGE_API_KEY);
             localStorage.setItem(FMP_API_KEY_STORAGE, FMP_API_KEY);
@@ -2486,7 +2526,7 @@
                 hideBannerTimeoutId = setTimeout(() => {
                     const _card = document.getElementById('refreshMessageCard');
                     if (_card) _card.style.display = 'none';
-                }, 15000);
+                }, 30000);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
 
                 if (isAutoRefreshEnabled) {
@@ -2498,15 +2538,7 @@
                     const nextUpdateEl = document.getElementById('nextUpdateTimer');
                     const refreshStatusBoxEl = document.getElementById('refreshStatusBox');
 
-                    function getSmartIntervalFB() {
-                        const now = new Date();
-                        const et  = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
-                        const day = et.getDay();
-                        const t   = et.getHours() * 60 + et.getMinutes();
-                        const isWeekend    = day === 0 || day === 6;
-                        const isMarketOpen = !isWeekend && t >= 570 && t < 960;
-                        return isMarketOpen ? autoRefreshIntervalSeconds : 300;
-                    }
+                    function getSmartIntervalFB() { return intervalForNow(); }
 
                     let timeLeft = getSmartIntervalFB();
                     if (refreshStatusBoxEl) refreshStatusBoxEl.style.display = 'block';
@@ -3228,6 +3260,10 @@
             document.getElementById('alphaVantageApiKeyInput').value = ALPHA_VANTAGE_API_KEY;
             document.getElementById('fmpApiKeyInput').value = FMP_API_KEY; 
             document.getElementById('autoRefreshIntervalInput').value = autoRefreshIntervalSeconds;
+            const _preEl  = document.getElementById('preMarketIntervalInput');
+            const _postEl = document.getElementById('afterHoursIntervalInput');
+            if (_preEl)  _preEl.value  = preMarketIntervalSeconds;
+            if (_postEl) _postEl.value = afterHoursIntervalSeconds;
             document.getElementById('settingsModal').style.display = 'flex';
         }
 
@@ -4405,18 +4441,7 @@
             const refreshStatusBoxEl = document.getElementById('refreshStatusBox'); 
 
             // Smart refresh: use user setting during market hours, 5 min after close
-            function getSmartInterval() {
-                const now = new Date();
-                const et  = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
-                const day = et.getDay(); // 0=Sun 6=Sat
-                const h   = et.getHours();
-                const m   = et.getMinutes();
-                const t   = h * 60 + m;
-                const isWeekend    = day === 0 || day === 6;
-                const isMarketOpen = !isWeekend && t >= 570 && t < 960; // 9:30-16:00
-                if (isMarketOpen) return autoRefreshIntervalSeconds;
-                return 300; // 5 minutes after hours / weekends
-            }
+            function getSmartInterval() { return intervalForNow(); }
 
             let timeLeft = getSmartInterval();
 
@@ -5878,9 +5903,19 @@
                 <small>Used by the Annual Contribution Tracker to show correct IRS limits.</small>
             </div>
             <div class="form-group">
-                <label for="autoRefreshIntervalInput">Auto-Refresh Interval (seconds)</label>
-                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 75">
-                <small>Minimum 30 seconds to respect API limits.</small>
+                <label for="autoRefreshIntervalInput">Auto-Refresh &mdash; Regular Hours (seconds)</label>
+                <input type="number" id="autoRefreshIntervalInput" step="1" min="30" placeholder="e.g., 72">
+                <small>9:30 AM &ndash; 4:00 PM ET. Minimum 30 seconds to respect API limits.</small>
+            </div>
+            <div class="form-group">
+                <label for="preMarketIntervalInput">Auto-Refresh &mdash; Pre-Market (seconds)</label>
+                <input type="number" id="preMarketIntervalInput" step="1" min="30" placeholder="e.g., 120">
+                <small>4:00 &ndash; 9:30 AM ET (1:00 &ndash; 6:30 AM Pacific).</small>
+            </div>
+            <div class="form-group">
+                <label for="afterHoursIntervalInput">Auto-Refresh &mdash; After-Hours (seconds)</label>
+                <input type="number" id="afterHoursIntervalInput" step="1" min="30" placeholder="e.g., 120">
+                <small>4:00 &ndash; 8:00 PM ET (1:00 &ndash; 5:00 PM Pacific). Overnight and weekends stay at 300s.</small>
             </div>
             
             <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 15px;">
