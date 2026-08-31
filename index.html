@@ -2521,12 +2521,12 @@
                 }
                 updateDataStatus(true);
 
-                // Auto-hide the completion banner after 30 seconds.
+                // Auto-hide the completion banner after 15 seconds.
                 clearTimeout(hideBannerTimeoutId);
                 hideBannerTimeoutId = setTimeout(() => {
                     const _card = document.getElementById('refreshMessageCard');
                     if (_card) _card.style.display = 'none';
-                }, 30000);
+                }, 15000);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
 
                 if (isAutoRefreshEnabled) {
