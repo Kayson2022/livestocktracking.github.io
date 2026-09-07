@@ -16,6 +16,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -675,7 +676,7 @@
     <script type="module">
         // Firebase App (the core Firebase SDK) is always required and must be listed first
         import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, writeBatch, getDoc, getDocs, deleteDoc, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // --- GLOBAL APP STATE ---
@@ -921,18 +922,19 @@
                         await setupFirestoreListeners(); // Setup listeners, including the session listener
                         updateDataStatus(true); // Call updateDataStatus here - FIXED
                     } else {
-                        userId = user?.uid; // Keep anonymous ID if exists
+                        // Anonymous sign-in used to happen here whenever user was
+                        // null. On mobile that fired during the gap after the OS
+                        // evicts the tab and Firebase is still restoring the
+                        // Google session from IndexedDB: the anonymous account
+                        // has a different uid, so the app briefly loaded an empty
+                        // portfolio and the numbers were wrong until the real
+                        // session resolved and re-rendered. Since this app is
+                        // only ever used signed in with Google, the anonymous
+                        // path is removed rather than raced against.
+                        userId = null;
                         signInBtn.style.display = 'block';
                         userInfoDiv.style.display = 'none';
-                        
-                        // Clear invalidation token on sign-out/anonymous - ADDED
                         sessionStorage.removeItem('myAppInvalidationToken');
-
-                        if (!user) {
-                           await signInAnonymously(auth);
-                        } else {
-                           await setupFirestoreListeners(); // Setup listeners for anonymous user (session listener won't attach)
-                        }
                     }
                 });
 
