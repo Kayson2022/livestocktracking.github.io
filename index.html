@@ -16,6 +16,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2482,7 +2483,7 @@
                 }
                 updateDataStatus(true);
 
-                // Auto-hide the completion banner after 30 seconds.
+                // Auto-hide the completion banner after 15 seconds.
                 clearTimeout(hideBannerTimeoutId);
                 hideBannerTimeoutId = setTimeout(() => {
                     const _card = document.getElementById('refreshMessageCard');
@@ -3103,6 +3104,147 @@
         // one name. Cached briefly since every card would otherwise recompute
         // it. Note this app also tracks 401k funds, 529 and cash -- none of
         // those belong in a "how concentrated are my stock picks" figure.
+        // Concentration panel. Position size relative to the portfolio is not
+        // visible anywhere else here: a holding can show a large gain without
+        // showing that it is now a third of everything. Which denominator to
+        // measure against is a genuine question -- the same holding is 21% of
+        // total assets and 38% of individual stocks -- so both the account and
+        // the asset-type filter are adjustable and the denominator is always
+        // stated with the numbers.
+        window.openConcentration401k = function() {
+            const holdings = window.portfolioHoldings
+                || (typeof calculateHoldingsAndCash === 'function' ? calculateHoldingsAndCash() : null);
+            if (!Array.isArray(holdings)) { alert('Holdings not loaded yet.'); return; }
+
+            const accounts = [...new Set(holdings.map(h => String(h.accountType || '').trim()).filter(Boolean))].sort();
+            const platforms = [...new Set(holdings.map(h => String(h.platform || '').trim()).filter(Boolean))].sort();
+
+            let modal = document.getElementById('concentration401kModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'concentration401kModal';
+                modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;'
+                    + 'display:flex;align-items:center;justify-content:center;padding:20px;';
+                modal.onclick = e => { if (e.target === modal) modal.remove(); };
+                document.body.appendChild(modal);
+            }
+
+            let acctOpts = '<option value="all">All Accounts</option>';
+            if (accounts.length) {
+                acctOpts += '<optgroup label="By Account Type">'
+                    + accounts.map(a => `<option value="AT::${a}">${a}</option>`).join('') + '</optgroup>';
+            }
+            if (platforms.length) {
+                acctOpts += '<optgroup label="By Broker">'
+                    + platforms.map(p => `<option value="PL::${p}">${p}</option>`).join('') + '</optgroup>';
+            }
+
+            modal.innerHTML = '<div style="background:#161b22;color:#e6edf3;max-width:760px;width:100%;'
+                + 'max-height:86vh;overflow:auto;border-radius:12px;padding:22px;">'
+                + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'
+                + '<h3 style="margin:0;">Position Concentration</h3>'
+                + '<button onclick="document.getElementById(\'concentration401kModal\').remove()" '
+                + 'style="background:none;border:none;color:#8b949e;font-size:24px;cursor:pointer;line-height:1;">&times;</button>'
+                + '</div>'
+                + '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+                + '<select id="conc401kAcct" style="flex:1;min-width:200px;padding:8px;border-radius:6px;'
+                + 'background:#0d1117;color:#e6edf3;border:1px solid #30363d;">' + acctOpts + '</select>'
+                + '<select id="conc401kType" style="flex:1;min-width:170px;padding:8px;border-radius:6px;'
+                + 'background:#0d1117;color:#e6edf3;border:1px solid #30363d;">'
+                + '<option value="Stock">Individual Stocks only</option>'
+                + '<option value="stock_etf">Stocks + ETFs</option>'
+                + '<option value="all">Everything</option>'
+                + '<option value="ETF">ETFs only</option>'
+                + '<option value="Mutual Fund">Mutual Funds only</option>'
+                + '</select></div><div id="conc401kBody"></div></div>';
+
+            const render = () => {
+                const acct = (document.getElementById('conc401kAcct') || {}).value || 'all';
+                const type = (document.getElementById('conc401kType') || {}).value || 'Stock';
+                const body = document.getElementById('conc401kBody');
+                if (!body) return;
+
+                const typeOk = h => {
+                    const t = String(h.type || '').trim();
+                    if (type === 'all') return true;
+                    if (type === 'stock_etf') return t === 'Stock' || t === 'ETF';
+                    return t === type;
+                };
+                const acctOk = h => {
+                    if (acct === 'all') return true;
+                    if (acct.startsWith('AT::')) return String(h.accountType || '').trim() === acct.slice(4);
+                    if (acct.startsWith('PL::')) return String(h.platform || '').trim() === acct.slice(4);
+                    return true;
+                };
+
+                const bySym = {};
+                holdings.filter(h => typeOk(h) && acctOk(h)).forEach(h => {
+                    const sh = Number(h.totalShares) || 0;
+                    const px = Number(h.currentPrice) || 0;
+                    if (sh <= 0 || px <= 0) return;
+                    if (!bySym[h.symbol]) bySym[h.symbol] = { symbol: h.symbol, value: 0, type: h.type };
+                    bySym[h.symbol].value += sh * px;
+                });
+
+                const rows = Object.values(bySym).sort((a, b) => b.value - a.value);
+                const total = rows.reduce((s, r) => s + r.value, 0);
+                if (!rows.length || !total) {
+                    body.innerHTML = '<div style="opacity:0.6;padding:20px 0;">No holdings match this combination.</div>';
+                    return;
+                }
+                let run = 0;
+                rows.forEach(r => { r.pct = (r.value / total) * 100; run += r.pct; r.cum = run; });
+
+                const money = v => '$' + v.toLocaleString('en-US', {maximumFractionDigits:0});
+                const topN = n => rows.slice(0, n).reduce((s, r) => s + r.pct, 0);
+                const stat = (l, v) => '<div style="flex:1;min-width:110px;background:rgba(255,255,255,0.04);'
+                    + 'padding:10px;border-radius:8px;"><div style="font-size:0.7rem;opacity:0.55;">' + l
+                    + '</div><div style="font-weight:700;font-size:1.05rem;">' + v + '</div></div>';
+
+                let html = '<div style="font-size:0.78rem;opacity:0.6;margin-bottom:10px;">Denominator: '
+                    + money(total) + ' across ' + rows.length + ' holdings.</div>'
+                    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
+                    + stat('Largest', rows[0].symbol + ' · ' + rows[0].pct.toFixed(1) + '%')
+                    + stat('Top 3', topN(3).toFixed(1) + '%')
+                    + stat('Top 5', topN(5).toFixed(1) + '%')
+                    + stat('Top 10', topN(10).toFixed(1) + '%')
+                    + '</div>'
+                    + '<table style="width:100%;border-collapse:collapse;font-size:0.86rem;">'
+                    + '<thead><tr style="text-align:left;opacity:0.55;font-size:0.74rem;">'
+                    + '<th style="padding:6px 4px;">#</th><th>Symbol</th><th>Type</th>'
+                    + '<th style="text-align:right;">Value</th><th style="text-align:right;">Share</th>'
+                    + '<th style="text-align:right;">Cumulative</th></tr></thead><tbody>';
+
+                rows.forEach((r, i) => {
+                    const col = r.pct >= 20 ? '#e74c3c' : r.pct >= 10 ? '#f39c12' : 'transparent';
+                    const bar = r.pct >= 20 ? '#e74c3c' : r.pct >= 10 ? '#f39c12' : '#58a6ff';
+                    html += '<tr style="border-top:1px solid rgba(255,255,255,0.06);">'
+                        + '<td style="padding:7px 4px;opacity:0.4;">' + (i + 1) + '</td>'
+                        + '<td style="font-weight:700;border-left:3px solid ' + col + ';padding-left:6px;">' + r.symbol + '</td>'
+                        + '<td style="opacity:0.6;font-size:0.78rem;">' + (r.type || '') + '</td>'
+                        + '<td style="text-align:right;">' + money(r.value) + '</td>'
+                        + '<td style="text-align:right;font-weight:700;">' + r.pct.toFixed(2) + '%'
+                        + '<div style="height:3px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:3px;">'
+                        + '<div style="height:100%;width:' + Math.max(1, Math.min(100, r.pct)) + '%;background:'
+                        + bar + ';border-radius:2px;"></div></div></td>'
+                        + '<td style="text-align:right;opacity:0.55;">' + r.cum.toFixed(1) + '%</td></tr>';
+                });
+                html += '</tbody></table>';
+
+                const hasFunds = rows.some(r => r.type === 'ETF' || r.type === 'Mutual Fund');
+                if (hasFunds) {
+                    html += '<div style="font-size:0.72rem;opacity:0.45;margin-top:10px;">'
+                         + 'ETFs and funds in this list hold some of the same companies as the individual '
+                         + 'stocks, so real exposure to the larger names is higher than any single row shows.</div>';
+                }
+                body.innerHTML = html;
+            };
+
+            document.getElementById('conc401kAcct').onchange = render;
+            document.getElementById('conc401kType').onchange = render;
+            render();
+        };
+
         function getIndividualStockTotal() {
             const h = window.portfolioHoldings
                 || (typeof calculateHoldingsAndCash === 'function' ? calculateHoldingsAndCash() : null);
@@ -6112,6 +6254,7 @@
 					<div class="recurring-toggle header-icon" onclick="openRecurringPurchaseModal()">🔁</div>
                     <div class="settings-toggle header-icon" onclick="openSettingsModal()">⚙️</div>
                     <div class="header-icon" onclick="openSplitModal401k()" title="Stock Split" style="cursor:pointer;">✂️</div>
+                    <div class="header-icon" onclick="openConcentration401k()" title="Position Concentration" style="cursor:pointer;">📊</div>
                 </div>
             </div>
             <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
