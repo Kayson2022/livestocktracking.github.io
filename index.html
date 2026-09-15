@@ -16,6 +16,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -702,7 +703,7 @@
         const CACHE_STALE_TIME_FAST = 300 * 1000; // 5 minutes for Stocks, ETFs
         const CACHE_STALE_TIME_SLOW = 12 * 60 * 60 * 1000; // 12 hours for Mutual Funds, etc.
 
-        let FINNHUB_API_KEY = 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
+        let FINNHUB_API_KEY = 'd625tn9r01qvmk0k8fo0d625tn9r01qvmk0k8fog';
         let ALPHA_VANTAGE_API_KEY = '0ZPH51BZ2N5O9G8Q';
         let FMP_API_KEY = 'vOqUU3gDIDYWghK8m4ZlsVQwLDnhfYMS';
         const WATCHLIST_ACCOUNT_TYPE = 'Yahoo Finance';
@@ -2011,7 +2012,7 @@
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         function loadApiKeys() {
-            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd316lc1r01qnu2r0opjgd316lc1r01qnu2r0opk0';
+            FINNHUB_API_KEY = localStorage.getItem(FINNHUB_API_KEY_STORAGE) || 'd625tn9r01qvmk0k8fo0d625tn9r01qvmk0k8fog';
             ALPHA_VANTAGE_API_KEY = localStorage.getItem(ALPHA_VANTAGE_API_KEY_STORAGE) || '0ZPH51BZ2N5O9G8Q';
             FMP_API_KEY = localStorage.getItem(FMP_API_KEY_STORAGE) || 'vOqUU3gDIDYWghK8m4ZlsVQwLDnhfYMS';
         }
