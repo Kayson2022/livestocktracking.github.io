@@ -3156,6 +3156,7 @@
             const today  = new Date().toISOString().slice(0,10);
             const future = new Date(Date.now()+90*86400000).toISOString().slice(0,10);
             const data   = cached ? {...cached} : {};
+            const failed = [];
             for (const sym of symbols) {
                 if (!force && data[sym] !== undefined) continue;
                 try {
@@ -3165,11 +3166,34 @@
                     if (res.ok) {
                         const j = await res.json();
                         const dates = (j.earningsCalendar||[]).map(e=>e.date).filter(Boolean).sort();
+                        // null means "asked, no upcoming date" and is cached.
+                        // A failed request must not be recorded that way: it
+                        // used to write null on a 429, the loop then skipped the
+                        // symbol forever because null !== undefined, and a single
+                        // rate-limit blip permanently hid that stock's date.
                         data[sym] = dates[0] || null;
-                    } else { data[sym] = null; }
-                } catch(e) { data[sym] = null; }
+                    } else { failed.push(sym); }
+                } catch(e) { failed.push(sym); }
                 window.saveErCache401k(data);
                 await new Promise(r=>setTimeout(r,1000));
+            }
+            // Retry whatever the rate limiter rejected, more slowly.
+            for (let attempt = 0; attempt < 2 && failed.length; attempt++) {
+                const retry = failed.splice(0, failed.length);
+                for (const sym of retry) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    try {
+                        const res = await fetch(
+                            `https://finnhub.io/api/v1/calendar/earnings?symbol=${sym}&from=${today}&to=${future}&token=${key}`
+                        );
+                        if (res.ok) {
+                            const j = await res.json();
+                            const dates = (j.earningsCalendar||[]).map(e=>e.date).filter(Boolean).sort();
+                            data[sym] = dates[0] || null;
+                            window.saveErCache401k(data);
+                        } else { failed.push(sym); }
+                    } catch(e) { failed.push(sym); }
+                }
             }
             window._erFetching401k = false;
             window.saveErCache401k(data);
