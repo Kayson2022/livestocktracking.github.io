@@ -1686,10 +1686,18 @@
             if (symbolsToFetch.length > 0) {
                 console.log(`Fetching historical data for ${symbolsToFetch.length} symbols via Yahoo Finance (free, unlimited)...`);
 
-                // Helper: fetch full daily history from Yahoo Finance via corsproxy.io
+                // Helper: fetch full daily history from Yahoo Finance via the
+                // app's own Cloudflare Worker. corsproxy.io used to sit here;
+                // it started returning 403 for every symbol, which cascaded
+                // into an Alpha Vantage fallback that hits its 25/day limit
+                // within the first few symbols -- so most of the portfolio's
+                // charts ended up with no historical data at all. The Worker
+                // has an open /raw passthrough restricted to Yahoo hosts, the
+                // same one the secure app already relies on.
                 async function fetchYahooHistory(symbol) {
                     // Use max range to cover 5Y/All — Yahoo returns up to 10+ years
-                    const url = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max`;
+                    const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max`;
+                    const url = `https://yahoo-proxy.giolamchieu1975.workers.dev/raw?url=${encodeURIComponent(target)}`;
                     const res = await fetch(url, { cache: 'no-store' });
                     if (!res.ok) throw new Error(`Yahoo history HTTP ${res.status}`);
                     const json = await res.json();
@@ -11534,7 +11542,9 @@ async function renderExDates() {
   for (let b = 0; b < batches.length; b++) {
     await Promise.allSettled(batches[b].map(async sym => {
       try {
-        const url  = `https://corsproxy.io/?https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+        // Same corsproxy.io → Worker /raw swap as fetchYahooHistory above.
+        const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+        const url  = `https://yahoo-proxy.giolamchieu1975.workers.dev/raw?url=${encodeURIComponent(target)}`;
         const r    = await fetch(url);
         if (!r.ok) return;
         const data = await r.json();
