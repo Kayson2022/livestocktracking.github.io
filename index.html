@@ -4265,6 +4265,41 @@
                         <div class="summary-item"><span>Total Shares:</span> <span>${totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span></div>
                         <div class="summary-item"><span>Total Value:</span> <span>${hasLivePrice ? formatCurrency(totalValue) : '...'}</span></div>
                         <div class="summary-item"><span>Avg. Cost Basis:</span> <span>${formatCurrency(avgCostBasis)}</span></div>
+                        ${(function(){
+                            // Consolidated cards (one symbol held at several brokers)
+                            // render from a separate template, so the weight and
+                            // earnings rows added to the single-platform card were
+                            // missing here -- exactly the holdings most likely to be
+                            // large ones worth watching.
+                            const t = String(holdings[0].type || '').trim();
+                            let out = '';
+                            if (t === 'Stock' || t === 'ETF') {
+                                const denom = t === 'Stock' ? getIndividualStockTotal() : getIndividualEtfTotal();
+                                if (denom && hasLivePrice) {
+                                    const pct = (totalValue / denom) * 100;
+                                    const col = pct >= 20 ? '#e74c3c' : pct >= 10 ? '#f39c12' : '';
+                                    const label = t === 'Stock' ? 'Individual Stocks %' : 'Individual ETFs %';
+                                    out += `<div class="summary-item"><span>${label}:</span> `
+                                         + `<span${col?` style="color:${col};font-weight:700;"`:''}>${pct.toFixed(2)}%</span></div>`;
+                                }
+                            }
+                            if (t === 'Stock') {
+                                const cache = window.getErCache401k ? window.getErCache401k() : null;
+                                const dateStr = cache && cache[holdings[0].symbol];
+                                if (dateStr) {
+                                    const date = new Date(dateStr + 'T00:00:00');
+                                    const days = Math.round((date - new Date()) / 86400000);
+                                    if (days >= 0 && days <= 90) {
+                                        const col = days <= 14 ? '#e74c3c' : days <= 30 ? '#f39c12' : '';
+                                        const lbl = days===0?'Today':days===1?'Tomorrow':`in ${days}d`;
+                                        out += `<div class="summary-item"><span>Next ER:</span> `
+                                             + `<span${col?` style="color:${col};font-weight:700;"`:''}>`
+                                             + `${date.toLocaleDateString('en-US',{month:'short',day:'numeric'})} (${lbl})</span></div>`;
+                                    }
+                                }
+                            }
+                            return out;
+                        })()}
                     </div>
                     <div class="purchase-breakdown">
                         <h4>Purchases in ${accountType}:</h4>
