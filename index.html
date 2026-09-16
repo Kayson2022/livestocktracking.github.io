@@ -1681,7 +1681,20 @@
 
             // NOTE: Historical Price Fetching uses ALPHA VANTAGE and is not optimized for daily limits.
             // We only fetch if prices are completely missing from session cache.
-            const symbolsToFetch = allSymbols.filter(s => historicalPriceCache[s] === undefined);
+            // Account names sometimes end up in the symbol field ("INDIVIDUAL -
+            // 529 - TOD" was one), and every price lookup for them fails twice
+            // -- once at Yahoo, once at Alpha Vantage -- before being logged as
+            // an error. Real tickers are short and have no spaces, so anything
+            // that cannot be a ticker is skipped rather than requested.
+            const looksLikeTicker = s =>
+                typeof s === 'string' && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(s.trim().toUpperCase());
+            const symbolsToFetch = allSymbols
+                .filter(s => historicalPriceCache[s] === undefined)
+                .filter(s => {
+                    if (looksLikeTicker(s)) return true;
+                    console.log(`Skipping "${s}" — not a ticker symbol.`);
+                    return false;
+                });
             
             if (symbolsToFetch.length > 0) {
                 console.log(`Fetching historical data for ${symbolsToFetch.length} symbols via Yahoo Finance (free, unlimited)...`);
