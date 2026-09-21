@@ -17,6 +17,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -769,6 +770,10 @@
         
         // --- NEW STATE FOR REFRESH LOGIC ---
         let isRefreshing = false; 
+        let lastPriceRefreshAt = 0;          // FIX: 0 = no refresh yet this page load
+        let portfolioReady = false;          // FIX: portfolio doc has loaded
+        let priceCacheReady = false;         // FIX: saved prices have loaded
+        let initialRefreshDone = false;
         let refreshStats = { gained: 0, lost: 0, failed: 0, total: 0, gainers: [], losers: [], flat: 0 }; 
         let hideBannerTimeoutId = null; 
         // --- END NEW STATE ---
@@ -1028,6 +1033,8 @@
                 } else {
                     await updateDisplay(false); // Subsequent updates won't re-fetch historical data
                 }
+                portfolioReady = true;
+                kickInitialRefresh();
 
                 if (isAutoRefreshEnabled && !isRefreshing) { // Check if not already refreshing
                      startAutoRefresh(); 
@@ -1077,7 +1084,9 @@
                         }
                     }
                 }
-            }).catch(e => console.error("Error loading priceCache:", e));
+                priceCacheReady = true;
+                kickInitialRefresh();
+            }).catch(e => { console.error("Error loading priceCache:", e); priceCacheReady = true; kickInitialRefresh(); });
             // --- End Unchanged Listeners ---
 
 
@@ -2496,6 +2505,7 @@
                 // --- Finally block: ALWAYS runs, whether try succeeded or failed ---
                 console.log("Refresh finally block executing.");
                 isRefreshing = false; // CRITICAL: Ensure flag is always reset
+                lastPriceRefreshAt = Date.now(); // FIX: used by the return-to-app catch-up
 
                 // Reset button state
                 if (refreshButton) {
@@ -2539,17 +2549,19 @@
                     }
 
                     let lastTargetFB = timeLeft;
+                    let deadlineFB = Date.now() + timeLeft * 1000; // FIX: real-clock countdown
                     countdownIntervalId = setInterval(() => {
                         const targetFB = getSmartIntervalFB();
                         if (targetFB !== lastTargetFB) {
                             lastTargetFB = targetFB;
-                            if (timeLeft > targetFB) timeLeft = targetFB;
+                            deadlineFB = Math.min(deadlineFB, Date.now() + targetFB * 1000);
                         }
-                        timeLeft--;
+                        timeLeft = Math.ceil((deadlineFB - Date.now()) / 1000);
                         if (timeLeft <= 0) {
                             refreshAllPrices(false);
                             timeLeft = getSmartIntervalFB();
                             lastTargetFB = timeLeft;
+                            deadlineFB = Date.now() + timeLeft * 1000;
                         }
                         if (nextUpdateEl) nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
                     }, 1000);
@@ -4868,17 +4880,22 @@
             document.getElementById('refreshMessageCard').style.display = 'none';
 
             let lastTarget = timeLeft;
+            // FIX: count down against the real clock, not by ticking 1s at a time.
+            // Phones throttle/suspend timers in the background, so a tick-based
+            // countdown barely moves while you're in another app.
+            let deadline = Date.now() + timeLeft * 1000;
             countdownIntervalId = setInterval(() => {
                 const target = getSmartInterval();
                 if (target !== lastTarget) {
                     lastTarget = target;
-                    if (timeLeft > target) timeLeft = target;
+                    deadline = Math.min(deadline, Date.now() + target * 1000);
                 }
-                timeLeft--;
+                timeLeft = Math.ceil((deadline - Date.now()) / 1000);
                 if (timeLeft <= 0) {
                     refreshAllPrices(false);
                     timeLeft = getSmartInterval();
                     lastTarget = timeLeft;
+                    deadline = Date.now() + timeLeft * 1000;
                 }
                 nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
             }, 1000);
@@ -5167,6 +5184,35 @@
         window.saveSettings = saveSettings;
         window.toggleAutoRefresh = toggleAutoRefresh;
         window.refreshAllPrices = refreshAllPrices;
+
+        // ════ FIX: FRESH NUMBERS AFTER RELOAD / RETURN TO APP ════════════
+        // (1) Page reload (phone discarded the tab): the portfolio and the saved
+        //     prices load separately. Previously the screen was drawn before the
+        //     saved prices arrived (so Brokerage/Roth/401k/529 showed fallback
+        //     numbers), nothing redrew it, and the first live refresh waited a
+        //     full countdown (up to 5 min). Now: once BOTH are loaded, redraw
+        //     with the saved prices, then fetch live prices right away.
+        async function kickInitialRefresh() {
+            if (initialRefreshDone || !portfolioReady || !priceCacheReady) return;
+            initialRefreshDone = true;
+            try { await updateDisplay(false); } catch (e) { console.error('[Resume] redraw failed:', e); }
+            if (isAutoRefreshEnabled && !isRefreshing) refreshAllPrices(false);
+        }
+
+        // (2) Coming back from another app: if a refresh was due while the phone
+        //     had the page paused, run it immediately.
+        function onReturnToApp() {
+            if (document.hidden || !isInitialDataLoaded || !initialRefreshDone) return;
+            if (!isAutoRefreshEnabled || isRefreshing) return;
+            const dueMs = Math.min(autoRefreshIntervalSeconds, 300) * 1000;
+            if (Date.now() - lastPriceRefreshAt >= dueMs) {
+                console.log('[Resume] Prices overdue — refreshing now');
+                refreshAllPrices(false);
+            }
+        }
+        document.addEventListener('visibilitychange', onReturnToApp);
+        window.addEventListener('pageshow', onReturnToApp);   // back/forward cache restore
+        window.addEventListener('focus', onReturnToApp);
 
         // --- Price Mode: 'realtime' (Finnhub) or 'delayed' (Yahoo) ---
         let priceMode = localStorage.getItem('portfolioPriceMode') || 'realtime';
