@@ -17,6 +17,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -722,6 +723,35 @@
 .k-danger-row + .k-danger-row { border-top:1px solid rgba(225,29,72,0.15); }
 .k-danger-btn { padding:7px 12px; border-radius:8px; border:1px solid #fda4af; background:transparent; color:#e11d48; font-size:0.82rem; font-weight:700; cursor:pointer; }
 .k-danger-btn:hover { background:#e11d48; color:#fff; border-color:#e11d48; }
+</style>
+
+<style>
+/* ═══ Phone fixes (401k) ═══
+   Root cause of the sideways sliding: grid/flex children default to "never shrink below
+   their content", so a single long row (the tab bar, the header icons, stat text) stretched
+   the whole page to ~590px on a 390px phone. */
+html, body { overflow-x: clip !important; max-width: 100%; }
+.main-content > *, .stats-grid > *, .stat-card, .stat-card > * { min-width: 0; }
+.charts-section > *, .pie-charts-container > *, .chart-container { min-width: 0; max-width: 100%; }
+.chart-container canvas { max-width: 100% !important; }
+@media (max-width: 768px) {
+  .main-content { grid-template-columns: minmax(0, 1fr) !important; }
+  /* Tabs scroll sideways inside their own strip instead of widening the page */
+  .tabs-nav { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs-nav::-webkit-scrollbar { display: none; }
+  .tabs-nav .tab-link { flex: 0 0 auto; white-space: nowrap; }
+  /* Header icons wrap onto a second line when needed */
+  .header-top-row { flex-wrap: wrap !important; }
+  .header-right { flex: 1 1 100% !important; flex-wrap: wrap !important; justify-content: center !important; min-width: 0; gap: 6px; }
+  .stat-card * { overflow-wrap: anywhere; }
+  /* Group headers: let the title shrink instead of pushing the arrow off-screen */
+  .investment-group-header { min-width: 0; flex-wrap: wrap; }
+  .investment-group-header .group-summary, .investment-group-header .group-title { min-width: 0; overflow-wrap: anywhere; }
+  /* iPhone zooms the page when you tap a field under 16px — keep every field at 16px */
+  body :where(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea):not(#__nz) { font-size: 16px !important; }
+  /* Pop-ups sized to the visible screen (not including the browser toolbar) */
+  .modal-content { max-height: 90vh; max-height: 90dvh !important; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+}
 </style>
 </head>
 <body>
