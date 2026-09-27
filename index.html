@@ -2652,6 +2652,22 @@ html, body { overflow-x: clip !important; max-width: 100%; }
         }
 
 
+        // Close the market-scan card (top ✕, bottom Close, tap outside, or Esc)
+        window.closeScanCard = function () {
+            var c = document.getElementById('refreshMessageCard');
+            var t = document.getElementById('nextUpdateTimer');
+            if (c) c.style.display = 'none';
+            if (t && window._isAutoRefreshOn) t.style.display = 'block';
+        };
+        document.addEventListener('click', function (e) {
+            var c = document.getElementById('refreshMessageCard');
+            if (!c || c.style.display === 'none' || !c.querySelector('[aria-label="Close"]')) return;
+            if (!c.contains(e.target)) window.closeScanCard();
+        }, true);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') window.closeScanCard();
+        });
+
         // --- NEW FUNCTION: Update Refresh Progress ---
         function updateRefreshProgress(status, current, total, symbol, gained = 0, lost = 0, failed = 0, gainers = [], losers = [], flat = 0) {
             const card = document.getElementById('refreshMessageCard');
@@ -2734,7 +2750,14 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     align-items: flex-start;
                     white-space: normal;
                     flex-wrap: wrap;
+                    width: min(640px, 92vw);
                     max-width: min(640px, 92vw);
+                    max-height: 70vh;
+                    max-height: 70dvh;
+                    overflow-y: auto;
+                    -webkit-overflow-scrolling: touch;
+                    overscroll-behavior: contain;
+                    box-sizing: border-box;
                     text-align: left;
                     box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
                     position: relative;
@@ -2743,24 +2766,21 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 card.innerHTML = `
                     <div style="width:100%;position:relative;padding-right:28px;">
 
-                        <!-- Dismiss button -->
-                        <button onclick="(function(){
-                            var c=document.getElementById('refreshMessageCard');
-                            var t=document.getElementById('nextUpdateTimer');
-                            if(c)c.style.display='none';
-                            if(t&&window._isAutoRefreshOn)t.style.display='block';
-                        })()" style="
-                            position:absolute;top:-4px;right:-4px;
-                            background:rgba(255,255,255,0.1);
-                            border:1px solid rgba(255,255,255,0.15);
-                            color:rgba(255,255,255,0.6);
-                            border-radius:50%;width:22px;height:22px;
-                            font-size:12px;line-height:22px;text-align:center;
+                        <!-- Dismiss button (top) — pinned while scrolling -->
+                        <div style="position:sticky;top:0;height:0;z-index:2;">
+                        <button onclick="window.closeScanCard()" style="
+                            position:absolute;top:-6px;right:-26px;
+                            background:rgba(255,255,255,0.12);
+                            border:1px solid rgba(255,255,255,0.2);
+                            color:rgba(255,255,255,0.8);
+                            border-radius:50%;width:36px;height:36px;
+                            font-size:16px;line-height:34px;text-align:center;
                             cursor:pointer;padding:0;
                             transition:all 0.15s;
-                        " onmouseover="this.style.background='rgba(255,255,255,0.2)'"
-                           onmouseout="this.style.background='rgba(255,255,255,0.1)'"
-                           title="Dismiss">✕</button>
+                        " onmouseover="this.style.background='rgba(255,255,255,0.22)'"
+                           onmouseout="this.style.background='rgba(255,255,255,0.12)'"
+                           title="Close (Esc)" aria-label="Close">✕</button>
+                        </div>
 
                         <!-- Header row -->
                         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
@@ -2812,6 +2832,16 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
                         ${gained===0&&lost===0 ? `<div style="font-size:0.85em;color:rgba(255,255,255,0.4);padding:8px 0;">No price movement vs previous close.</div>` : ''}
                         ${flatLine}${failLine}
+
+                        <!-- Close (bottom) — no need to scroll back up -->
+                        <button onclick="window.closeScanCard()" style="
+                            display:block;width:100%;margin-top:14px;min-height:44px;
+                            background:rgba(255,255,255,0.08);
+                            border:1px solid rgba(255,255,255,0.18);
+                            color:rgba(255,255,255,0.85);
+                            border-radius:12px;font-size:0.9em;font-weight:700;
+                            cursor:pointer;
+                        " aria-label="Close">✕ Close</button>
                     </div>
                 `;
 
