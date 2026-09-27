@@ -6456,6 +6456,12 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             </div>
 
             <div class="form-group">
+                <label for="userNameInput">Your Name</label>
+                <input type="text" id="userNameInput" placeholder="Enter your name" autocomplete="name">
+                <div style="font-size:0.75rem;color:var(--text-color-secondary);margin-top:4px;">Shown in the title (“Investment App for …”). Saves automatically as you type.</div>
+            </div>
+
+            <div class="form-group">
                 <label for="finnhubApiKeyInput">Finnhub API Key</label>
                 <input type="text" id="finnhubApiKeyInput" placeholder="Enter your Finnhub API Key">
             </div>
@@ -6672,10 +6678,6 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             </div>
             <h1>💰 Investment App <span id="userNameDisplay"></span></h1>
             <p>Track your investments with a detailed transaction log</p>
-            <div class="form-group" style="max-width: 300px; margin: 15px auto 0;">
-                <label for="userNameInput" style="color: var(--text-color-primary); font-weight: normal; font-size: 0.9em;">Your Name:</label>
-                <input type="text" id="userNameInput" placeholder="Enter your name" style="background: rgba(255, 255, 255, 0.9); border: none; color: #333;">
-            </div>
         </div>
         <!-- MODIFIED stats-grid to add Volatility -->
         <div class="stats-grid">
