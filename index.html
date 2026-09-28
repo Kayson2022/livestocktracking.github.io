@@ -1736,13 +1736,25 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
         function calculateMaxDrawdown(history) {
             if (!history || history.length < 2) return 0;
-            let peak = history[0].value;
-            let maxDrawdown = 0;
+            // Chain daily market returns into an index, skipping days with buys/sells.
+            // Otherwise selling shares (cash leaving) looked like a "drawdown".
+            const txnDates = new Set(
+                (portfolioData?.transactions || [])
+                    .filter(t => ['BUY', 'SELL'].includes((t.transactionType || '').toUpperCase()))
+                    .map(t => t.date ? t.date.slice(0, 10) : null).filter(Boolean)
+            );
+            let index = 1, peak = 1, maxDrawdown = 0;
             for (let i = 1; i < history.length; i++) {
-                const val = history[i].value;
-                if (val > peak) peak = val;
-                const drawdown = peak > 0 ? (peak - val) / peak : 0;
-                if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+                const dateStr = history[i].date ? history[i].date.slice(0, 10) : '';
+                if (txnDates.has(dateStr)) continue;
+                const cur = history[i].value, prev = history[i - 1].value;
+                if (!(prev > 0 && cur > 0)) continue;
+                const r = cur / prev - 1;
+                if (Math.abs(r) >= 0.25) continue;          // data glitch, not a real move
+                index *= (1 + r);
+                if (index > peak) peak = index;
+                const dd = (peak - index) / peak;
+                if (dd > maxDrawdown) maxDrawdown = dd;
             }
             return maxDrawdown;
         }
@@ -1984,6 +1996,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             const lastKnownPrices = {};
 
             for (let d = new Date(firstDate); d <= today; d.setDate(d.getDate() + 1)) {
+                if (d.getDay() === 0 || d.getDay() === 6) continue;   // markets closed — skip weekends
                 const dateString = d.toISOString().split('T')[0];
                 const transactionsUpToDate = sorted.filter(t => new Date(t.date) <= d);
 
@@ -4498,6 +4511,13 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                         window._tlFullHistory = history;
                         isHistoricalDataLoaded = true;
                         window._historyFetchInProgress = false;
+                        // FIX: the volatility history was built at startup, BEFORE historical prices
+                        // were downloaded, so every day used today's price → a flat line → 0% volatility,
+                        // and it was never rebuilt. Rebuild it now that real daily prices exist.
+                        buildVolatilityHistoryFromTransactions().then(h => {
+                            cachedVolatilityHistory = h;
+                            updateStats(calculateOverallStats(calculateHoldingsAndCash(), h));
+                        }).catch(e => console.warn('Volatility rebuild failed:', e));
                         // Default to YTD view
                         activeChartFilter = 'YTD';
                         filterChart('YTD', history).catch(()=>{});
