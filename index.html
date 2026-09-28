@@ -753,6 +753,16 @@ html, body { overflow-x: clip !important; max-width: 100%; }
   .modal-content { max-height: 90vh; max-height: 90dvh !important; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
 }
 </style>
+
+<style>
+/* Collapsible charts section (401k app) */
+.k-charts-head { display:flex; justify-content:space-between; align-items:center; gap:10px; cursor:pointer;
+  padding:4px 2px; margin:4px 0 16px; font-size:1.05rem; font-weight:700; color:var(--text-color); }
+.k-charts-btn { padding:5px 14px; border-radius:999px; border:1px solid var(--border-color); background:transparent;
+  color:var(--text-color); font-size:0.8rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+.k-charts-btn:hover { background:color-mix(in srgb, var(--text-color) 7%, transparent); }
+@media (max-width:600px){ .k-charts-head > span > span { display:none; } }
+</style>
 </head>
 <body>
 
@@ -6784,6 +6794,12 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             <button id="toggleBackupBtn401" onclick="toggleAutoBackup401()" style="padding:8px 16px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-primary);font-weight:700;font-size:0.85rem;cursor:pointer;">⏸️ Pause Auto-Backup</button>
             <span id="backupStatusBadge" class="backup-status"></span>
         </div>
+        <!-- Charts: collapsed by default to save space (state remembered) -->
+        <div class="k-charts-head" onclick="window.toggleChartsSection()">
+            <span>📊 Charts <span style="font-weight:500;opacity:0.7;font-size:0.85em;">· Monthly activity · Performance history · Allocation · Income</span></span>
+            <button type="button" class="k-charts-btn" id="kChartsBtn" aria-expanded="false">Show</button>
+        </div>
+        <div id="kChartsBody" style="display:none;">
         <!-- Monthly Investment Chart -->
         <div class="card-panel" style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -6830,6 +6846,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     <canvas id="dividendChart"></canvas>
                 </div>
             </div>
+        </div>
         </div>
         <div class="main-content">
             <div class="add-investment card-panel">
@@ -14208,6 +14225,32 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   window.addEventListener('load', init);
   // the pill strip is injected after sign-in, so keep checking briefly
   var tries = 0, t = setInterval(function () { init(); if (document.getElementById('kToolbar') || ++tries > 120) clearInterval(t); }, 500);
+})();
+</script>
+
+<script>
+/* Collapsible charts section: hidden by default, remembers your choice */
+(function () {
+  function apply(open) {
+    var body = document.getElementById('kChartsBody'), btn = document.getElementById('kChartsBtn');
+    if (!body || !btn) return;
+    body.style.display = open ? '' : 'none';
+    btn.textContent = open ? 'Hide' : 'Show';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // charts drawn while hidden have no size — nudge Chart.js to re-measure
+    if (open) setTimeout(function () {
+      window.dispatchEvent(new Event('resize'));
+      if (window.Chart && Chart.instances) Object.values(Chart.instances).forEach(function (c) { try { c.resize(); } catch (e) {} });
+    }, 60);
+  }
+  window.toggleChartsSection = function () {
+    var body = document.getElementById('kChartsBody');
+    var open = body && body.style.display === 'none';
+    try { localStorage.setItem('k401ChartsOpen', open ? '1' : '0'); } catch (e) {}
+    apply(open);
+  };
+  function init() { var v = null; try { v = localStorage.getItem('k401ChartsOpen'); } catch (e) {} apply(v === '1'); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
 </body>
