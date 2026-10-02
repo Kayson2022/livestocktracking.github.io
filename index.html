@@ -1968,16 +1968,26 @@ html, body { overflow-x: clip !important; max-width: 100%; }
         async function buildVolatilityHistoryFromTransactions() {
              // Requirement: Stocks, ETFs, Mutual Funds, but EXCLUDE 401(k) and 529. Also include Cash.
             const typesToInclude = ['Stock', 'ETF', 'Mutual Fund'];
-            const accountsToExclude = ['401(k)', '529 College Saving'];
-            
             console.log('buildVolatilityHistoryFromTransactions called');
             console.log('Total transactions:', portfolioData.transactions ? portfolioData.transactions.length : 0);
             
+            // All accounts — including 401(k) and 529 — as long as the holding has REAL daily prices.
+            // Holdings with no daily history (type "Manual", e.g. employer funds with no public ticker)
+            // are left out: their typed-in price never moves, which would flatten the result.
+            const hasDailyPrices = t => {
+                if (isCashEquivalentType(t.type)) return true;
+                if (t.type === 'Manual' || !t.symbol) return false;
+                const h = historicalPriceCache[String(t.symbol).toUpperCase()] || historicalPriceCache[t.symbol];
+                return !!h && Object.keys(h).length > 0;
+            };
             const transactions = (portfolioData.transactions || []).filter(t => 
                 t.accountType !== WATCHLIST_ACCOUNT_TYPE && 
-                !accountsToExclude.includes(t.accountType) &&
-                (t.transactionType === 'BUY' || t.transactionType === 'SELL' || isCashEquivalentType(t.type))
+                (t.transactionType === 'BUY' || t.transactionType === 'SELL' || isCashEquivalentType(t.type)) &&
+                hasDailyPrices(t)
             );
+            window._volExcludedManual = [...new Set((portfolioData.transactions || [])
+                .filter(t => t.accountType !== WATCHLIST_ACCOUNT_TYPE && !hasDailyPrices(t) && t.symbol)
+                .map(t => t.symbol + ' (' + t.accountType + ')'))];
             
             console.log('Filtered transactions for volatility:', transactions.length);
             
@@ -7123,6 +7133,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             <h2>Data Transfer & Management</h2>
             <div class="k-data-grid">
                 <button type="button" class="k-data-btn" onclick="exportCSV()">📤 Export Transactions (CSV)</button>
+                <button type="button" class="k-data-btn" onclick="window.openBrokerImport()" style="border-color:#10b981;">📥 Import Broker CSV</button>
                 <button type="button" class="k-data-btn" onclick="openCSVImportModal()">📊 Import from JSON Backup</button>
                 <button type="button" class="k-data-btn" onclick="var p=document.getElementById('restorePanel');p.style.display=p.style.display==='none'?'block':'none'">📥 Restore from Email Backup</button>
             </div>
@@ -14271,6 +14282,307 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   };
   function init() { var v = null; try { v = localStorage.getItem('k401ChartsOpen'); } catch (e) {} apply(v === '1'); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+<script>
+/* Bridge: three add-on features (Import from JSON Backup, Clean Bad Imports, and one display refresh)
+   call saveDataToFirestore / updateDisplay / logActivity by name, but those live inside the app's
+   module and were invisible to them — so their changes were never saved to the cloud. Route them
+   through the app's official bridge. */
+(function () {
+  const h = () => (typeof window.__getFirebaseHandles === 'function' ? window.__getFirebaseHandles() : {}) || {};
+  if (typeof window.saveDataToFirestore !== 'function') window.saveDataToFirestore = (...a) => { const f = h().saveDataToFirestore; return f ? f(...a) : undefined; };
+  if (typeof window.updateDisplay !== 'function')       window.updateDisplay       = (...a) => { const f = h().updateDisplay;       return f ? f(...a) : undefined; };
+  if (typeof window.logActivity !== 'function')         window.logActivity         = (...a) => { const f = h().logActivity;         return f ? f(...a) : undefined; };
+})();
+</script>
+<script>
+/* ═══ 401k app: Import Broker CSV (Fidelity · Schwab · Vanguard · Merrill Edge · Robinhood) ═══
+   Same engine as the Secure app: reads broker CSVs directly, detects duplicates against what you
+   already entered (incl. rounded shares, ±days, split orders), lets you tick/untick rows, and takes
+   a Backup Center snapshot before writing. 401(k) / 529 / HSA rows are skipped — you update those
+   by hand each week. Cash funding mirrors manual entry: a BUY sells from the account's cash fund,
+   a SELL buys into it (Regular Brokerage / Roth only). */
+(function () {
+  'use strict';
+  const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const SKIP_ACCOUNT_RE = /401\s*\(?k\)?|403\s*\(?b\)?|457|\b529\b|college|education|unique plan|hsa|health savings|pension|netbenefits|brokeragelink/i;
+  const CASH_SWEEP = new Set(['SPAXX','FDRXX','FZFXX','SPRXX','FCASH','CORE','SWVXX','SNVXX','SNSXX','VMFXX','VMRXX','VUSXX']);
+  let files = [], rows = [], result = null, skipped = null;
+
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const isCashType = t => { const x = String(t || '').toLowerCase(); return x.includes('cash') || (x.includes('money') && x.includes('market')); };
+
+  function splitCSVLine(line) {
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c;
+    }
+    out.push(cur); return out.map(x => x.trim());
+  }
+  function normDate(d) {
+    if (!d) return ''; const t = String(d).trim(); let m;
+    if ((m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+    if ((m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/))) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`; }
+    if ((m = t.match(/^([A-Za-z]{3})[a-z]*[-\s](\d{1,2}),?[-\s](\d{4})/))) { const mo = MONTHS[m[1].toLowerCase()]; if (mo) return `${m[3]}-${String(mo).padStart(2,'0')}-${m[2].padStart(2,'0')}`; }
+    const dt = new Date(t); return isNaN(dt) ? t : dt.toISOString().slice(0, 10);
+  }
+  function parseBrokerCSV(text, fileName) {
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const hi = lines.findIndex(l => /symbol|instrument/i.test(l) && /action|transaction type|trans code|type/i.test(l));
+    if (hi < 0) return [];
+    const head = splitCSVLine(lines[hi]).map(h => h.toLowerCase().replace(/\s+/g, ' ').trim());
+    const col = (...names) => head.findIndex(h => names.some(n => h === n || h.startsWith(n)));
+    const iDate = col('run date', 'trade date', 'activity date', 'date');
+    const iAct = col('action', 'transaction type', 'trans code', 'type');
+    const iSym = col('symbol', 'instrument');
+    const iDesc = col('description', 'investment name', 'description 2');
+    const iQty = col('quantity', 'shares');
+    const iPx = col('price', 'share price');
+    const iAcct = col('account');
+    const ht = head.join('|');
+    const broker = /run date/.test(ht) ? 'Fidelity'
+      : /symbol\/cusip|account registration|account nickname/.test(ht) ? 'Merrill Edge'
+      : /trans code/.test(ht) ? 'Robinhood' : /share price/.test(ht) ? 'Vanguard' : /fees & comm/.test(ht) ? 'Charles Schwab'
+      : /fidelity/i.test(fileName) ? 'Fidelity' : /schwab/i.test(fileName) ? 'Charles Schwab' : /vanguard/i.test(fileName) ? 'Vanguard'
+      : /merrill/i.test(fileName) ? 'Merrill Edge' : /robinhood/i.test(fileName) ? 'Robinhood' : 'Other';
+    const out = [];
+    for (let r = hi + 1; r < lines.length; r++) {
+      if (!lines[r].trim()) continue;
+      const c = splitCSVLine(lines[r]);
+      const act = String(c[iAct] || '').toLowerCase();
+      let type = null;
+      if (/\bsold\b|\bsell\b|\bsale\b/.test(act)) type = 'sell';
+      else if (/\bbought\b|\bbuy\b|\bpurchase\b|reinvest/.test(act)) type = 'buy';
+      if (!type) continue;
+      const sym = String(c[iSym] || '').replace(/[^A-Za-z0-9.\-]/g, '').toUpperCase();
+      const qty = Math.abs(parseFloat(String(c[iQty] || '').replace(/[$,()]/g, '')) || 0);
+      const px = Math.abs(parseFloat(String(c[iPx] || '').replace(/[$,()]/g, '')) || 0);
+      if (!sym || !qty) continue;
+      const acct = iAcct >= 0 ? String(c[iAcct] || '') : '';
+      if (SKIP_ACCOUNT_RE.test(acct) || (iAcct < 0 && SKIP_ACCOUNT_RE.test(fileName))) {
+        skipped.retirement++; skipped.accounts.add(acct.replace(/\s*[A-Z]?\d{5,}\s*/g, ' ').trim() || fileName); continue;
+      }
+      if (CASH_SWEEP.has(sym) || /money market|core position|cash reserves/i.test(c.join(' '))) { skipped.cash++; continue; }
+      const isRoth = /roth/i.test(acct) || /roth/i.test(fileName);
+      out.push({
+        type, symbol: sym, date: normDate(String(c[iDate] || '').replace(/^.*\bas of\s+/i, '')),
+        shares: qty, price: px, platform: broker, accountType: isRoth ? 'Roth IRA' : 'Regular Brokerage',
+        name: iDesc >= 0 ? String(c[iDesc] || '').trim() : '', source: fileName
+      });
+    }
+    return out;
+  }
+
+  // ── duplicate detection (same rules as the Secure app) ──
+  const dayGap = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
+  const samePrice = (a, b) => Math.abs(a - b) <= Math.max(0.02, Math.max(a, b) * 0.005);
+  const sameShares = (a, b) => Math.abs(a - b) < 0.001;
+  function smartMerge(incoming, existing) {
+    const bySym = {};
+    existing.forEach(e => (bySym[e.symbol] = bySym[e.symbol] || []).push({ tx: e, used: false }));
+    const fmtE = e => `${e.tx.date} · ${+e.tx.shares} sh @ $${(+e.tx.price).toFixed(2)}${e.tx.accountType ? ' · ' + e.tx.accountType : ''}`;
+    let dup = 0, pos = 0; const merged = [], seen = [];
+    // split orders (e.g. 280 + 0.102) that you entered once
+    const groups = {};
+    incoming.forEach(t => { const k = t.symbol + '|' + t.type + '|' + t.date; (groups[k] = groups[k] || []).push(t); });
+    Object.values(groups).forEach(g => {
+      if (g.length < 2) return;
+      const sum = g.reduce((a, t) => a + t.shares, 0), pool = bySym[g[0].symbol] || [];
+      if (g.some(t => pool.some(e => e.tx.type === t.type && e.tx.date === t.date && sameShares(e.tx.shares, t.shares)))) return;
+      const e = pool.find(x => !x.used && x.tx.type === g[0].type && dayGap(x.tx.date, g[0].date) <= 3 && Math.abs(x.tx.shares - sum) <= Math.max(0.011, sum * 0.02));
+      if (!e) return; e.used = true;
+      g.forEach(t => { t._combined = `these ${g.length} rows add up to your single entry: ${e.tx.date} · ${+e.tx.shares} sh`; });
+    });
+    for (const t of incoming) {
+      const pool = bySym[t.symbol] || [];
+      if (t._combined) { t.status = 'possible'; t.selected = false; t.note = t._combined; delete t._combined; pos++; seen.push(t); merged.push(t); continue; }
+      const core = e => !e.used && e.tx.type === t.type && sameShares(e.tx.shares, t.shares) && samePrice(e.tx.price, t.price);
+      let hit = pool.find(e => core(e) && e.tx.date === t.date);
+      if (hit) { hit.used = true; t.status = 'duplicate'; dup++; continue; }
+      const inBatch = seen.find(b => b.symbol === t.symbol && b.type === t.type && b.date === t.date && sameShares(b.shares, t.shares) && samePrice(b.price, t.price) && b.source !== t.source);
+      if (inBatch) { t.status = 'duplicate'; t.note = 'also in ' + inBatch.source; dup++; continue; }
+      const amt = x => (+x.shares || 0) * (+x.price || 0);
+      hit = pool.find(e => core(e) && dayGap(e.tx.date, t.date) <= 3) ||
+            pool.find(e => !e.used && e.tx.type === t.type && dayGap(e.tx.date, t.date) <= 5 &&
+              (Math.abs(e.tx.shares - t.shares) <= Math.max(0.011, t.shares * 0.02) || Math.abs(amt(e.tx) - amt(t)) <= Math.max(1, amt(t) * 0.02)));
+      if (hit) { hit.used = true; t.status = 'possible'; t.selected = false; t.note = 'close to your entry: ' + fmtE(hit); pos++; }
+      else {
+        t.status = 'new'; t.selected = true;
+        const near = pool.filter(e => e.tx.type === t.type).map(e => ({ e, g: dayGap(e.tx.date, t.date) })).filter(x => x.g <= 10).sort((a, b) => a.g - b.g)[0];
+        t.note = near ? 'nearest in app: ' + fmtE(near.e) : `no ${t.type} of ${t.symbol} within 10 days in app`;
+      }
+      seen.push(t); merged.push(t);
+    }
+    return { list: merged, dup, pos, total: incoming.length };
+  }
+
+  // ── UI ──
+  function ensureModal() {
+    let ov = document.getElementById('kImportModal');
+    if (ov) return ov;
+    ov = document.createElement('div');
+    ov.id = 'kImportModal';
+    ov.style.cssText = 'display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;padding:14px;';
+    ov.innerHTML = `
+      <div style="background:var(--card-bg-color);color:var(--text-color);width:100%;max-width:980px;max-height:90vh;max-height:90dvh;overflow:auto;border-radius:14px;border:1px solid var(--border-color);box-shadow:0 20px 50px rgba(0,0,0,0.35);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border-color);">
+          <div><div style="font-size:1.1rem;font-weight:800;">📥 Import Broker CSV</div>
+            <div style="font-size:0.8rem;color:var(--text-color-secondary);">Fidelity · Schwab · Vanguard · Merrill Edge · Robinhood — duplicates detected automatically</div></div>
+          <button type="button" onclick="window.closeBrokerImport()" aria-label="Close" style="background:none;border:none;font-size:26px;color:var(--text-color-secondary);cursor:pointer;">&times;</button>
+        </div>
+        <div id="kImpUpload" style="padding:18px;">
+          <label for="kImpFile" style="display:block;border:2px dashed var(--border-color);border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;">
+            <div style="font-size:2rem;">📂</div>
+            <div style="font-weight:700;margin-top:6px;">Choose CSV file(s)</div>
+            <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-top:4px;">Transaction / activity history exports. You can pick several files — overlapping dates are fine.</div>
+          </label>
+          <input type="file" id="kImpFile" accept=".csv" multiple style="display:none;">
+          <div id="kImpFiles" style="margin-top:10px;font-size:0.85rem;"></div>
+          <button type="button" id="kImpProcess" class="k-data-btn" disabled style="margin-top:12px;width:100%;opacity:0.5;">Process Files →</button>
+        </div>
+        <div id="kImpPreview" style="display:none;padding:18px;">
+          <div id="kImpStats" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
+          <div id="kImpSkip" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);font-size:0.82rem;"></div>
+          <div style="overflow-x:auto;border:1px solid var(--border-color);border-radius:10px;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+              <thead><tr style="text-align:left;">
+                <th style="padding:8px;">Import</th><th style="padding:8px;">Status</th><th style="padding:8px;">Date</th><th style="padding:8px;">Type</th>
+                <th style="padding:8px;">Symbol</th><th style="padding:8px;text-align:right;">Shares</th><th style="padding:8px;text-align:right;">Price</th>
+                <th style="padding:8px;text-align:right;">Total</th><th style="padding:8px;">Account</th></tr></thead>
+              <tbody id="kImpBody"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;">
+            <button type="button" class="k-data-btn" onclick="window.openBrokerImport()">← Back</button>
+            <button type="button" class="k-data-btn" id="kImpGo" style="background:#10b981;color:#fff;border-color:#10b981;">Import</button>
+          </div>
+        </div>
+      </div>`;
+    ov.addEventListener('click', e => { if (e.target === ov) window.closeBrokerImport(); });
+    document.body.appendChild(ov);
+    ov.querySelector('#kImpFile').addEventListener('change', e => {
+      files = [...e.target.files].filter(f => /\.csv$/i.test(f.name));
+      ov.querySelector('#kImpFiles').innerHTML = files.map(f => '📄 ' + esc(f.name)).join('<br>');
+      const b = ov.querySelector('#kImpProcess'); b.disabled = !files.length; b.style.opacity = files.length ? '1' : '0.5';
+    });
+    ov.querySelector('#kImpProcess').addEventListener('click', process);
+    ov.querySelector('#kImpGo').addEventListener('click', doImport);
+    return ov;
+  }
+  window.openBrokerImport = function () {
+    const ov = ensureModal();
+    files = []; rows = []; result = null;
+    ov.querySelector('#kImpFile').value = '';
+    ov.querySelector('#kImpFiles').innerHTML = '';
+    const b = ov.querySelector('#kImpProcess'); b.disabled = true; b.style.opacity = '0.5';
+    ov.querySelector('#kImpUpload').style.display = '';
+    ov.querySelector('#kImpPreview').style.display = 'none';
+    ov.style.display = 'flex';
+  };
+  window.closeBrokerImport = function () { const ov = document.getElementById('kImportModal'); if (ov) ov.style.display = 'none'; };
+
+  async function process() {
+    skipped = { retirement: 0, cash: 0, accounts: new Set() };
+    rows = [];
+    for (const f of files) {
+      const parsed = parseBrokerCSV(await f.text(), f.name);
+      if (!parsed.length) { alert('No buy/sell rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export rather than Positions?'); }
+      rows.push(...parsed);
+    }
+    if (!rows.length) return;
+    const pd = window.portfolioData || { transactions: [] };
+    const existing = (pd.transactions || [])
+      .filter(t => ['BUY', 'SELL'].includes(String(t.transactionType || '').toUpperCase()))
+      .map(t => ({ symbol: String(t.symbol || '').trim().toUpperCase(), type: String(t.transactionType).toLowerCase(),
+                   date: normDate(t.date), shares: Math.abs(+t.shares || 0), price: Math.abs(+t.price || 0), accountType: t.accountType }));
+    result = smartMerge(rows, existing);
+    render();
+  }
+  function render() {
+    const ov = document.getElementById('kImportModal');
+    ov.querySelector('#kImpUpload').style.display = 'none';
+    ov.querySelector('#kImpPreview').style.display = '';
+    const nNew = result.list.filter(t => t.status === 'new').length;
+    const pill = (c, label, n) => `<div style="padding:8px 12px;border-radius:10px;border:1px solid var(--border-color);font-size:0.8rem;"><div style="color:var(--text-color-secondary);">${label}</div><div style="font-size:1.25rem;font-weight:800;color:${c};">${n}</div></div>`;
+    ov.querySelector('#kImpStats').innerHTML = pill('var(--text-color)', '📊 Found', result.total) + pill('#10b981', '✅ New', nNew) +
+      pill('#f59e0b', '⚠️ Duplicates', result.dup) + pill('#6366f1', '🤔 Possible (you decide)', result.pos);
+    const parts = [];
+    if (skipped.retirement) parts.push(`<b>${skipped.retirement}</b> row(s) from 401(k) / 529 / HSA accounts (${esc([...skipped.accounts].join(', '))}) — you update those by hand`);
+    if (skipped.cash) parts.push(`<b>${skipped.cash}</b> cash-sweep / money-market row(s) (SPAXX etc.)`);
+    const sk = ov.querySelector('#kImpSkip'); sk.style.display = parts.length ? '' : 'none'; sk.innerHTML = 'ℹ️ Skipped automatically: ' + parts.join('; ') + '.';
+    const all = [...result.list, ...rows.filter(r => r.status === 'duplicate')]
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const bg = s => s === 'new' ? 'rgba(16,185,129,0.10)' : s === 'possible' ? 'rgba(99,102,241,0.12)' : 'rgba(245,158,11,0.10)';
+    const tag = s => s === 'new' ? ['#10b981', 'NEW'] : s === 'possible' ? ['#6366f1', 'POSSIBLE DUP'] : ['#f59e0b', 'DUPLICATE'];
+    ov.querySelector('#kImpBody').innerHTML = all.map(t => {
+      const i = rows.indexOf(t), [c, l] = tag(t.status);
+      return `<tr style="background:${bg(t.status)};border-top:1px solid var(--border-color);${t.status === 'duplicate' ? 'opacity:0.6;' : ''}">
+        <td style="padding:8px;text-align:center;">${t.status === 'duplicate' ? '' : `<input type="checkbox" ${t.selected ? 'checked' : ''} data-i="${i}" style="width:18px;height:18px;">`}</td>
+        <td style="padding:8px;"><span style="background:${c};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700;">${l}</span>${t.note ? `<div style="font-size:0.7rem;color:var(--text-color-secondary);margin-top:3px;">${esc(t.note)}</div>` : ''}</td>
+        <td style="padding:8px;white-space:nowrap;">${esc(t.date)}</td><td style="padding:8px;">${t.type.toUpperCase()}</td>
+        <td style="padding:8px;font-weight:700;">${esc(t.symbol)}</td>
+        <td style="padding:8px;text-align:right;">${(+t.shares).toFixed(4)}</td><td style="padding:8px;text-align:right;">$${(+t.price).toFixed(2)}</td>
+        <td style="padding:8px;text-align:right;">$${(t.shares * t.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td style="padding:8px;white-space:nowrap;">${esc(t.platform)} · ${esc(t.accountType)}</td></tr>`;
+    }).join('');
+    ov.querySelectorAll('#kImpBody input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { rows[+cb.dataset.i].selected = cb.checked; updateBtn(); }));
+    updateBtn();
+  }
+  function updateBtn() {
+    const n = result.list.filter(t => t.selected).length, b = document.getElementById('kImpGo');
+    b.textContent = n ? `✅ Import ${n} transaction${n === 1 ? '' : 's'}` : 'Nothing selected';
+    b.disabled = !n; b.style.opacity = n ? '1' : '0.5';
+  }
+
+  async function doImport() {
+    const chosen = result.list.filter(t => t.selected);
+    if (!chosen.length) return;
+    if (!confirm(`Import ${chosen.length} transaction(s)?\n\n${result.total - chosen.length} duplicate/unticked row(s) will be skipped.\nA Backup Center snapshot is saved first, so you can restore if needed.`)) return;
+    const btn = document.getElementById('kImpGo'); btn.disabled = true; btn.textContent = 'Importing…';
+    try {
+      if (typeof window.takeVerifiedSnapshot === 'function') {
+        const s = await window.takeVerifiedSnapshot('Auto-saved before broker CSV import (' + chosen.length + ' txns)');
+        if (!s && !confirm('Could not save a safety snapshot first.\n\nImport anyway, with NO undo available?')) { btn.disabled = false; updateBtn(); return; }
+      }
+      const pd = window.portfolioData; pd.transactions = pd.transactions || [];
+      const batch = 'csv-' + Date.now();
+      const holdings = typeof window.calculateHoldingsAndCash === 'function' ? window.calculateHoldingsAndCash() : [];
+      const known = {};
+      pd.transactions.forEach(t => { if (t.symbol) known[String(t.symbol).toUpperCase()] = known[String(t.symbol).toUpperCase()] || t; });
+      let n = 0, idBase = Date.now();
+      chosen.forEach(t => {
+        const prior = known[t.symbol];
+        const type = prior && prior.type ? prior.type : (t.symbol.length === 5 && t.symbol.endsWith('X') ? 'Mutual Fund' : 'Stock');
+        const name = prior && prior.name ? prior.name : (t.name || t.symbol);
+        const main = { id: idBase + (n++) * 0.001 + Math.random() * 0.0001, transactionType: t.type.toUpperCase(), date: t.date,
+          symbol: t.symbol, name, type, shares: t.shares, price: t.price, accountType: t.accountType, platform: t.platform,
+          dividend: 0, source: 'broker-csv', importBatch: batch };
+        pd.transactions.push(main);
+        // fund the trade from / into the account's cash fund, exactly like a manual entry
+        const cash = holdings.filter(h => h.accountType === t.accountType && h.platform === t.platform && isCashType(h.type))
+                             .sort((a, b) => (b.totalShares || 0) - (a.totalShares || 0))[0];
+        if (cash) {
+          pd.transactions.push({ id: main.id + 0.0005, transactionType: t.type === 'buy' ? 'SELL' : 'BUY', date: t.date,
+            accountType: t.accountType, platform: cash.platform, symbol: cash.symbol, name: cash.name, shares: t.shares * t.price,
+            price: 1, type: cash.type, source: 'broker-csv-cash', importBatch: batch });
+        }
+      });
+      const h = typeof window.__getFirebaseHandles === 'function' ? window.__getFirebaseHandles() : {};
+      if (h.logActivity) h.logActivity(`Imported ${chosen.length} transaction(s) from broker CSV (batch ${batch}).`);
+      if (h.saveDataToFirestore) await h.saveDataToFirestore(); else throw new Error('save function not available');
+      if (h.updateDisplay) await h.updateDisplay();
+      window.closeBrokerImport();
+      alert(`✅ Imported ${chosen.length} transaction(s).\n\nTo undo: Backup Center → restore "Auto-saved before broker CSV import".`);
+    } catch (e) {
+      console.error('[Broker import]', e);
+      alert('Import failed: ' + e.message + '\nNothing was saved to the cloud. Reload the app before trying again.');
+      btn.disabled = false; updateBtn();
+    }
+  }
+  window.__k401ImportTest = { parseBrokerCSV, smartMerge, normDate, setSkipped: s => { skipped = s; } };
 })();
 </script>
 </body>
