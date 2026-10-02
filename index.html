@@ -17,7 +17,6 @@
 
 
 
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14436,7 +14435,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         <div id="kImpUpload" style="padding:18px;">
           <label for="kImpFile" style="display:block;border:2px dashed var(--border-color);border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;">
             <div style="font-size:2rem;">📂</div>
-            <div style="font-weight:700;margin-top:6px;">Choose CSV file(s)</div>
+            <div style="font-weight:700;margin-top:6px;">Drop CSV file(s) here, or click to choose</div>
             <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-top:4px;">Transaction / activity history exports. You can pick several files — overlapping dates are fine.</div>
           </label>
           <input type="file" id="kImpFile" accept=".csv" multiple style="display:none;">
@@ -14463,11 +14462,23 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       </div>`;
     ov.addEventListener('click', e => { if (e.target === ov) window.closeBrokerImport(); });
     document.body.appendChild(ov);
-    ov.querySelector('#kImpFile').addEventListener('change', e => {
-      files = [...e.target.files].filter(f => /\.csv$/i.test(f.name));
-      ov.querySelector('#kImpFiles').innerHTML = files.map(f => '📄 ' + esc(f.name)).join('<br>');
+    const setFiles = list => {
+      const all = [...(list || [])];
+      files = all.filter(f => /\.csv$/i.test(f.name));
+      const ignored = all.length - files.length;
+      ov.querySelector('#kImpFiles').innerHTML = files.map(f => '📄 ' + esc(f.name)).join('<br>') +
+        (ignored ? `<div style="color:#f59e0b;margin-top:4px;">${ignored} non-CSV file(s) ignored</div>` : '');
       const b = ov.querySelector('#kImpProcess'); b.disabled = !files.length; b.style.opacity = files.length ? '1' : '0.5';
-    });
+    };
+    ov.querySelector('#kImpFile').addEventListener('change', e => setFiles(e.target.files));
+    // Drag & drop onto the dashed box
+    const zone = ov.querySelector('label[for="kImpFile"]');
+    const on = v => { zone.style.borderColor = v ? '#10b981' : ''; zone.style.background = v ? 'rgba(16,185,129,0.08)' : ''; };
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); on(true); }));
+    ['dragleave', 'dragend'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); on(false); }));
+    zone.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); on(false); setFiles(e.dataTransfer && e.dataTransfer.files); });
+    // A file dropped anywhere else in the window shouldn't make the browser open it
+    ['dragover', 'drop'].forEach(ev => ov.addEventListener(ev, e => e.preventDefault()));
     ov.querySelector('#kImpProcess').addEventListener('click', process);
     ov.querySelector('#kImpGo').addEventListener('click', doImport);
     return ov;
