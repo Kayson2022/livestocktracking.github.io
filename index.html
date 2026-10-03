@@ -14667,14 +14667,15 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       ${rows || '<div style="font-size:0.85rem;color:var(--text-color-secondary);padding:6px 0;">No exchanges recorded yet.</div>'}
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color);display:grid;gap:8px;">
         <label style="font-size:0.8rem;">Exchange date <input type="date" id="kAdjDate" value="2026-07-31" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-color);"></label>
-        <label style="font-size:0.8rem;">Gain moved ("Change in Market Value") <input type="text" inputmode="decimal" id="kAdjAmt" placeholder="179,919.42" value="${items.length ? '' : '179,919.42'}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-color);"></label>
+        <label style="font-size:0.8rem;">Gain moved ("Change in Market Value" — use − for a loss) <input type="text" inputmode="decimal" id="kAdjAmt" placeholder="179,919.42" value="${items.length ? '' : '179,919.42'}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-color);"></label>
         <label style="font-size:0.8rem;">Note <input type="text" id="kAdjNote" value="${items.length ? '' : 'US Large Cap Equity → Equity Index Fund ($330,000)'}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-color);"></label>
         <button type="button" id="kAdjAdd" class="k-data-btn" style="background:#10b981;color:#fff;border-color:#10b981;">Add exchange</button>
       </div></div>`;
     ov.style.display = 'flex';
     ov.querySelector('#kAdjAdd').onclick = async () => {
       const amt = parseFloat(String(ov.querySelector('#kAdjAmt').value).replace(/[$,\s]/g, ''));
-      if (!(amt > 0)) { alert('Enter the gain amount, e.g. 179919.42'); return; }
+      // a LOSS moved is entered as a negative number (e.g. -5000) — Fidelity then lowered the cost
+      if (!amt || isNaN(amt)) { alert('Enter the amount from the "Change in Market Value" row, e.g. 179919.42 (use a minus sign for a loss, e.g. -5000)'); return; }
       const pd = window.portfolioData; if (!pd) return;
       pd.costAdjustments = Array.isArray(pd.costAdjustments) ? pd.costAdjustments : [];
       pd.costAdjustments.push({ id: 'adj' + Date.now(), accountType: acct, amount: amt,
