@@ -689,7 +689,7 @@
 @media (max-width:480px){ .k-tb-menu { left:8px; right:8px; grid-template-columns:1fr 1fr; } }
 
 /* Action bar (replaces 6 full-width buttons) */
-.refresh-button-container.k-actionbar { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:8px; text-align:initial; margin-bottom:16px; }
+.refresh-button-container.k-actionbar { display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:center; gap:8px; text-align:initial; margin-bottom:16px; }
 .k-act { height:36px; padding:0 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--card-bg-color) !important; color:var(--text-color) !important;
   font-size:0.85rem; font-weight:600; cursor:pointer; white-space:nowrap; width:auto !important; margin:0 !important; box-shadow:none !important; }
 .k-act:hover { background:color-mix(in srgb, var(--text-color) 6%, var(--card-bg-color)) !important; }
@@ -705,11 +705,11 @@
 .k-item { display:block; width:100% !important; text-align:left; padding:10px 12px; margin:0 !important; border:none !important; border-radius:6px;
   background:transparent !important; color:var(--text-color) !important; font-size:0.88rem; font-weight:600; cursor:pointer; box-shadow:none !important; }
 .k-item:hover { background:color-mix(in srgb, var(--text-color) 7%, transparent) !important; }
-.k-paused-chip { font-size:0.75rem; font-weight:700; color:#b45309; background:#fef3c7; border:1px solid #fcd34d; border-radius:999px; padding:3px 10px; margin-right:auto; }
+.k-paused-chip { font-size:0.75rem; font-weight:700; color:#b45309; background:#fef3c7; border:1px solid #fcd34d; border-radius:999px; padding:3px 10px; order:10; }   /* sits after the buttons */
 .k-short { display:none; }
 @media (max-width:600px){ .k-long { display:none; } .k-short { display:inline; }
   .k-act { padding:0 10px; font-size:0.8rem; } .k-split .k-caret { padding:0 8px; } }
-@media (max-width:600px){ .refresh-button-container.k-actionbar { justify-content:center; } .k-paused-chip { margin-right:0; flex-basis:100%; text-align:center; } }
+@media (max-width:600px){ .k-paused-chip { flex-basis:100%; text-align:left; } }
 
 /* Data Transfer & Management */
 .k-data-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:8px; }
