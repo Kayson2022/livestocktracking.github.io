@@ -14318,19 +14318,25 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 (function () {
   'use strict';
   const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-  const SKIP_ACCOUNT_RE = /401\s*\(?k\)?|403\s*\(?b\)?|457|\b529\b|college|education|unique plan|hsa|health savings|pension|netbenefits|brokeragelink/i;
+  // 401(k) and 529 are imported into their own accounts; only HSA / pension rows are skipped
+  const SKIP_ACCOUNT_RE = /\bhsa\b|health savings|pension/i;
+  const RE_401K = /401\s*\(?k\)?|403\s*\(?b\)?|\b457\b|netbenefits|brokeragelink/i;
+  const RE_529 = /\b529\b|college|education|unique plan|unique college/i;
+  const ACCT_401K = '401(k)', ACCT_529 = '529 College Saving';
+  const isRetAcct = a => a === ACCT_401K || a === ACCT_529;
   const CASH_SWEEP = new Set(['SPAXX','FDRXX','FZFXX','SPRXX','FCASH','CORE','SWVXX','SNVXX','SNSXX','VMFXX','VMRXX','VUSXX']);
   let files = [], rows = [], result = null, skipped = null;
 
   const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const isCashType = t => { const x = String(t || '').toLowerCase(); return x.includes('cash') || (x.includes('money') && x.includes('market')); };
 
-  function splitCSVLine(line) {
+  function splitCSVLine(line, delim) {
+    delim = delim || ',';
     const out = []; let cur = '', q = false;
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
       if (q) { if (c === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
-      else if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c;
+      else if (c === '"') q = true; else if (c === delim) { out.push(cur); cur = ''; } else cur += c;
     }
     out.push(cur); return out.map(x => x.trim());
   }
@@ -14341,11 +14347,43 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     if ((m = t.match(/^([A-Za-z]{3})[a-z]*[-\s](\d{1,2}),?[-\s](\d{4})/))) { const mo = MONTHS[m[1].toLowerCase()]; if (mo) return `${m[3]}-${String(mo).padStart(2,'0')}-${m[2].padStart(2,'0')}`; }
     const dt = new Date(t); return isNaN(dt) ? t : dt.toISOString().slice(0, 10);
   }
+  // NetBenefits 401(k) history: Date, Investment, Transaction Type, Shares/Unit, Amount ($)
+  function parseNetBenefits(lines, hi, delim, fileName) {
+    const head = splitCSVLine(lines[hi], delim).map(h => h.toLowerCase().replace(/\s+/g, ' ').trim());
+    const col = n => head.findIndex(h => h.startsWith(n));
+    const iD = col('date'), iInv = col('investment'), iT = col('transaction type'), iSh = col('shares'), iAmt = col('amount');
+    const out = [];
+    for (let r = hi + 1; r < lines.length; r++) {
+      const c = splitCSVLine(lines[r], delim);
+      if (!c[iD] || !/\d/.test(c[iD]) || !c[iInv]) continue;
+      const kind = String(c[iT] || '').trim();
+      const sh = parseFloat(String(c[iSh] || '').replace(/[$,()"]/g, '')) || 0;
+      const amt = parseFloat(String(c[iAmt] || '').replace(/[$,()"]/g, '')) || 0;
+      const fund = String(c[iInv]).trim().toUpperCase();
+      const date = normDate(c[iD]);
+      if (/change in market value/i.test(kind) && !sh) {
+        // not a trade — but on an exchange date it is the gain that moved (used for True cost)
+        out.push({ kind: 'cmv', fund, date, amount: amt, source: fileName });
+        skipped.cmv++; continue;
+      }
+      if (!sh) { skipped.other++; continue; }
+      const type = sh > 0 ? 'buy' : 'sell';
+      const label = /fee/i.test(kind) ? 'fee' : /exchange in/i.test(kind) ? 'exchange-in' : /exchange out/i.test(kind) ? 'exchange-out'
+                  : /contribution/i.test(kind) ? 'contribution' : /dividend|reinvest/i.test(kind) ? 'dividend' : kind.toLowerCase();
+      out.push({ type, symbol: fund, fund, date, shares: Math.abs(sh), price: Math.abs(sh) ? Math.abs(amt) / Math.abs(sh) : 0,
+                 platform: 'Fidelity', accountType: ACCT_401K, name: '', kind: label, source: fileName });
+    }
+    return out;
+  }
+
   function parseBrokerCSV(text, fileName) {
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const nb = lines.findIndex(l => /investment/i.test(l) && /transaction type/i.test(l) && /shares\/unit|amount/i.test(l));
+    if (nb >= 0) return parseNetBenefits(lines, nb, (lines[nb].split('\t').length > lines[nb].split(',').length ? '\t' : ','), fileName);
     const hi = lines.findIndex(l => /symbol|instrument/i.test(l) && /action|transaction type|trans code|type/i.test(l));
     if (hi < 0) return [];
-    const head = splitCSVLine(lines[hi]).map(h => h.toLowerCase().replace(/\s+/g, ' ').trim());
+    const delim = lines[hi].split('\t').length > lines[hi].split(',').length ? '\t' : ',';
+    const head = splitCSVLine(lines[hi], delim).map(h => h.toLowerCase().replace(/\s+/g, ' ').trim());
     const col = (...names) => head.findIndex(h => names.some(n => h === n || h.startsWith(n)));
     const iDate = col('run date', 'trade date', 'activity date', 'date');
     const iAct = col('action', 'transaction type', 'trans code', 'type');
@@ -14363,26 +14401,32 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const out = [];
     for (let r = hi + 1; r < lines.length; r++) {
       if (!lines[r].trim()) continue;
-      const c = splitCSVLine(lines[r]);
+      const c = splitCSVLine(lines[r], delim);
       const act = String(c[iAct] || '').toLowerCase();
       let type = null;
       if (/\bsold\b|\bsell\b|\bsale\b/.test(act)) type = 'sell';
       else if (/\bbought\b|\bbuy\b|\bpurchase\b|reinvest/.test(act)) type = 'buy';
       if (!type) continue;
-      const sym = String(c[iSym] || '').replace(/[^A-Za-z0-9.\-]/g, '').toUpperCase();
+      // 529 files leave Symbol empty and put the fund code in the Action text, e.g. "(NHFSMKX98)"
+      let sym = String(c[iSym] || '').replace(/[^A-Za-z0-9.\-]/g, '').toUpperCase();
+      if (!sym) { const m = String(c[iAct] || '').match(/\(([A-Z0-9]{4,12})\)/); if (m) sym = m[1]; }
       const qty = Math.abs(parseFloat(String(c[iQty] || '').replace(/[$,()]/g, '')) || 0);
       const px = Math.abs(parseFloat(String(c[iPx] || '').replace(/[$,()]/g, '')) || 0);
       if (!sym || !qty) continue;
       const acct = iAcct >= 0 ? String(c[iAcct] || '') : '';
+      const desc = iDesc >= 0 ? String(c[iDesc] || '') : '';
+      const is529 = RE_529.test(acct) || /contribution/i.test(act) && /^[A-Z]{2}\s/.test(desc) || /^[A-Z]{2}[A-Z]{3,}\d{2}$/.test(sym);
+      const is401 = !is529 && RE_401K.test(acct);
       if (SKIP_ACCOUNT_RE.test(acct) || (iAcct < 0 && SKIP_ACCOUNT_RE.test(fileName))) {
         skipped.retirement++; skipped.accounts.add(acct.replace(/\s*[A-Z]?\d{5,}\s*/g, ' ').trim() || fileName); continue;
       }
       if (CASH_SWEEP.has(sym) || /money market|core position|cash reserves/i.test(c.join(' '))) { skipped.cash++; continue; }
       const isRoth = /roth/i.test(acct) || /roth/i.test(fileName);
       out.push({
-        type, symbol: sym, date: normDate(String(c[iDate] || '').replace(/^.*\bas of\s+/i, '')),
-        shares: qty, price: px, platform: broker, accountType: isRoth ? 'Roth IRA' : 'Regular Brokerage',
-        name: iDesc >= 0 ? String(c[iDesc] || '').trim() : '', source: fileName
+        type, symbol: sym, fund: desc.trim().toUpperCase(), date: normDate(String(c[iDate] || '').replace(/^.*\bas of\s+/i, '')),
+        shares: qty, price: px, platform: broker,
+        accountType: is529 ? ACCT_529 : is401 ? ACCT_401K : isRoth ? 'Roth IRA' : 'Regular Brokerage',
+        name: desc.trim(), kind: /contribution/i.test(act) ? 'contribution' : '', source: fileName
       });
     }
     return out;
@@ -14442,7 +14486,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       <div style="background:var(--card-bg-color);color:var(--text-color);width:100%;max-width:980px;max-height:90vh;max-height:90dvh;overflow:auto;border-radius:14px;border:1px solid var(--border-color);box-shadow:0 20px 50px rgba(0,0,0,0.35);">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border-color);">
           <div><div style="font-size:1.1rem;font-weight:800;">📥 Import Broker CSV</div>
-            <div style="font-size:0.8rem;color:var(--text-color-secondary);">Fidelity · Schwab · Vanguard · Merrill Edge · Robinhood — duplicates detected automatically</div></div>
+            <div style="font-size:0.8rem;color:var(--text-color-secondary);">Fidelity · NetBenefits 401(k) · 529 · Schwab · Vanguard · Merrill Edge · Robinhood — duplicates detected automatically</div></div>
           <button type="button" onclick="window.closeBrokerImport()" aria-label="Close" style="background:none;border:none;font-size:26px;color:var(--text-color-secondary);cursor:pointer;">&times;</button>
         </div>
         <div id="kImpUpload" style="padding:18px;">
@@ -14451,7 +14495,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             <div style="font-weight:700;margin-top:6px;">Drop CSV file(s) here, or click to choose</div>
             <div style="font-size:0.82rem;color:var(--text-color-secondary);margin-top:4px;">Transaction / activity history exports. You can pick several files — overlapping dates are fine.</div>
           </label>
-          <input type="file" id="kImpFile" accept=".csv" multiple style="display:none;">
+          <input type="file" id="kImpFile" accept=".csv,.txt,.tsv" multiple style="display:none;">
           <div id="kImpFiles" style="margin-top:10px;font-size:0.85rem;"></div>
           <button type="button" id="kImpProcess" class="k-data-btn" disabled style="margin-top:12px;width:100%;opacity:0.5;">Process Files →</button>
         </div>
@@ -14477,7 +14521,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     document.body.appendChild(ov);
     const setFiles = list => {
       const all = [...(list || [])];
-      files = all.filter(f => /\.csv$/i.test(f.name));
+      files = all.filter(f => /\.(csv|txt|tsv)$/i.test(f.name));
       const ignored = all.length - files.length;
       ov.querySelector('#kImpFiles').innerHTML = files.map(f => '📄 ' + esc(f.name)).join('<br>') +
         (ignored ? `<div style="color:#f59e0b;margin-top:4px;">${ignored} non-CSV file(s) ignored</div>` : '');
@@ -14508,21 +14552,68 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   };
   window.closeBrokerImport = function () { const ov = document.getElementById('kImportModal'); if (ov) ov.style.display = 'none'; };
 
-  async function process() {
-    skipped = { retirement: 0, cash: 0, accounts: new Set() };
-    rows = [];
+  let cmvRows = [], adjRows = [], cutoff = {};
+  const normName = x => String(x || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').replace(/\b(FUND|THE|CL|CLASS)\b/g, '').replace(/\s+/g, ' ').trim();
+  // Match "US LARGE CAP EQUITY" to your holding "US LARGE CAP EQUITY FUND", etc.
+  function matchHolding(acct, fund, code) {
+    const txs = ((window.portfolioData || {}).transactions || []).filter(t => t.accountType === acct && t.symbol);
+    const syms = [...new Set(txs.map(t => t.symbol))];
+    const nf = normName(fund), nc = String(code || '').toUpperCase();
+    let hit = syms.find(s => s.toUpperCase() === nc || s.toUpperCase() === fund) ||
+              syms.find(s => normName(s) === nf) ||
+              syms.find(s => nf && (normName(s).startsWith(nf) || nf.startsWith(normName(s))));
+    if (!hit && acct === ACCT_529 && syms.length === 1) hit = syms[0];   // your 529 is a single holding
+    if (!hit) return null;
+    const t = txs.find(x => x.symbol === hit);
+    return { symbol: hit, name: t.name, type: t.type, platform: t.platform || 'Fidelity' };
+  }
+  function lastDate(acct) {
+    const d = ((window.portfolioData || {}).transactions || []).filter(t => t.accountType === acct && t.date).map(t => normDate(t.date)).sort();
+    return d.length ? d[d.length - 1] : '';
+  }
+
+  async function process(keepCutoff) {
+    skipped = { retirement: 0, cash: 0, cmv: 0, other: 0, accounts: new Set() };
+    rows = []; cmvRows = []; adjRows = [];
     for (const f of files) {
       const parsed = parseBrokerCSV(await f.text(), f.name);
       if (!parsed.length) { alert('No buy/sell rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export rather than Positions?'); }
-      rows.push(...parsed);
+      parsed.forEach(r => (r.kind === 'cmv' ? cmvRows : rows).push(r));
     }
-    if (!rows.length) return;
+    if (!rows.length && !cmvRows.length) return;
+    if (!keepCutoff) cutoff = {};
+    // 401(k) / 529: point each row at your existing holding; rows on/before your last update are already in your balance
+    rows.forEach(r => {
+      if (!isRetAcct(r.accountType)) return;
+      const m = matchHolding(r.accountType, r.fund || r.symbol, r.symbol);
+      if (m) { r.symbol = m.symbol; r.appName = m.name; r.appType = m.type; r.platform = m.platform; }
+      else { r.appType = 'Manual'; r.appName = r.accountType === ACCT_401K ? '401(k)' : r.name || r.symbol; r.note0 = 'new holding — not in your app yet'; }
+      if (!(r.accountType in cutoff)) cutoff[r.accountType] = lastDate(r.accountType);
+    });
+    // Exchange gains: Exchange Out of a fund + same-day "Change in Market Value" of that fund
+    rows.filter(r => r.kind === 'exchange-out').forEach(r => {
+      const g = cmvRows.find(c => c.date === r.date && normName(c.fund) === normName(r.fund));
+      const pd = window.portfolioData || {};
+      if (!g || adjRows.some(a => a.date === r.date && a.amount === g.amount)) return;
+      const dup = (pd.costAdjustments || []).some(a => a.date === r.date && Math.abs(+a.amount - g.amount) < 0.01);
+      adjRows.push({ date: r.date, amount: g.amount, fund: r.fund, accountType: r.accountType, selected: !dup, dup });
+    });
     const pd = window.portfolioData || { transactions: [] };
     const existing = (pd.transactions || [])
       .filter(t => ['BUY', 'SELL'].includes(String(t.transactionType || '').toUpperCase()))
       .map(t => ({ symbol: String(t.symbol || '').trim().toUpperCase(), type: String(t.transactionType).toLowerCase(),
                    date: normDate(t.date), shares: Math.abs(+t.shares || 0), price: Math.abs(+t.price || 0), accountType: t.accountType }));
-    result = smartMerge(rows, existing);
+    const included = rows.filter(r => isRetAcct(r.accountType) && cutoff[r.accountType] && r.date <= cutoff[r.accountType]);
+    included.forEach(r => { r.status = 'included'; r.selected = false; r.note = `already in your balance (app updated through ${cutoff[r.accountType]})`; });
+    result = smartMerge(rows.filter(r => !included.includes(r)).map(r => { r.symbol = String(r.symbol).toUpperCase(); return r; }), existing);
+    result.included = included.length;
+    const label = { 'contribution': 'Contribution', 'fee': 'Recordkeeping fee', 'exchange-in': 'Exchange in', 'exchange-out': 'Exchange out', 'dividend': 'Dividend reinvested' };
+    rows.forEach(r => {
+      if (r.status === 'included') return;
+      const k = label[r.kind] || r.kind || '';
+      if (isRetAcct(r.accountType) && r.status === 'new') r.note = k + (r.note0 ? ' · ' + r.note0 : '');   // plain label for 401(k)/529
+      else if (k) r.note = k + (r.note ? ' · ' + r.note : '');
+    });
     render();
   }
   function render() {
@@ -14531,20 +14622,55 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     ov.querySelector('#kImpPreview').style.display = '';
     const nNew = result.list.filter(t => t.status === 'new').length;
     const pill = (c, label, n) => `<div style="padding:8px 12px;border-radius:10px;border:1px solid var(--border-color);font-size:0.8rem;"><div style="color:var(--text-color-secondary);">${label}</div><div style="font-size:1.25rem;font-weight:800;color:${c};">${n}</div></div>`;
-    ov.querySelector('#kImpStats').innerHTML = pill('var(--text-color)', '📊 Found', result.total) + pill('#10b981', '✅ New', nNew) +
-      pill('#f59e0b', '⚠️ Duplicates', result.dup) + pill('#6366f1', '🤔 Possible (you decide)', result.pos);
+    ov.querySelector('#kImpStats').innerHTML = pill('var(--text-color)', '📊 Found', result.total + (result.included || 0)) + pill('#10b981', '✅ New', nNew) +
+      pill('#f59e0b', '⚠️ Duplicates', result.dup) + pill('#6366f1', '🤔 Possible (you decide)', result.pos) +
+      (result.included ? pill('#64748b', '🗂 Already in balance', result.included) : '');
+    // 401(k) / 529 controls: cut-off date, exchange gains, and a share check against Fidelity
+    let ret = '';
+    Object.keys(cutoff).forEach(acct => {
+      ret += `<div style="margin-top:6px;">📅 <b>${esc(acct)}</b>: your app already includes everything up to
+        <input type="date" class="kImpCut" data-acct="${esc(acct)}" value="${esc(cutoff[acct])}" style="padding:3px 6px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-color);">
+        <span style="color:var(--text-color-secondary);">(= the date you last updated it — rows on/before it are skipped)</span></div>`;
+    });
+    if (Object.keys(cutoff).length) {
+      const pdx = window.portfolioData || { transactions: [] };
+      const syms = [...new Set(rows.filter(r => isRetAcct(r.accountType)).map(r => r.accountType + '|' + r.symbol))];
+      const lines = syms.map(k => {
+        const [acct, sym] = k.split('|');
+        const now = (pdx.transactions || []).filter(t => t.accountType === acct && String(t.symbol).toUpperCase() === sym)
+          .reduce((a, t) => a + (String(t.transactionType).toUpperCase() === 'SELL' ? -1 : String(t.transactionType).toUpperCase() === 'BUY' ? 1 : 0) * (+t.shares || 0), 0);
+        const add = rows.filter(r => r.accountType === acct && r.symbol === sym && r.selected && r.status !== 'included' && r.status !== 'duplicate')
+          .reduce((a, r) => a + (r.type === 'sell' ? -r.shares : r.shares), 0);
+        return `<tr><td style="padding:3px 8px;">${esc(sym)}</td><td style="padding:3px 8px;text-align:right;">${now.toFixed(3)}</td><td style="padding:3px 8px;text-align:right;"><b>${(now + add).toFixed(3)}</b></td></tr>`;
+      }).join('');
+      ret += `<div style="margin-top:8px;">🔎 <b>Share check</b> — after importing, these should equal the <b>Quantity</b> column on Fidelity:
+        <table style="margin-top:4px;font-size:0.8rem;border-collapse:collapse;"><tr style="color:var(--text-color-secondary);"><td style="padding:3px 8px;">Fund</td><td style="padding:3px 8px;text-align:right;">Now</td><td style="padding:3px 8px;text-align:right;">After</td></tr>${lines}</table></div>`;
+    }
+    if (adjRows.length) {
+      ret += adjRows.map((a, k) => `<div style="margin-top:8px;">🔁 <label><input type="checkbox" class="kImpAdj" data-k="${k}" ${a.selected ? 'checked' : ''} ${a.dup ? 'disabled' : ''}>
+        Record <b>$${a.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</b> exchange gain (${esc(a.fund)}, ${esc(a.date)}) for <b>True cost</b></label>
+        ${a.dup ? '<span style="color:var(--text-color-secondary);"> — already recorded</span>' : ''}</div>`).join('');
+    }
+    let rb = ov.querySelector('#kImpRet');
+    if (!rb) { rb = document.createElement('div'); rb.id = 'kImpRet'; rb.style.cssText = 'margin-bottom:10px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);font-size:0.82rem;'; ov.querySelector('#kImpSkip').after(rb); }
+    rb.style.display = ret ? '' : 'none'; rb.innerHTML = ret;
+    rb.querySelectorAll('.kImpCut').forEach(inp => inp.addEventListener('change', () => { cutoff[inp.dataset.acct] = inp.value; process(true); }));
+    rb.querySelectorAll('.kImpAdj').forEach(cb => cb.addEventListener('change', () => { adjRows[+cb.dataset.k].selected = cb.checked; updateBtn(); }));
     const parts = [];
     if (skipped.retirement) parts.push(`<b>${skipped.retirement}</b> row(s) from 401(k) / 529 / HSA accounts (${esc([...skipped.accounts].join(', '))}) — you update those by hand`);
     if (skipped.cash) parts.push(`<b>${skipped.cash}</b> cash-sweep / money-market row(s) (SPAXX etc.)`);
+    if (skipped.cmv) parts.push(`<b>${skipped.cmv}</b> "Change in Market Value" row(s) — Fidelity's price updates, not trades`);
+    if (skipped.retirement) parts[0] = `<b>${skipped.retirement}</b> HSA / pension row(s)`;
     const sk = ov.querySelector('#kImpSkip'); sk.style.display = parts.length ? '' : 'none'; sk.innerHTML = 'ℹ️ Skipped automatically: ' + parts.join('; ') + '.';
-    const all = [...result.list, ...rows.filter(r => r.status === 'duplicate')]
+    const all = [...result.list, ...rows.filter(r => r.status === 'duplicate' || r.status === 'included')]
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    const bg = s => s === 'new' ? 'rgba(16,185,129,0.10)' : s === 'possible' ? 'rgba(99,102,241,0.12)' : 'rgba(245,158,11,0.10)';
-    const tag = s => s === 'new' ? ['#10b981', 'NEW'] : s === 'possible' ? ['#6366f1', 'POSSIBLE DUP'] : ['#f59e0b', 'DUPLICATE'];
+    const bg = s => s === 'new' ? 'rgba(16,185,129,0.10)' : s === 'possible' ? 'rgba(99,102,241,0.12)' : s === 'included' ? 'rgba(100,116,139,0.10)' : 'rgba(245,158,11,0.10)';
+    const tag = s => s === 'new' ? ['#10b981', 'NEW'] : s === 'possible' ? ['#6366f1', 'POSSIBLE DUP'] : s === 'included' ? ['#64748b', 'IN BALANCE'] : ['#f59e0b', 'DUPLICATE'];
     ov.querySelector('#kImpBody').innerHTML = all.map(t => {
       const i = rows.indexOf(t), [c, l] = tag(t.status);
-      return `<tr style="background:${bg(t.status)};border-top:1px solid var(--border-color);${t.status === 'duplicate' ? 'opacity:0.6;' : ''}">
-        <td style="padding:8px;text-align:center;">${t.status === 'duplicate' ? '' : `<input type="checkbox" ${t.selected ? 'checked' : ''} data-i="${i}" style="width:18px;height:18px;">`}</td>
+      const off = t.status === 'duplicate' || t.status === 'included';
+      return `<tr style="background:${bg(t.status)};border-top:1px solid var(--border-color);${off ? 'opacity:0.6;' : ''}">
+        <td style="padding:8px;text-align:center;">${off ? '' : `<input type="checkbox" ${t.selected ? 'checked' : ''} data-i="${i}" style="width:18px;height:18px;">`}</td>
         <td style="padding:8px;"><span style="background:${c};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700;">${l}</span>${t.note ? `<div style="font-size:0.7rem;color:var(--text-color-secondary);margin-top:3px;">${esc(t.note)}</div>` : ''}</td>
         <td style="padding:8px;white-space:nowrap;">${esc(t.date)}</td><td style="padding:8px;">${t.type.toUpperCase()}</td>
         <td style="padding:8px;font-weight:700;">${esc(t.symbol)}</td>
@@ -14552,19 +14678,20 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         <td style="padding:8px;text-align:right;">$${(t.shares * t.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td style="padding:8px;white-space:nowrap;">${esc(t.platform)} · ${esc(t.accountType)}</td></tr>`;
     }).join('');
-    ov.querySelectorAll('#kImpBody input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { rows[+cb.dataset.i].selected = cb.checked; updateBtn(); }));
+    ov.querySelectorAll('#kImpBody input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { rows[+cb.dataset.i].selected = cb.checked; render(); }));
     updateBtn();
   }
   function updateBtn() {
-    const n = result.list.filter(t => t.selected).length, b = document.getElementById('kImpGo');
-    b.textContent = n ? `✅ Import ${n} transaction${n === 1 ? '' : 's'}` : 'Nothing selected';
+    const n = result.list.filter(t => t.selected).length + adjRows.filter(a => a.selected).length, b = document.getElementById('kImpGo');
+    b.textContent = n ? `✅ Import ${n} item${n === 1 ? '' : 's'}` : 'Nothing selected';
     b.disabled = !n; b.style.opacity = n ? '1' : '0.5';
   }
 
   async function doImport() {
     const chosen = result.list.filter(t => t.selected);
-    if (!chosen.length) return;
-    if (!confirm(`Import ${chosen.length} transaction(s)?\n\n${result.total - chosen.length} duplicate/unticked row(s) will be skipped.\nA Backup Center snapshot is saved first, so you can restore if needed.`)) return;
+    const adjChosen = adjRows.filter(a => a.selected);
+    if (!chosen.length && !adjChosen.length) return;
+    if (!confirm(`Import ${chosen.length} transaction(s)${adjChosen.length ? ' and ' + adjChosen.length + ' exchange gain(s)' : ''}?\n\n${result.total - chosen.length} duplicate/unticked row(s) will be skipped.\nA Backup Center snapshot is saved first, so you can restore if needed.`)) return;
     const btn = document.getElementById('kImpGo'); btn.disabled = true; btn.textContent = 'Importing…';
     try {
       if (typeof window.takeVerifiedSnapshot === 'function') {
@@ -14579,11 +14706,13 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       let n = 0, idBase = Date.now();
       chosen.forEach(t => {
         const prior = known[t.symbol];
-        const type = prior && prior.type ? prior.type : (t.symbol.length === 5 && t.symbol.endsWith('X') ? 'Mutual Fund' : 'Stock');
-        const name = prior && prior.name ? prior.name : (t.name || t.symbol);
+        const type = t.appType || (prior && prior.type ? prior.type : (t.symbol.length === 5 && t.symbol.endsWith('X') ? 'Mutual Fund' : 'Stock'));
+        const name = t.appName || (prior && prior.name ? prior.name : (t.name || t.symbol));
         const main = { id: idBase + (n++) * 0.001 + Math.random() * 0.0001, transactionType: t.type.toUpperCase(), date: t.date,
           symbol: t.symbol, name, type, shares: t.shares, price: t.price, accountType: t.accountType, platform: t.platform,
-          dividend: 0, source: 'broker-csv', importBatch: batch };
+          dividend: 0, source: isRetAcct(t.accountType) ? 'retirement-csv' : 'broker-csv', importBatch: batch,
+          notes: t.kind && isRetAcct(t.accountType) ? t.kind : undefined };
+        if (main.notes === undefined) delete main.notes;
         pd.transactions.push(main);
         // fund the trade from / into the account's cash fund, exactly like a manual entry
         const cash = holdings.filter(h => h.accountType === t.accountType && h.platform === t.platform && isCashType(h.type))
@@ -14594,19 +14723,24 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
             price: 1, type: cash.type, source: 'broker-csv-cash', importBatch: batch });
         }
       });
+      if (adjChosen.length) {
+        pd.costAdjustments = Array.isArray(pd.costAdjustments) ? pd.costAdjustments : [];
+        adjChosen.forEach((a, k) => pd.costAdjustments.push({ id: 'adj' + Date.now() + k, accountType: a.accountType, amount: a.amount,
+          date: a.date, note: 'Exchange out of ' + a.fund + ' (imported)' }));
+      }
       const h = typeof window.__getFirebaseHandles === 'function' ? window.__getFirebaseHandles() : {};
       if (h.logActivity) h.logActivity(`Imported ${chosen.length} transaction(s) from broker CSV (batch ${batch}).`);
       if (h.saveDataToFirestore) await h.saveDataToFirestore(); else throw new Error('save function not available');
       if (h.updateDisplay) await h.updateDisplay();
       window.closeBrokerImport();
-      alert(`✅ Imported ${chosen.length} transaction(s).\n\nTo undo: Backup Center → restore "Auto-saved before broker CSV import".`);
+      alert(`✅ Imported ${chosen.length} transaction(s)${adjChosen.length ? ' + ' + adjChosen.length + ' exchange gain(s)' : ''}.\n\nTo undo: Backup Center → restore "Auto-saved before broker CSV import".`);
     } catch (e) {
       console.error('[Broker import]', e);
       alert('Import failed: ' + e.message + '\nNothing was saved to the cloud. Reload the app before trying again.');
       btn.disabled = false; updateBtn();
     }
   }
-  window.__k401ImportTest = { parseBrokerCSV, smartMerge, normDate, setSkipped: s => { skipped = s; } };
+  window.__k401ImportTest = { parseBrokerCSV, smartMerge, normDate, setSkipped: s => { skipped = s; }, process: () => process() };
 })();
 </script>
 
