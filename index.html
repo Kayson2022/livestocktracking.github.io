@@ -14536,7 +14536,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     zone.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); on(false); setFiles(e.dataTransfer && e.dataTransfer.files); });
     // A file dropped anywhere else in the window shouldn't make the browser open it
     ['dragover', 'drop'].forEach(ev => ov.addEventListener(ev, e => e.preventDefault()));
-    ov.querySelector('#kImpProcess').addEventListener('click', process);
+    ov.querySelector('#kImpProcess').addEventListener('click', () => process(false));   // fresh run: reset dates from the files you picked
     ov.querySelector('#kImpGo').addEventListener('click', doImport);
     return ov;
   }
