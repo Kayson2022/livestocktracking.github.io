@@ -18,6 +18,7 @@
 
 
 <!DOCTYPE html>
+<!-- build: imports "Secure app fixes" CSV without moving cash - 2026-10-07 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14376,8 +14377,34 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     return out;
   }
 
+  // "Secure app fixes for 401k app" file (made by the Secure app's vs-401k pop-up): the exact
+  // trades the Secure app has and this app is missing. Historical trades — the broker's cash already
+  // reflects them — so they are imported WITHOUT moving the cash fund (noCash).
+  function parseSecureFixes(lines, fileName) {
+    const hi = lines.findIndex(l => /date/i.test(l) && /action/i.test(l) && /platform/i.test(l));
+    if (hi < 0) return [];
+    const head = splitCSVLine(lines[hi]).map(h => h.toLowerCase().trim());
+    const ix = n => head.indexOf(n);
+    const iD = ix('date'), iA = ix('action'), iS = ix('symbol'), iQ = ix('quantity'), iP = ix('price'),
+          iPl = ix('platform'), iAc = ix('account type'), iN = ix('name');
+    const out = [];
+    for (let r = hi + 1; r < lines.length; r++) {
+      if (!lines[r].trim()) continue;
+      const c = splitCSVLine(lines[r]);
+      const type = /sell/i.test(c[iA]) ? 'sell' : /buy/i.test(c[iA]) ? 'buy' : null;
+      const sym = String(c[iS] || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+      const qty = Math.abs(parseFloat(c[iQ]) || 0), px = Math.abs(parseFloat(c[iP]) || 0);
+      if (!type || !sym || !qty) continue;
+      out.push({ type, symbol: sym, fund: '', date: normDate(c[iD]), shares: qty, price: px,
+        platform: c[iPl] || 'Fidelity', accountType: c[iAc] || 'Regular Brokerage',
+        name: iN >= 0 ? (c[iN] || '') : '', kind: '', source: fileName, noCash: true });
+    }
+    return out;
+  }
+
   function parseBrokerCSV(text, fileName) {
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    if (/^\s*"?Secure app fixes for 401k app/i.test(lines[0] || '')) return parseSecureFixes(lines, fileName);
     const nb = lines.findIndex(l => /investment/i.test(l) && /transaction type/i.test(l) && /shares\/unit|amount/i.test(l));
     if (nb >= 0) return parseNetBenefits(lines, nb, (lines[nb].split('\t').length > lines[nb].split(',').length ? '\t' : ','), fileName);
     const hi = lines.findIndex(l => /symbol|instrument/i.test(l) && /action|transaction type|trans code|type/i.test(l));
@@ -14453,7 +14480,9 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       g.forEach(t => { t._combined = `these ${g.length} rows add up to your single entry: ${e.tx.date} · ${+e.tx.shares} sh`; });
     });
     for (const t of incoming) {
-      const pool = bySym[t.symbol] || [];
+      // rows from the Secure app's fixes file were already checked per account there, so only
+      // compare them with trades in the SAME account here
+      const pool = t.noCash ? (bySym[t.symbol] || []).filter(e => e.tx.platform === t.platform && e.tx.accountType === t.accountType) : (bySym[t.symbol] || []);
       if (t._combined) { t.status = 'possible'; t.selected = false; t.note = t._combined; delete t._combined; pos++; seen.push(t); merged.push(t); continue; }
       const core = e => !e.used && e.tx.type === t.type && sameShares(e.tx.shares, t.shares) && samePrice(e.tx.price, t.price);
       let hit = pool.find(e => core(e) && e.tx.date === t.date);
@@ -14602,7 +14631,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const existing = (pd.transactions || [])
       .filter(t => ['BUY', 'SELL'].includes(String(t.transactionType || '').toUpperCase()))
       .map(t => ({ symbol: String(t.symbol || '').trim().toUpperCase(), type: String(t.transactionType).toLowerCase(),
-                   date: normDate(t.date), shares: Math.abs(+t.shares || 0), price: Math.abs(+t.price || 0), accountType: t.accountType }));
+                   date: normDate(t.date), shares: Math.abs(+t.shares || 0), price: Math.abs(+t.price || 0), accountType: t.accountType, platform: t.platform }));
     const included = rows.filter(r => isRetAcct(r.accountType) && cutoff[r.accountType] && r.date <= cutoff[r.accountType]);
     included.forEach(r => { r.status = 'included'; r.selected = false; r.note = `already in your balance (app updated through ${cutoff[r.accountType]})`; });
     result = smartMerge(rows.filter(r => !included.includes(r)).map(r => { r.symbol = String(r.symbol).toUpperCase(); return r; }), existing);
@@ -14710,14 +14739,14 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
         const name = t.appName || (prior && prior.name ? prior.name : (t.name || t.symbol));
         const main = { id: idBase + (n++) * 0.001 + Math.random() * 0.0001, transactionType: t.type.toUpperCase(), date: t.date,
           symbol: t.symbol, name, type, shares: t.shares, price: t.price, accountType: t.accountType, platform: t.platform,
-          dividend: 0, source: isRetAcct(t.accountType) ? 'retirement-csv' : 'broker-csv', importBatch: batch,
+          dividend: 0, source: t.noCash ? 'secure-sync' : isRetAcct(t.accountType) ? 'retirement-csv' : 'broker-csv', importBatch: batch,
           notes: t.kind && isRetAcct(t.accountType) ? t.kind : undefined };
         if (main.notes === undefined) delete main.notes;
         pd.transactions.push(main);
         // fund the trade from / into the account's cash fund, exactly like a manual entry
         const cash = holdings.filter(h => h.accountType === t.accountType && h.platform === t.platform && isCashType(h.type))
                              .sort((a, b) => (b.totalShares || 0) - (a.totalShares || 0))[0];
-        if (cash) {
+        if (cash && !t.noCash) {
           pd.transactions.push({ id: main.id + 0.0005, transactionType: t.type === 'buy' ? 'SELL' : 'BUY', date: t.date,
             accountType: t.accountType, platform: cash.platform, symbol: cash.symbol, name: cash.name, shares: t.shares * t.price,
             price: 1, type: cash.type, source: 'broker-csv-cash', importBatch: batch });
