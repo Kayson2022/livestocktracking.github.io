@@ -18,7 +18,7 @@
 
 
 <!DOCTYPE html>
-<!-- build: Secure fixes CSV without cash + Fidelity 401(k) "Contributions" rows imported - 2026-10-07 -->
+<!-- build: Secure fixes CSV + 401(k) Contributions import + tax reports FIFO per broker account - 2026-10-07 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -8438,7 +8438,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       const shares = parseFloat(t.shares);
       const price  = parseFloat(t.price);
       if (!t.symbol || isNaN(shares) || isNaN(price)) return;
-      const key = `${t.symbol}|||${t.accountType}`;
+      const key = `${t.symbol}|||${t.accountType}|||${t.platform || ''}`;   // FIFO per account (broker + type)
 
       if (type === 'BUY') {
         if (!lots[key]) lots[key] = [];
@@ -8676,7 +8676,7 @@ body.compact-mode .stat-card { padding:14px 10px !important; }
       const shares = parseFloat(t.shares);
       const price  = parseFloat(t.price);
       if (!t.symbol || isNaN(shares) || isNaN(price)) return;
-      const key = `${t.symbol}|||${t.accountType}`;
+      const key = `${t.symbol}|||${t.accountType}|||${t.platform || ''}`;   // FIFO per account (broker + type)
 
       if (type === 'BUY') {
         if (!lots[key]) lots[key] = [];
@@ -9060,7 +9060,7 @@ function buildTaxLossSection(lots, realizedRows, selectedYear, colorGLfn, pillfn
     const type  = (t.transactionType||'').toUpperCase();
     const sh    = parseFloat(t.shares), pr = parseFloat(t.price);
     if (!t.symbol || isNaN(sh) || isNaN(pr)) return;
-    const key = `${t.symbol}|||${t.accountType}`;
+    const key = `${t.symbol}|||${t.accountType}|||${t.platform || ''}`;   // FIFO per account (broker + type)
     if (type === 'BUY') {
       if (!taxLots[key]) taxLots[key] = [];
       taxLots[key].push({ shares: sh, price: pr, date: t.date });
@@ -9260,7 +9260,7 @@ if (_origBuild) {
         const type = (t.transactionType||'').toUpperCase();
         const sh = parseFloat(t.shares), pr = parseFloat(t.price);
         if (!t.symbol || isNaN(sh) || isNaN(pr)) return;
-        const key = `${t.symbol}|||${t.accountType}`;
+        const key = `${t.symbol}|||${t.accountType}|||${t.platform || ''}`;   // FIFO per account (broker + type)
         if (type === 'BUY') { if (!lots[key]) lots[key]=[]; lots[key].push({shares:sh,price:pr,date:t.date}); }
         else if (type === 'SELL') {
           if (!lots[key]) lots[key]=[];
@@ -11016,13 +11016,13 @@ window.runTaxPlan = function() {
   // FIFO realized gains YTD
   const lotsMap = {};
   txns.filter(t => t.type === 'BUY').sort((a,b) => new Date(a.date)-new Date(b.date)).forEach(t => {
-    const k = t.symbol + '|' + t.accountType;
+    const k = t.symbol + '|' + t.accountType + '|' + (t.platform || '');
     if (!lotsMap[k]) lotsMap[k] = [];
     lotsMap[k].push({ date: t.date, price: parseFloat(t.price)||0, rem: parseFloat(t.shares)||0 });
   });
   let stGain = 0, ltGain = 0;
   txns.filter(t => t.type === 'SELL' && new Date(t.date).getFullYear() === year).forEach(sell => {
-    const lots = (lotsMap[sell.symbol + '|' + sell.accountType] || []);
+    const lots = (lotsMap[sell.symbol + '|' + sell.accountType + '|' + (sell.platform || '')] || []);
     let need = parseFloat(sell.shares)||0, cost = 0, oldestDate = null;
     for (const lot of lots) {
       if (need <= 0) break;
