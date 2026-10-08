@@ -18,7 +18,7 @@
 
 
 <!DOCTYPE html>
-<!-- build: imports "Secure app fixes" CSV without moving cash - 2026-10-07 -->
+<!-- build: Secure fixes CSV without cash + Fidelity 401(k) "Contributions" rows imported - 2026-10-07 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14419,6 +14419,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const iQty = col('quantity', 'shares');
     const iPx = col('price', 'share price');
     const iAcct = col('account');
+    const iAmt = col('amount');
     const ht = head.join('|');
     const broker = /run date/.test(ht) ? 'Fidelity'
       : /symbol\/cusip|account registration|account nickname/.test(ht) ? 'Merrill Edge'
@@ -14430,19 +14431,26 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       if (!lines[r].trim()) continue;
       const c = splitCSVLine(lines[r], delim);
       const act = String(c[iAct] || '').toLowerCase();
+      const acct = iAcct >= 0 ? String(c[iAcct] || '') : '';
+      const desc = iDesc >= 0 ? String(c[iDesc] || '') : '';
+      const acct401 = RE_401K.test(acct);
       let type = null;
       if (/\bsold\b|\bsell\b|\bsale\b/.test(act)) type = 'sell';
       else if (/\bbought\b|\bbuy\b|\bpurchase\b|reinvest/.test(act)) type = 'buy';
+      // Fidelity Activity & Orders lists 401(k)/529 payroll contributions with Action "Contributions"
+      // (no "bought"); each one buys shares of the fund named in Description
+      else if (/contribution/.test(act) && (acct401 || RE_529.test(acct))) type = 'buy';
       if (!type) continue;
       // 529 files leave Symbol empty and put the fund code in the Action text, e.g. "(NHFSMKX98)"
       let sym = String(c[iSym] || '').replace(/[^A-Za-z0-9.\-]/g, '').toUpperCase();
       if (!sym) { const m = String(c[iAct] || '').match(/\(([A-Z0-9]{4,12})\)/); if (m) sym = m[1]; }
+      // 401(k) funds often have no ticker: use the fund name; process() maps it to your holding
+      if (!sym && (acct401 || RE_529.test(acct)) && desc.trim()) sym = desc.trim().toUpperCase();
       const qty = Math.abs(parseFloat(String(c[iQty] || '').replace(/[$,()]/g, '')) || 0);
-      const px = Math.abs(parseFloat(String(c[iPx] || '').replace(/[$,()]/g, '')) || 0);
+      let px = Math.abs(parseFloat(String(c[iPx] || '').replace(/[$,()]/g, '')) || 0);
+      if (!px && qty && iAmt >= 0) px = Math.abs(parseFloat(String(c[iAmt] || '').replace(/[$,()]/g, '')) || 0) / qty;
       if (!sym || !qty) continue;
-      const acct = iAcct >= 0 ? String(c[iAcct] || '') : '';
-      const desc = iDesc >= 0 ? String(c[iDesc] || '') : '';
-      const is529 = RE_529.test(acct) || /contribution/i.test(act) && /^[A-Z]{2}\s/.test(desc) || /^[A-Z]{2}[A-Z]{3,}\d{2}$/.test(sym);
+      const is529 = !acct401 && (RE_529.test(acct) || /contribution/i.test(act) && /^[A-Z]{2}\s/.test(desc) || /^[A-Z]{2}[A-Z]{3,}\d{2}$/.test(sym));
       const is401 = !is529 && RE_401K.test(acct);
       if (SKIP_ACCOUNT_RE.test(acct) || (iAcct < 0 && SKIP_ACCOUNT_RE.test(fileName))) {
         skipped.retirement++; skipped.accounts.add(acct.replace(/\s*[A-Z]?\d{5,}\s*/g, ' ').trim() || fileName); continue;
@@ -14591,6 +14599,21 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     let hit = syms.find(s => s.toUpperCase() === nc || s.toUpperCase() === fund) ||
               syms.find(s => normName(s) === nf) ||
               syms.find(s => nf && (normName(s).startsWith(nf) || nf.startsWith(normName(s))));
+    // Same fund written differently ("SM MIDCAP CORE INDEX" vs "SM MID CAP CORE IDX"):
+    // compare with spaces removed and common abbreviations expanded, then by shared words.
+    if (!hit && nf) {
+      const canon = x => normName(x).replace(/\bIDX\b/g, 'INDEX').replace(/\bINTL\b/g, 'INTERNATIONAL')
+        .replace(/\bMKT\b/g, 'MARKET').replace(/\bEQ\b/g, 'EQUITY').replace(/\bCP\b/g, 'CAP').replace(/\bSMCP\b/g, 'SMALL CAP');
+      const squash = x => canon(x).replace(/\s+/g, '');
+      hit = syms.find(s => squash(s) === squash(fund));
+      if (!hit) {
+        const words = x => new Set(canon(x).replace(/MIDCAP/g, 'MID CAP').replace(/SMALLCAP/g, 'SMALL CAP').replace(/LARGECAP/g, 'LARGE CAP').split(' ').filter(Boolean));
+        const fw = words(fund);
+        const scored = syms.map(s => { const sw = words(s); const common = [...fw].filter(w => sw.has(w)).length;
+          return { s, score: common / Math.max(fw.size, sw.size) }; }).sort((a, b) => b.score - a.score);
+        if (scored[0] && scored[0].score >= 0.6 && (!scored[1] || scored[0].score > scored[1].score)) hit = scored[0].s;
+      }
+    }
     if (!hit && acct === ACCT_529 && syms.length === 1) hit = syms[0];   // your 529 is a single holding
     if (!hit) return null;
     const t = txs.find(x => x.symbol === hit);
@@ -14769,7 +14792,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       btn.disabled = false; updateBtn();
     }
   }
-  window.__k401ImportTest = { parseBrokerCSV, smartMerge, normDate, setSkipped: s => { skipped = s; }, process: () => process() };
+  window.__k401ImportTest = { parseBrokerCSV, smartMerge, normDate, matchHolding, setSkipped: s => { skipped = s; }, process: () => process() };
 })();
 </script>
 
