@@ -2231,6 +2231,35 @@ html, body { overflow-x: clip !important; max-width: 100%; }
         // Your own Cloudflare Worker — no rate limits, no CORS issues, handles parallel requests fine
         const YAHOO_PROXY = 'https://yahoo-proxy.giolamchieu1975.workers.dev';
 
+        /* ── Mutual fund NAV timing (2026-10-09, same rule as the Secure app) ──
+           A mutual fund (FXAIX, FSELX…) gets one price a day, after the close. Until today's NAV
+           is out, Yahoo's "current vs previous close" for a fund is YESTERDAY's move, which was
+           being added to Today's G/L. Rule: a fund's change counts only when its quote is from
+           the current session; otherwise it is 0 for today. ETFs and stocks are not affected.
+           401(k)/529 holdings keep their own manual-price rule. */
+        function etDateKey(d) {
+            return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        }
+        function currentSessionKey() {
+            const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const mins = et.getHours() * 60 + et.getMinutes();
+            const d = new Date(et);
+            if (d.getDay() >= 1 && d.getDay() <= 5 && mins < 570) d.setDate(d.getDate() - 1);   // before 9:30 → previous session
+            while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        function fundNavIsStale(h) {
+            if (!h || h.type !== 'Mutual Fund') return false;
+            if (h.accountType === '401(k)' || h.accountType === '529 College Saving') return false;
+            const qt = (priceCache[h.symbol] || {}).quoteTime;
+            if (qt) return etDateKey(new Date(qt * 1000)) < currentSessionKey();
+            // no quote time saved yet: assume stale while the market is open, before NAVs are out
+            const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const mins = et.getHours() * 60 + et.getMinutes();
+            return et.getDay() >= 1 && et.getDay() <= 5 && mins >= 570 && mins < 1080;
+        }
+        window.fundNavIsStale = fundNavIsStale;
+
         async function fetchPriceFromYahooQuote(symbol) {
             const sym = symbol.toUpperCase().trim();
             const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
@@ -2261,7 +2290,8 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 const quoteType = meta.instrumentType || null;
 
                 console.log(`Yahoo ✅ ${sym}: cur=$${price} prev=$${previousClosePrice}`);
-                return { currentPrice: price, previousClosePrice, name, quoteType };
+                const quoteTime = Number(meta.regularMarketTime) || null;   // unix seconds — tells if a fund's NAV is today's
+                return { currentPrice: price, previousClosePrice, name, quoteType, quoteTime };
 
             } catch (err) {
                 console.warn(`Yahoo Worker failed for ${sym}: ${err.message}`);
@@ -2547,6 +2577,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                             priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                             priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice ?? null;
                         }
+                        priceCache[holding.symbol].quoteTime = priceData.quoteTime ?? null;
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
 
                         const finalPc  = priceCache[holding.symbol].previousClosePrice;
@@ -3816,6 +3847,8 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                         const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
                         if (manualTimestamp < twentyFourHoursAgo) canIncludeDailyGL = false;
                     }
+                    const navPending = fundNavIsStale(h);   // fund still on yesterday's NAV → 0 today, not a "missing" symbol
+                    if (navPending) canIncludeDailyGL = false;
 
                     if (canIncludeDailyGL && h.previousClosePrice !== null && h.previousClosePrice > 0) {
                         const symbolGL = currentValue - ((Number(h.totalShares) || 0) * h.previousClosePrice);
@@ -4025,9 +4058,10 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                         canIncludeDailyGL = false;
                     }
                 }
+                if (fundNavIsStale(h)) canIncludeDailyGL = false;
 
                 if (canIncludeDailyGL && h.previousClosePrice !== null && h.previousClosePrice > 0) {
-                    return sum + ((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
+                    return sum +((h.currentPrice - h.previousClosePrice) * (Number(h.totalShares) || 0));
                 }
                 return sum;
             }, 0);
@@ -4198,9 +4232,11 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     canIncludeDailyGL = false;
                 }
             }
-            
+            const navPending = fundNavIsStale(h);
+            if (navPending) { canIncludeDailyGL = false; todayGainLossAmount = 0; todayGainLossPercentage = 0; }
+
             let todayGLLabelClass = todayGainLossAmount >= 0 ? 'positive' : 'negative';
-            let todayGLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayGainLossAmount) : (isRetirementOr529 ? '(Stale)' : '...');
+            let todayGLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayGainLossAmount) : (navPending ? '$0.00 (NAV pending)' : isRetirementOr529 ? '(Stale)' : '...');
             let todayGLPercentDisplay = hasLivePrice && canIncludeDailyGL ? formatPercentage(todayGainLossPercentage) : '...';
 
             if (isWatchlist) {
@@ -4347,6 +4383,8 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     canIncludeDailyGL = false;
                 }
             }
+            const navPending = fundNavIsStale(holdings[0]);
+            if (navPending) canIncludeDailyGL = false;
 
             if (canIncludeDailyGL && hasLivePrice && previousClosePrice > 0) {
                 todayPL = (currentPrice - previousClosePrice) * totalShares;
@@ -4357,7 +4395,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             }
             
             let todayPLLabelClass = todayPL >= 0 ? 'positive' : 'negative';
-            let todayPLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayPL) : (isRetirementOr529 ? '(Stale)' : '...');
+            let todayPLAmountDisplay = hasLivePrice && canIncludeDailyGL ? formatCurrency(todayPL) : (navPending ? '$0.00 (NAV pending)' : isRetirementOr529 ? '(Stale)' : '...');
             let todayPLPercentDisplay = hasLivePrice && canIncludeDailyGL ? formatPercentage(todayPLPercent) : '...';
             // --- END MODIFIED G/L LOGIC ---
 
@@ -5264,6 +5302,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
+                    priceCache[holding.symbol].quoteTime = priceData.quoteTime ?? null;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
 
                     // Use previousClosePrice vs currentPrice for gain/loss —
@@ -14985,12 +15024,23 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   function btn() { const n = plan.filter(p => p.sel).length, b = $('kcsGo'); b.disabled = !n; b.textContent = n ? `✅ Apply ${n} adjustment(s)` : 'Nothing to apply'; }
 
   async function onFiles(files) {
-    const found = {}, msgs = [];
+    const found = {}, msgs = [], byBroker = {};
+    // Two files from the same broker (e.g. OfxDownload (5).csv and (6).csv) must not be added
+    // together: keep only the most recently downloaded one per broker.
     for (const f of files) {
-      try { const r = readCash(await f.text(), f.name); msgs.push(`${f.name}: ${r.broker}`); r.accts.forEach(a => {
-        const o = found[a.key] = found[a.key] || { ...a, cash: 0, parts: [] }; o.cash += a.cash; o.parts.push(...a.parts); if (a.fund && !o.fund) o.fund = a.fund; }); }
-      catch (e) { msgs.push('⚠️ ' + e.message); }
+      try {
+        const r = readCash(await f.text(), f.name);
+        const prev = byBroker[r.broker];
+        if (prev && (prev.f.lastModified || 0) >= (f.lastModified || 0)) { msgs.push(`${f.name}: ${r.broker} — skipped, older than ${prev.f.name}`); continue; }
+        if (prev) msgs.push(`${prev.f.name}: ${r.broker} — skipped, older than ${f.name}`);
+        byBroker[r.broker] = { f, r };
+      } catch (e) { msgs.push('⚠️ ' + e.message); }
     }
+    Object.values(byBroker).forEach(({ f, r }) => {
+      msgs.push(`${f.name}: ${r.broker} (downloaded ${f.lastModified ? new Date(f.lastModified).toLocaleString() : '?'})`);
+      r.accts.forEach(a => {
+        const o = found[a.key] = found[a.key] || { ...a, cash: 0, parts: [] }; o.cash += a.cash; o.parts.push(...a.parts); if (a.fund && !o.fund) o.fund = a.fund; });
+    });
     const ac = appCash();
     plan = Object.values(found).map(a => {
       const funds = (ac[a.key] || []).sort((x, y) => (y.totalShares || 0) - (x.totalShares || 0));
