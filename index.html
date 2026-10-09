@@ -2248,8 +2248,14 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
             return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
         }
+        function isMutualFundHolding(h) {
+            if (!h) return false;
+            if (h.type === 'Mutual Fund') return true;
+            // Yahoo's own label wins over how the holding was typed (FXAIX entered as "Stock" still counts)
+            return String((priceCache[h.symbol] || {}).quoteType || '').toUpperCase() === 'MUTUALFUND';
+        }
         function fundNavIsStale(h) {
-            if (!h || h.type !== 'Mutual Fund') return false;
+            if (!isMutualFundHolding(h)) return false;
             if (h.accountType === '401(k)' || h.accountType === '529 College Saving') return false;
             const qt = (priceCache[h.symbol] || {}).quoteTime;
             if (qt) return etDateKey(new Date(qt * 1000)) < currentSessionKey();
@@ -2259,6 +2265,20 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             return et.getDay() >= 1 && et.getDay() <= 5 && mins >= 570 && mins < 1080;
         }
         window.fundNavIsStale = fundNavIsStale;
+        // Console check: navCheck() → one row per fund-like holding, shows why it is / isn't counted today
+        window.navCheck = function () {
+            const rows = calculateHoldingsAndCash()
+                .filter(h => isMutualFundHolding(h) || /^[A-Z]{4}X$/.test(String(h.symbol || '')))
+                .map(h => {
+                    const c = priceCache[h.symbol] || {};
+                    return { symbol: h.symbol, type: h.type, account: h.accountType, yahooType: c.quoteType || '-',
+                             quoteDateET: c.quoteTime ? etDateKey(new Date(c.quoteTime * 1000)) : '(none — press Refresh)',
+                             session: currentSessionKey(), cur: c.currentPrice, prev: c.previousClosePrice,
+                             countedToday: !fundNavIsStale(h) };
+                });
+            console.table(rows);
+            return rows.length + ' fund row(s). Build: NAV-fix 2026-10-09b';
+        };
 
         async function fetchPriceFromYahooQuote(symbol) {
             const sym = symbol.toUpperCase().trim();
@@ -2578,6 +2598,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                             priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice ?? null;
                         }
                         priceCache[holding.symbol].quoteTime = priceData.quoteTime ?? null;
+                        if (priceData.quoteType) priceCache[holding.symbol].quoteType = priceData.quoteType;
                         priceCache[holding.symbol].lastFetchTimestamp = Date.now();
 
                         const finalPc  = priceCache[holding.symbol].previousClosePrice;
@@ -5303,6 +5324,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     priceCache[holding.symbol].currentPrice = priceData.currentPrice;
                     priceCache[holding.symbol].previousClosePrice = priceData.previousClosePrice;
                     priceCache[holding.symbol].quoteTime = priceData.quoteTime ?? null;
+                    if (priceData.quoteType) priceCache[holding.symbol].quoteType = priceData.quoteType;
                     priceCache[holding.symbol].lastFetchTimestamp = Date.now();
 
                     // Use previousClosePrice vs currentPrice for gain/loss —
