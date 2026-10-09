@@ -18,7 +18,7 @@
 
 
 <!DOCTYPE html>
-<!-- build: Secure fixes CSV + 401(k) Contributions import + tax reports FIFO per broker account - 2026-10-07 -->
+<!-- build: Secure fixes CSV + 401(k) Contributions import + tax reports FIFO per broker account + Sync cash with broker - 2026-10-07 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -7137,6 +7137,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             <div class="k-data-grid">
                 <button type="button" class="k-data-btn" onclick="exportCSV()">📤 Export Transactions (CSV)</button>
                 <button type="button" class="k-data-btn" onclick="window.openBrokerImport()" style="border-color:#10b981;">📥 Import Broker CSV</button>
+                <button type="button" class="k-data-btn" onclick="window.openCashSync()" style="border-color:#10b981;">💵 Sync cash with broker</button>
                 <button type="button" class="k-data-btn" onclick="openCSVImportModal()">📊 Import from JSON Backup</button>
                 <button type="button" class="k-data-btn" onclick="var p=document.getElementById('restorePanel');p.style.display=p.style.display==='none'?'block':'none'">📥 Restore from Email Backup</button>
             </div>
@@ -14232,6 +14233,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     // Data tools live at the very bottom of the page — offer them here too
     if (key === 'util') {
       [['📥 Import Broker CSV', function () { window.openBrokerImport && window.openBrokerImport(); }],
+       ['💵 Sync cash with broker', function () { window.openCashSync && window.openCashSync(); }],
        ['📤 Export Transactions (CSV)', function () { if (typeof exportCSV === 'function') exportCSV(); }],
        ['🗄️ Go to Data Transfer & Backup', function () { var d = document.getElementById('dataTransfer'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }]
       ].forEach(function (x) {
@@ -14877,6 +14879,180 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   };
 })();
 </script>
+<script>
+/* ═══ 💵 Sync cash with broker (2026-10-07) ═══
+   Cash funds (SPAXX, VMFXX, Schwab cash, Merrill sweep) drift because every BUY/SELL moves them by
+   an estimate. This reads the brokers' Positions CSVs (the same files used for 🧮 Compare in the
+   Secure app), takes the real cash balance of each account, and adds ONE adjustment transaction per
+   account so the app's cash equals the broker's. A Backup Center snapshot is saved first. */
+(function () {
+  const $ = id => document.getElementById(id);
+  const CASH = /^(SPAXX|FDRXX|FZFXX|SPRXX|FCASH|CORE|SWVXX|SNVXX|SNSXX|SNOXX|VMFXX|VMRXX|VUSXX|CASH)$/;
+  const SKIP = /401|529|hsa|health/i;
+  const money = n => (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const num = s => { let t = String(s || '').replace(/[$,\s]/g, ''); const neg = /^\(.*\)$/.test(t) || /^-/.test(t); t = t.replace(/[()\-+]/g, ''); const v = parseFloat(t); return isNaN(v) ? null : (neg ? -v : v); };
+  const isCash = t => { const s = String(t || '').toLowerCase(); return s.includes('cash') || (s.includes('money') && s.includes('market')) || s.replace(/[^a-z]/g, '') === 'mm'; };
+
+  function parseCSV(text) {
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+      else cell += c;
+    }
+    if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(r => r.map(x => x.replace(/^﻿/, '').trim()));
+  }
+
+  // → [{ key:'Regular Brokerage|Fidelity', accountType, platform, cash, fund, detail }]
+  function readCash(text, fileName) {
+    const rows = parseCSV(text), out = {};
+    const add = (accountType, platform, v, fund, what) => {
+      const k = accountType + '|' + platform;
+      const o = out[k] = out[k] || { key: k, accountType, platform, cash: 0, fund: fund || '', parts: [] };
+      o.cash += v; if (fund && !o.fund) o.fund = fund; o.parts.push(what + ' ' + money(v));
+    };
+    // Merrill Edge: "Positions","Quantity",… ; cash sweep rows start with a CUSIP number
+    const mh = rows.findIndex(r => /^positions$/i.test(r[0] || '') && /^quantity$/i.test(r[1] || ''));
+    if (mh >= 0) {
+      const h = rows[mh], iVal = h.findIndex(c => /^value$|market value/i.test(c));
+      rows.forEach((r, i) => {
+        if (i <= mh) return;
+        const first = String(r[0] || '').split(/\s+/)[0] || '';
+        if (/^\d+$/.test(first)) { const v = num(r[iVal >= 0 ? iVal : 1]); if (v != null) add('Regular Brokerage', 'Merrill Edge', v, '', r[0]); }
+      });
+      return { broker: 'Merrill Edge', accts: Object.values(out) };
+    }
+    const hi = rows.findIndex(r => r.some(c => /^symbol$/i.test(c)));
+    if (hi < 0) throw new Error(fileName + ': no "Symbol" column — is it a Positions file?');
+    const h = rows[hi], col = re => h.findIndex(c => re.test(c));
+    const iSym = col(/^symbol$/i), iDesc = col(/^description$|investment name/i);
+    let broker, iVal;
+    if (col(/^account name$/i) >= 0) { broker = 'Fidelity'; iVal = col(/^current value$/i); }
+    else if (col(/investment name/i) >= 0 || col(/^share price$/i) >= 0) { broker = 'Vanguard'; iVal = col(/^total value$/i); }
+    else if (col(/mkt val|market value/i) >= 0) { broker = 'Charles Schwab'; iVal = col(/mkt val|market value/i); }
+    else throw new Error(fileName + ': could not tell which broker this Positions file is from.');
+    if (iVal < 0) throw new Error(fileName + ': no value column found.');
+    const iAcct = col(/^account name$/i);
+    let started = false, stopped = false;
+    rows.slice(hi + 1).forEach(r => {
+      if (stopped) return;
+      if (r.every(c => c === '')) { if (started) stopped = true; return; }
+      if (r.some(c => /^(trade date|settlement date|transaction type)$/i.test(c))) { stopped = true; return; }
+      started = true;
+      const symRaw = String(r[iSym] || ''), sym = symRaw.replace(/\*+/g, '').trim().toUpperCase();
+      const desc = iDesc >= 0 ? String(r[iDesc] || '') : '';
+      const v = num(r[iVal]); if (v == null) return;
+      const isCashRow = CASH.test(sym) || /pending activity/i.test(symRaw + ' ' + desc) || /cash & cash investments|^cash$/i.test(symRaw) || /money market|cash reserves|core position/i.test(desc);
+      if (!isCashRow) return;
+      let accountType = 'Regular Brokerage';
+      if (broker === 'Fidelity') {
+        const a = iAcct >= 0 ? String(r[iAcct] || '') : '';
+        if (SKIP.test(a)) return;
+        if (/roth/i.test(a)) accountType = 'Roth IRA';
+      }
+      add(accountType, broker, v, CASH.test(sym) ? sym : '', /pending/i.test(symRaw + desc) ? 'pending activity' : (sym || symRaw));
+    });
+    return { broker, accts: Object.values(out) };
+  }
+
+  function appCash() {
+    const hs = (window.calculateHoldingsAndCash ? window.calculateHoldingsAndCash() : []).filter(h => isCash(h.type));
+    const by = {};
+    hs.forEach(h => { const k = h.accountType + '|' + h.platform; (by[k] = by[k] || []).push(h); });
+    return by;
+  }
+
+  let plan = [];
+  function render() {
+    const box = $('kcsOut');
+    if (!plan.length) { box.innerHTML = '<p style="font-size:.85rem;">No cash rows found in these files.</p>'; return; }
+    box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.86rem;margin-top:10px;">
+      <thead><tr style="text-align:left;color:var(--text-color-secondary);font-size:.75rem;"><th></th><th>Account</th><th style="text-align:right">Broker</th><th style="text-align:right">This app</th><th style="text-align:right">Adjustment</th></tr></thead>
+      <tbody>${plan.map((p, i) => `<tr style="border-top:1px solid var(--border-color);">
+        <td><input type="checkbox" data-i="${i}" ${p.sel ? 'checked' : ''} ${Math.abs(p.diff) < 0.005 ? 'disabled' : ''}></td>
+        <td>${esc(p.platform)} · ${esc(p.accountType)}<div style="font-size:.7rem;color:var(--text-color-secondary);">${esc(p.parts.join(' + '))}${p.fundSym ? ' → into ' + esc(p.fundSym) : ''}</div></td>
+        <td style="text-align:right">${money(p.cash)}</td><td style="text-align:right">${money(p.app)}</td>
+        <td style="text-align:right;font-weight:700;color:${Math.abs(p.diff) < 0.005 ? 'var(--text-color-secondary)' : '#f59e0b'}">${Math.abs(p.diff) < 0.005 ? '✓ matches' : (p.diff > 0 ? '+' : '') + money(p.diff)}</td></tr>`).join('')}</tbody></table>
+      <p style="font-size:.75rem;color:var(--text-color-secondary);margin-top:8px;">Each ticked account gets ONE transaction on its cash fund dated today (BUY to add, SELL to remove) so the app's cash equals the broker's. Use files downloaded after the market closes. A Backup Center snapshot is saved first.</p>`;
+    box.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { plan[+cb.dataset.i].sel = cb.checked; btn(); });
+    btn();
+  }
+  function btn() { const n = plan.filter(p => p.sel).length, b = $('kcsGo'); b.disabled = !n; b.textContent = n ? `✅ Apply ${n} adjustment(s)` : 'Nothing to apply'; }
+
+  async function onFiles(files) {
+    const found = {}, msgs = [];
+    for (const f of files) {
+      try { const r = readCash(await f.text(), f.name); msgs.push(`${f.name}: ${r.broker}`); r.accts.forEach(a => {
+        const o = found[a.key] = found[a.key] || { ...a, cash: 0, parts: [] }; o.cash += a.cash; o.parts.push(...a.parts); if (a.fund && !o.fund) o.fund = a.fund; }); }
+      catch (e) { msgs.push('⚠️ ' + e.message); }
+    }
+    const ac = appCash();
+    plan = Object.values(found).map(a => {
+      const funds = (ac[a.key] || []).sort((x, y) => (y.totalShares || 0) - (x.totalShares || 0));
+      const app = funds.reduce((s, h) => s + (+h.totalShares || 0), 0), diff = +(a.cash - app).toFixed(2);
+      return { ...a, app, diff, sel: Math.abs(diff) >= 0.01, fundSym: (funds[0] || {}).symbol || a.fund || (a.platform === 'Charles Schwab' ? 'CASH & MONEY MARKET' : a.platform === 'Merrill Edge' ? 'ML DIRECT DEPOSIT' : 'CASH'),
+               fundName: (funds[0] || {}).name, fundType: (funds[0] || {}).type || 'Money Market' };
+    }).sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff));
+    $('kcsFiles').textContent = msgs.join(' · ');
+    render();
+  }
+
+  async function apply() {
+    const chosen = plan.filter(p => p.sel && Math.abs(p.diff) >= 0.01);
+    if (!chosen.length) return;
+    if (!confirm(`Adjust cash in ${chosen.length} account(s)?\n\n` + chosen.map(p => `${p.platform} ${p.accountType}: ${money(p.app)} → ${money(p.cash)}`).join('\n'))) return;
+    const b = $('kcsGo'); b.disabled = true; b.textContent = 'Saving…';
+    try {
+      if (typeof window.takeVerifiedSnapshot === 'function') {
+        const s = await window.takeVerifiedSnapshot('Auto-saved before cash sync with broker');
+        if (!s && !confirm('Could not save a safety snapshot first. Continue with NO undo?')) { btn(); return; }
+      }
+      const pd = window.portfolioData; pd.transactions = pd.transactions || [];
+      const d = new Date(), today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const batch = 'cash-sync-' + Date.now();
+      chosen.forEach((p, i) => pd.transactions.push({ id: Date.now() + i * 0.001, transactionType: p.diff > 0 ? 'BUY' : 'SELL', date: today,
+        symbol: p.fundSym, name: p.fundName || p.fundSym, type: p.fundType, shares: Math.abs(p.diff), price: 1,
+        accountType: p.accountType, platform: p.platform, dividend: 0, source: 'cash-sync', importBatch: batch,
+        notes: `Cash synced to broker Positions file: ${money(p.app)} → ${money(p.cash)}` }));
+      const h = typeof window.__getFirebaseHandles === 'function' ? window.__getFirebaseHandles() : {};
+      if (h.logActivity) h.logActivity(`Cash synced with broker for ${chosen.length} account(s) (batch ${batch}).`);
+      if (h.saveDataToFirestore) await h.saveDataToFirestore(); else throw new Error('save function not available');
+      if (h.updateDisplay) await h.updateDisplay();
+      $('kcsModal').remove();
+      alert(`✅ Cash updated in ${chosen.length} account(s).\n\nTo undo: Backup Center → restore "Auto-saved before cash sync with broker".`);
+    } catch (e) { alert('Cash sync failed: ' + e.message); btn(); }
+  }
+
+  window.openCashSync = function () {
+    let ov = $('kcsModal'); if (ov) ov.remove();
+    plan = [];
+    ov = document.createElement('div'); ov.id = 'kcsModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:flex-start;justify-content:center;padding:14px;overflow:auto;';
+    ov.innerHTML = `<div style="background:var(--card-bg-color);color:var(--text-color);width:100%;max-width:760px;border-radius:14px;border:1px solid var(--border-color);padding:18px 20px;box-shadow:0 20px 50px rgba(0,0,0,0.35);">
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-size:1.1rem;font-weight:800;">💵 Sync cash with broker</div>
+        <button type="button" onclick="document.getElementById('kcsModal').remove()" style="background:none;border:none;font-size:1.4rem;color:var(--text-color-secondary);cursor:pointer;">×</button></div>
+      <p style="font-size:.82rem;color:var(--text-color-secondary);margin:6px 0 12px;">Pick the <b>Positions</b> CSVs from Fidelity, Vanguard, Schwab and/or Merrill Edge (several at once is fine). The app reads the cash balance of each Regular Brokerage and Roth IRA account (SPAXX + pending activity, VMFXX, Schwab cash, Merrill sweep) and shows how far its own cash is off.</p>
+      <label style="display:inline-block;padding:9px 14px;border:1px solid #10b981;border-radius:8px;cursor:pointer;font-weight:600;">📂 Choose Positions CSV(s)
+        <input type="file" accept=".csv,text/csv" multiple style="display:none" id="kcsInput"></label>
+      <div id="kcsFiles" style="font-size:.75rem;color:var(--text-color-secondary);margin-top:6px;"></div>
+      <div id="kcsOut"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button type="button" onclick="document.getElementById('kcsModal').remove()" style="padding:9px 14px;border-radius:8px;border:1px solid var(--border-color);background:none;color:var(--text-color);cursor:pointer;">Cancel</button>
+        <button type="button" id="kcsGo" disabled style="padding:9px 14px;border-radius:8px;border:none;background:#10b981;color:#fff;font-weight:700;cursor:pointer;">Choose files first</button></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    $('kcsInput').onchange = e => onFiles([...e.target.files]);
+    $('kcsGo').onclick = apply;
+  };
+  window.__cashSyncTest = { readCash };
+})();
+</script>
+
 </body>
 </html>
 
