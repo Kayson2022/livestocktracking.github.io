@@ -445,13 +445,19 @@
 
         /* Privacy Mode */
         body.stats-hidden .stat-value,
-        body.stats-hidden .detail-value {
+        body.stats-hidden .detail-value,
+        body.stats-hidden .pv,
+        body.stats-hidden .pv * {
             color: transparent !important;
             text-shadow: 0 0 8px var(--text-color-secondary);
             user-select: none;
             cursor: pointer;
             transition: all 0.2s ease-in-out;
         }
+        /* 2026-10-10: Account Breakdown / Contribution Tracker money values (class pv) and
+           the manual contribution inputs are hidden too */
+        body.stats-hidden .pv-input { filter: blur(6px); }
+        body.stats-hidden .pv-input:focus { filter: none; }
 
 
         /* NEW/MODIFIED SYNC STATUS BOX STYLES */
@@ -650,6 +656,15 @@
             color: var(--text-secondary, #6c757d);
             margin-right: 6px;
             white-space: nowrap;
+        }
+        /* 2026-10-10: label sits on its own line above its buttons, so the buttons start
+           at the same left edge as "Refresh Now" */
+        .price-mode-label.price-mode-label-above {
+            flex-basis: 100%;
+            margin-right: 0;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
         #priceModeIndicator {
             font-size: 0.78rem;
@@ -5892,9 +5907,9 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                             <div style="font-weight:700;font-size:0.9rem;">${name}</div>
                             <div style="font-size:0.75rem;font-weight:700;background:${color}20;color:${color};padding:2px 8px;border-radius:999px;">${pct.toFixed(1)}%</div>
                         </div>
-                        <div style="font-size:1.3rem;font-weight:800;margin-bottom:4px;">${formatCurrency(data.value)}</div>
-                        <div style="font-size:0.8rem;color:var(--text-color-secondary);margin-bottom:8px;">${data.count} holding${data.count !== 1 ? 's' : ''} · Cost: ${formatCurrency(data.cost)}</div>
-                        <div style="font-size:0.85rem;font-weight:700;color:var(--${glCls === 'positive' ? 'positive' : 'negative'}-color);">${glSign}${formatCurrency(gl)} (${glSign}${glPct.toFixed(2)}%)</div>
+                        <div class="pv" style="font-size:1.3rem;font-weight:800;margin-bottom:4px;">${formatCurrency(data.value)}</div>
+                        <div style="font-size:0.8rem;color:var(--text-color-secondary);margin-bottom:8px;">${data.count} holding${data.count !== 1 ? 's' : ''} · Cost: <span class="pv">${formatCurrency(data.cost)}</span></div>
+                        <div class="pv" style="font-size:0.85rem;font-weight:700;color:var(--${glCls === 'positive' ? 'positive' : 'negative'}-color);">${glSign}${formatCurrency(gl)} (${glSign}${glPct.toFixed(2)}%)</div>
                         ${typeof window.k401AdjLine === 'function' ? window.k401AdjLine(name, data.cost, data.value, 'card') : ''}
                         <div style="margin-top:10px;background:var(--bg-secondary,#f0f2f5);border-radius:999px;height:4px;overflow:hidden;">
                             <div style="height:100%;width:${pct}%;background:${color};border-radius:999px;transition:width 0.4s ease;"></div>
@@ -5988,6 +6003,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                                <span style="font-size:0.82rem;font-weight:700;color:var(--text-color-secondary);">Limit: ${formatCurrency(limit)}</span>
                            </div>
                            <input id="${inputId}" type="number" min="0" step="100"
+                               class="pv-input"
                                value="${contributed || ''}"
                                placeholder="e.g. 4000"
                                onchange="saveManualContribution('${key}', this.value)"
@@ -5996,7 +6012,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                        </div>`
                     : `<div style="margin-bottom:8px;">
                            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;">
-                               <div style="font-size:1.2rem;font-weight:800;">${formatCurrency(contributed)}</div>
+                               <div class="pv" style="font-size:1.2rem;font-weight:800;">${formatCurrency(contributed)}</div>
                                <div style="font-size:0.82rem;color:var(--text-color-secondary);">of ${formatCurrency(limit)}</div>
                            </div>
                            <div style="font-size:0.7rem;color:var(--text-color-secondary);">📊 ${txnCount} BUY transaction${txnCount !== 1 ? 's' : ''} in ${year} (auto)</div>
@@ -6015,7 +6031,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:0.78rem;">
                         <span style="font-weight:700;color:${contributed > 0 ? color : 'var(--text-color-secondary)'};">${contributed > 0 ? pct.toFixed(1) + '% used' : isManual ? 'Enter amount above' : 'No ' + year + ' transactions'}</span>
-                        <span style="color:var(--text-color-secondary);">${contributed === 0 ? '' : overLimit ? '⚠️ Over IRS limit!' : formatCurrency(remaining) + ' remaining'}</span>
+                        <span style="color:var(--text-color-secondary);">${contributed === 0 ? '' : overLimit ? '⚠️ Over IRS limit!' : '<span class="pv">' + formatCurrency(remaining) + '</span> remaining'}</span>
                     </div>
                 </div>`;
             });
@@ -6045,7 +6061,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
                     <!-- Total contributed -->
                     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
-                        <span style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(totalContrib)}</span>
+                        <span class="pv" style="font-size:1.4rem;font-weight:800;color:#3498db;">${formatCurrency(totalContrib)}</span>
                         <span style="font-size:0.78rem;color:var(--text-color-secondary);">of ${formatCurrency(totalLimit)} total limit</span>
                     </div>
 
@@ -6064,7 +6080,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     <div style="background:${paceColor}15;border:1px solid ${paceColor}40;border-radius:8px;padding:10px;margin-bottom:10px;">
                         <div style="font-size:0.82rem;font-weight:700;color:${paceColor};">${paceLabel}</div>
                         <div style="font-size:0.72rem;color:var(--text-color-secondary);margin-top:3px;">
-                            ${totalRemain > 0 ? `Need ${formatCurrency(monthlyNeeded)}/mo to max out by Dec 31` : '🎉 Limits maxed out!'}
+                            ${totalRemain > 0 ? `Need <span class="pv">${formatCurrency(monthlyNeeded)}</span>/mo to max out by Dec 31` : '🎉 Limits maxed out!'}
                         </div>
                     </div>
 
@@ -6075,7 +6091,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                             <div style="font-size:0.65rem;color:var(--text-color-secondary);">days left in ${year}</div>
                         </div>
                         <div style="text-align:center;padding:6px;background:var(--bg-secondary,#f0f2f5);border-radius:8px;">
-                            <div style="font-size:1rem;font-weight:800;color:var(--text-color);">${formatCurrency(totalRemain)}</div>
+                            <div class="pv" style="font-size:1rem;font-weight:800;color:var(--text-color);">${formatCurrency(totalRemain)}</div>
                             <div style="font-size:0.65rem;color:var(--text-color-secondary);">remaining to max</div>
                         </div>
                     </div>
@@ -6906,16 +6922,16 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             <button type="button" class="k-act" onclick="openPortfolioSnapshot()" title="Portfolio Snapshot">📊 Snapshot</button>
             <button type="button" class="k-act" onclick="openAlertsModal()" title="Price Alerts">🔔 Alerts</button>
         </div>
-        <div style="display:flex; align-items:center; gap:10px; margin: 0 0 10px; flex-wrap:wrap;">
-            <span class="price-mode-label">Stock/ETF Price Source:</span>
+        <div style="display:flex; align-items:center; column-gap:10px; row-gap:5px; margin: 0 0 12px; flex-wrap:wrap;">
+            <span class="price-mode-label price-mode-label-above">Stock/ETF Price Source</span>
             <div class="price-mode-toggle">
                 <button class="price-mode-btn" id="priceModeRealtime" onclick="setPriceMode('realtime')">⚡ Real-Time (Finnhub)</button>
                 <button class="price-mode-btn" id="priceModeDelayed" onclick="setPriceMode('delayed')">🕐 15-Min Delay (Yahoo)</button>
             </div>
             <span id="priceModeIndicator" class="realtime">🟢 Real-Time</span>
         </div>
-        <div style="display:flex; align-items:center; gap:10px; margin: 0 0 16px; flex-wrap:wrap;">
-            <span class="price-mode-label">Auto Backup:</span>
+        <div style="display:flex; align-items:center; column-gap:10px; row-gap:5px; margin: 0 0 16px; flex-wrap:wrap;">
+            <span class="price-mode-label price-mode-label-above">Auto Backup</span>
             <button onclick="sendBackupEmail(true)" style="padding:8px 16px;border-radius:999px;border:none;background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">📲 Backup to Telegram</button>
             <button id="toggleBackupBtn401" onclick="toggleAutoBackup401()" style="padding:8px 16px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-primary);font-weight:700;font-size:0.85rem;cursor:pointer;">⏸️ Pause Auto-Backup</button>
             <span id="backupStatusBadge" class="backup-status"></span>
@@ -14913,7 +14929,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     }
     const trueCost = fidelityCost - adj, gl = value - trueCost, pct = trueCost > 0 ? gl / trueCost * 100 : 0;
     const col = gl >= 0 ? '#10b981' : '#ef4444', sign = gl >= 0 ? '+' : '';
-    const body = `<span style="opacity:0.75;">True cost</span> <b>${money(trueCost)}</b> · <span style="opacity:0.75;">true gain</span> <b style="color:${col};">${sign}${money(gl)} (${sign}${pct.toFixed(2)}%)</b>`;
+    const body = `<span style="opacity:0.75;">True cost</span> <b class="pv">${money(trueCost)}</b> · <span style="opacity:0.75;">true gain</span> <b class="pv" style="color:${col};">${sign}${money(gl)} (${sign}${pct.toFixed(2)}%)</b>`;
     const edit = `<a href="#" onclick="event.preventDefault();event.stopPropagation();window.openCostAdjustments('${acct}')" style="margin-left:6px;color:var(--text-color-secondary);font-size:0.9em;" title="Fidelity cost minus ${money(adj)} of exchange gains">ⓘ</a>`;
     return where === 'group'
       ? `<div class="group-stat-item" style="flex-basis:100%;margin-top:4px;"><div class="detail-value" style="font-size:0.8rem;font-weight:500;">${body}${edit}</div></div>`
