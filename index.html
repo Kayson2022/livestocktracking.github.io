@@ -709,6 +709,12 @@
 .k-act { height:36px; padding:0 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--card-bg-color) !important; color:var(--text-color) !important;
   font-size:0.85rem; font-weight:600; cursor:pointer; white-space:nowrap; width:auto !important; margin:0 !important; box-shadow:none !important; }
 .k-act:hover { background:color-mix(in srgb, var(--text-color) 6%, var(--card-bg-color)) !important; }
+/* 2026-10-10: Pause/Resume Auto-Backup looked like plain text (its background variable did not exist).
+   Same card + clear border as Snapshot/Alerts; Resume (paused) state is solid orange. */
+.k-backup-toggle { height:36px; padding:0 16px; border-radius:999px; border:1.5px solid color-mix(in srgb, var(--text-color) 30%, transparent);
+  background:var(--card-bg-color); color:var(--text-color); font-size:0.85rem; font-weight:700; cursor:pointer; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
+.k-backup-toggle:hover { background:color-mix(in srgb, var(--text-color) 6%, var(--card-bg-color)); }
+.k-backup-toggle.is-paused { background:linear-gradient(135deg,#f39c12,#e67e22); color:#fff; border-color:#e67e22; }
 .k-split { display:inline-flex; position:relative; }
 .k-split .k-primary { border-radius:8px 0 0 8px; background:#7c3aed !important; color:#fff !important; border-color:#7c3aed; }
 .k-split .k-primary:hover { background:#6d28d9 !important; }
@@ -5714,9 +5720,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             const btn = document.getElementById('toggleBackupBtn401');
             if (!btn) return;
             btn.textContent = isRunning ? '⏸️ Pause Auto-Backup' : '▶️ Resume Auto-Backup';
-            btn.style.background = isRunning ? 'var(--bg-tertiary)' : 'linear-gradient(135deg,#f39c12,#e67e22)';
-            btn.style.color = isRunning ? 'var(--text-primary)' : '#fff';
-            btn.style.border = isRunning ? '1px solid var(--border-color)' : 'none';
+            btn.classList.toggle('is-paused', !isRunning);   // look comes from .k-backup-toggle in the CSS
         }
 
         window.toggleAutoBackup401 = toggleAutoBackup401;
@@ -6933,7 +6937,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
         <div style="display:flex; align-items:center; column-gap:10px; row-gap:5px; margin: 0 0 16px; flex-wrap:wrap;">
             <span class="price-mode-label price-mode-label-above">Auto Backup</span>
             <button onclick="sendBackupEmail(true)" style="padding:8px 16px;border-radius:999px;border:none;background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;">📲 Backup to Telegram</button>
-            <button id="toggleBackupBtn401" onclick="toggleAutoBackup401()" style="padding:8px 16px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-primary);font-weight:700;font-size:0.85rem;cursor:pointer;">⏸️ Pause Auto-Backup</button>
+            <button id="toggleBackupBtn401" class="k-backup-toggle" onclick="toggleAutoBackup401()">⏸️ Pause Auto-Backup</button>
             <span id="backupStatusBadge" class="backup-status"></span>
         </div>
         <!-- Charts: collapsed by default to save space (state remembered) -->
