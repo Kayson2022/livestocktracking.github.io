@@ -2213,6 +2213,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 portfolioData = { username: '', transactions: [], recurringTransactions: [], activityLog: [] };
                 uiState = { expandedGroups: {}, expandedTransactions: {} };
                 priceCache = {};
+                window.priceCache = priceCache;
 
                 const userDocRef = doc(db, 'users', userId);
                 const portfolioColRef = collection(userDocRef, 'data');
@@ -5614,6 +5615,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
             // Nuke the entire in-memory price cache
             priceCache = {};
+            window.priceCache = priceCache;   // keep add-ons (401k price update etc.) on the same object
             window._priceCacheFreshFetched = false;
 
             // Restore manual prices so they survive the wipe
@@ -14815,6 +14817,70 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     const t = txs.find(x => x.symbol === hit);
     return { symbol: hit, name: t.name, type: t.type, platform: t.platform || 'Fidelity' };
   }
+  // ── 2026-10-19: 401(k) / 529 prices from a Fidelity Positions file ─────────────────────
+  // These funds have no ticker, so their price is typed by hand and goes stale (value no longer
+  // matches Fidelity after the market moves). The Positions file has "Last price" (and "Last price
+  // change") for each fund: offer to copy them in as the manual price / previous close.
+  function readPositionsPrices(text) {
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const hi = lines.findIndex(l => /symbol/i.test(l) && /last price/i.test(l));
+    if (hi < 0) return [];
+    const delim = lines[hi].split('\t').length > lines[hi].split(',').length ? '\t' : ',';
+    const head = splitCSVLine(lines[hi], delim).map(h => h.toLowerCase().replace(/\s+/g, ' ').trim());
+    const ix = n => head.indexOf(n);
+    const iAcct = ix('account name') >= 0 ? ix('account name') : ix('account'), iSym = ix('symbol'), iDesc = ix('description'),
+          iQty = ix('quantity'), iPx = ix('last price'), iChg = ix('last price change');
+    const money = v => { const x = parseFloat(String(v || '').replace(/[$,+\s]/g, '')); return isFinite(x) ? x : null; };
+    const out = [];
+    for (let r = hi + 1; r < lines.length; r++) {
+      if (!lines[r].trim()) break;                       // Fidelity puts disclaimers after a blank line
+      const c = splitCSVLine(lines[r], delim);
+      const px = money(c[iPx]);
+      if (!px || px <= 0) continue;
+      out.push({ acct: String(c[iAcct] || ''), sym: String(c[iSym] || '').trim().toUpperCase(), desc: String(c[iDesc] || '').trim(),
+                 qty: money(c[iQty]), px, chg: iChg >= 0 ? money(c[iChg]) : null });
+    }
+    return out;
+  }
+  async function offerRetPriceUpdate(text, fileName) {
+    const rowsP = readPositionsPrices(text);
+    const pc = window.priceCache || {};
+    const hits = [];
+    rowsP.forEach(r => {
+      if (/roth|\bira\b|individual|brokerage|joint/i.test(r.acct) && !RE_529.test(r.acct) && !RE_529.test(r.desc)) return;
+      let acct = null, m = null;
+      if (RE_529.test(r.acct) || RE_529.test(r.desc)) { acct = ACCT_529; m = matchHolding(ACCT_529, r.desc, r.sym); }
+      if (!m) { m = matchHolding(ACCT_401K, r.desc, r.sym); if (m) acct = ACCT_401K; }
+      if (!m) return;
+      const old = pc[m.symbol] ? (pc[m.symbol].manualPrice ?? pc[m.symbol].currentPrice ?? null) : null;
+      if (hits.some(h => h.symbol === m.symbol)) return;
+      hits.push({ symbol: m.symbol, acct, desc: r.desc, px: r.px, prev: r.chg != null ? Math.round((r.px - r.chg) * 10000) / 10000 : null, old, qty: r.qty });
+    });
+    if (!hits.length) {
+      alert('📸 ' + fileName + ' is a POSITIONS file (what you hold today) — it has no transactions, so nothing is imported from it.\n\n' +
+            'For contributions use the ACTIVITY file: Fidelity → Activity & Orders → History → Download (named like Accounts_History.csv).');
+      return;
+    }
+    const fmt = v => v == null ? '—' : '$' + (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    const lines = hits.map(h => '• ' + h.symbol + ' (' + h.acct + '): ' + fmt(h.old) + ' → ' + fmt(h.px)).join('\n');
+    if (!confirm('📸 ' + fileName + ' is a POSITIONS file — no transactions to import.\n\n' +
+                 'It does have Fidelity\'s latest prices for your 401(k) / 529 funds. Update the prices in this app?\n\n' + lines +
+                 '\n\n(Shares are not changed. OK = update prices, Cancel = leave them.)')) return;
+    const now = Date.now();
+    hits.forEach(h => {
+      const e = pc[h.symbol] = pc[h.symbol] || {};
+      e.manualPrice = h.px; e.currentPrice = h.px;
+      if (h.prev != null && h.prev > 0) { e.manualPreviousClosePrice = h.prev; e.previousClosePrice = h.prev; }
+      e.manualPriceEntryTimestamp = now;
+    });
+    const hdl = window.__getFirebaseHandles ? window.__getFirebaseHandles() : {};
+    try {
+      if (hdl.logActivity) hdl.logActivity('Updated ' + hits.length + ' 401(k)/529 price(s) from ' + fileName + '.');
+      if (hdl.saveDataToFirestore) await hdl.saveDataToFirestore();
+      if (hdl.updateDisplay) await hdl.updateDisplay(false);
+      alert('✅ Updated ' + hits.length + ' price(s) from Fidelity. Values now match the Positions file (as of when you downloaded it).');
+    } catch (e) { alert('Prices changed on screen but saving failed: ' + (e.message || e)); }
+  }
   function lastDate(acct) {
     const d = ((window.portfolioData || {}).transactions || []).filter(t => t.accountType === acct && t.date).map(t => normDate(t.date)).sort();
     return d.length ? d[d.length - 1] : '';
@@ -14828,9 +14894,8 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       if (!parsed.length) {
         const head = (await f.text()).slice(0, 600).toLowerCase();
         const isPos = /last price|current value|cost basis total|percent of account/.test(head);
-        alert(isPos
-          ? '📸 ' + f.name + ' is a POSITIONS file (what you hold today) — it has no transactions, so nothing is imported from it.\n\nFor contributions use the ACTIVITY file: Fidelity → Activity & Orders → History → Download (named like Accounts_History.csv).'
-          : 'No buy/sell/contribution rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export?');
+        if (isPos) await offerRetPriceUpdate(await f.text(), f.name);
+        else alert('No buy/sell/contribution rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export?');
       }
       parsed.forEach(r => (r.kind === 'cmv' ? cmvRows : rows).push(r));
     }
@@ -15287,7 +15352,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initMore); else initMore();
 })();
 </script>
-<!-- build: 401(k) contributions without "401(k)" in the plan name + Positions-file message - 2026-10-19 -->
+<!-- build: 401(k) contributions without "401(k)" in the plan name + Positions file updates 401(k)/529 prices - 2026-10-19 -->
 </body>
 </html>
 
