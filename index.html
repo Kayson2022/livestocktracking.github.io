@@ -14628,18 +14628,26 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
       // Fidelity Activity & Orders lists 401(k)/529 payroll contributions with Action "Contributions"
       // (no "bought"); each one buys shares of the fund named in Description
       else if (/contribution/.test(act) && (acct401 || RE_529.test(acct))) type = 'buy';
-      if (!type) continue;
+      // 2026-10-19: some Fidelity files name the plan without "401(k)" (e.g. "… SAVINGS PLAN"), so those
+      // contributions were dropped silently. A contribution that BUYS SHARES (Quantity filled) of a fund is a
+      // retirement-plan buy; IRA cash contributions have no Quantity and stay ignored.
+      let planContrib = false;
+      if (!type && /contribution/.test(act) && broker === 'Fidelity' && !/roth|\bira\b|individual|brokerage|joint/i.test(acct)) {
+        const q0 = Math.abs(parseFloat(String(c[iQty] || '').replace(/[$,()]/g, '')) || 0);
+        if (q0 > 0 && desc.trim() && !/\bcash\b|money market|core position/i.test(desc)) { type = 'buy'; planContrib = true; }
+      }
+      if (!type) { if (/contribution/.test(act)) skipped.notTrade = (skipped.notTrade || 0) + 1; continue; }
       // 529 files leave Symbol empty and put the fund code in the Action text, e.g. "(NHFSMKX98)"
       let sym = String(c[iSym] || '').replace(/[^A-Za-z0-9.\-]/g, '').toUpperCase();
       if (!sym) { const m = String(c[iAct] || '').match(/\(([A-Z0-9]{4,12})\)/); if (m) sym = m[1]; }
       // 401(k) funds often have no ticker: use the fund name; process() maps it to your holding
-      if (!sym && (acct401 || RE_529.test(acct)) && desc.trim()) sym = desc.trim().toUpperCase();
+      if (!sym && (acct401 || planContrib || RE_529.test(acct)) && desc.trim()) sym = desc.trim().toUpperCase();
       const qty = Math.abs(parseFloat(String(c[iQty] || '').replace(/[$,()]/g, '')) || 0);
       let px = Math.abs(parseFloat(String(c[iPx] || '').replace(/[$,()]/g, '')) || 0);
       if (!px && qty && iAmt >= 0) px = Math.abs(parseFloat(String(c[iAmt] || '').replace(/[$,()]/g, '')) || 0) / qty;
       if (!sym || !qty) continue;
-      const is529 = !acct401 && (RE_529.test(acct) || /contribution/i.test(act) && /^[A-Z]{2}\s/.test(desc) || /^[A-Z]{2}[A-Z]{3,}\d{2}$/.test(sym));
-      const is401 = !is529 && RE_401K.test(acct);
+      const is529 = !acct401 && !planContrib && (RE_529.test(acct) || /contribution/i.test(act) && /^[A-Z]{2}\s/.test(desc) || /^[A-Z]{2}[A-Z]{3,}\d{2}$/.test(sym));
+      const is401 = !is529 && (RE_401K.test(acct) || planContrib);
       if (SKIP_ACCOUNT_RE.test(acct) || (iAcct < 0 && SKIP_ACCOUNT_RE.test(fileName))) {
         skipped.retirement++; skipped.accounts.add(acct.replace(/\s*[A-Z]?\d{5,}\s*/g, ' ').trim() || fileName); continue;
       }
@@ -14817,7 +14825,13 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     rows = []; cmvRows = []; adjRows = [];
     for (const f of files) {
       const parsed = parseBrokerCSV(await f.text(), f.name);
-      if (!parsed.length) { alert('No buy/sell rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export rather than Positions?'); }
+      if (!parsed.length) {
+        const head = (await f.text()).slice(0, 600).toLowerCase();
+        const isPos = /last price|current value|cost basis total|percent of account/.test(head);
+        alert(isPos
+          ? '📸 ' + f.name + ' is a POSITIONS file (what you hold today) — it has no transactions, so nothing is imported from it.\n\nFor contributions use the ACTIVITY file: Fidelity → Activity & Orders → History → Download (named like Accounts_History.csv).'
+          : 'No buy/sell/contribution rows found in ' + f.name + '.\nIs it a transaction-history (Activity) export?');
+      }
       parsed.forEach(r => (r.kind === 'cmv' ? cmvRows : rows).push(r));
     }
     if (!rows.length && !cmvRows.length) return;
@@ -14900,6 +14914,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
     if (skipped.retirement) parts.push(`<b>${skipped.retirement}</b> row(s) from 401(k) / 529 / HSA accounts (${esc([...skipped.accounts].join(', '))}) — you update those by hand`);
     if (skipped.cash) parts.push(`<b>${skipped.cash}</b> cash-sweep / money-market row(s) (SPAXX etc.)`);
     if (skipped.cmv) parts.push(`<b>${skipped.cmv}</b> "Change in Market Value" row(s) — Fidelity's price updates, not trades`);
+    if (skipped.notTrade) parts.push(`<b>${skipped.notTrade}</b> cash contribution row(s) (no shares bought)`);
     if (skipped.retirement) parts[0] = `<b>${skipped.retirement}</b> HSA / pension row(s)`;
     const sk = ov.querySelector('#kImpSkip'); sk.style.display = parts.length ? '' : 'none'; sk.innerHTML = 'ℹ️ Skipped automatically: ' + parts.join('; ') + '.';
     const all = [...result.list, ...rows.filter(r => r.status === 'duplicate' || r.status === 'included')]
@@ -15272,6 +15287,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initMore); else initMore();
 })();
 </script>
+<!-- build: 401(k) contributions without "401(k)" in the plan name + Positions-file message - 2026-10-19 -->
 </body>
 </html>
 
