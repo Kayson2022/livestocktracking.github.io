@@ -1017,6 +1017,12 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             }
         }
 
+        // Shown once after "opened on another device" signed this one out (see ONE DEVICE AT A TIME)
+        try {
+            const _kicked = sessionStorage.getItem('k401_kicked');
+            if (_kicked) { sessionStorage.removeItem('k401_kicked'); setTimeout(() => alert(_kicked), 900); }
+        } catch (e) {}
+
         async function signOutUser() {
             try {
                  sessionStorage.removeItem('myAppInvalidationToken'); // Clear local token on sign out - ADDED
@@ -1298,6 +1304,34 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 }, (error) => console.error("Error listening to session management:", error));
             }
             // --- END INTEGRATED SESSION LISTENER ---
+
+            // --- ONE DEVICE AT A TIME (2026-10-28, same idea as the Secure app) ---
+            // Opening the app on a device marks it as the active one; any other device that has the
+            // app open sees that and signs out, so forgotten tabs/phones stop refreshing prices.
+            // Tabs on the SAME device share the id (only the visible one refreshes, see refreshAllPrices).
+            if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                let myDevice = null;
+                try { myDevice = localStorage.getItem('k401_deviceId'); if (!myDevice) { myDevice = crypto.randomUUID(); localStorage.setItem('k401_deviceId', myDevice); } }
+                catch (e) { myDevice = crypto.randomUUID(); }
+                const devRef = doc(portfolioColRef, FIRESTORE_SESSION_DOC);
+                setDoc(devRef, { activeDevice: myDevice, activeDeviceAt: Date.now(),
+                                 activeDeviceInfo: String(navigator.userAgent || '').slice(0, 140) }, { merge: true })
+                  .then(() => {
+                    if (window._k401DevUnsub) window._k401DevUnsub();
+                    window._k401DevUnsub = onSnapshot(devRef, snap => {
+                        const d = snap.exists() ? snap.data() : null;
+                        if (!d || !d.activeDevice || d.activeDevice === myDevice || window._k401KickedOut) return;
+                        window._k401KickedOut = true;
+                        try { isAutoRefreshEnabled = false; if (countdownIntervalId) clearInterval(countdownIntervalId); } catch (e) {}
+                        if (window._k401DevUnsub) window._k401DevUnsub();
+                        try { sessionStorage.setItem('k401_kicked', 'The 401k app was opened on another device, so it was signed out here (one device at a time).\n\nSign in again to use it on this device — that will sign out the other one.'); } catch (e) {}
+                        console.warn('[OneDevice] Opened on another device — signing out here.');
+                        signOutUser();
+                    }, err => console.warn('[OneDevice] listener error:', err));
+                  })
+                  .catch(e => console.warn('[OneDevice] could not mark this device active:', e));
+            }
+            // --- END ONE DEVICE AT A TIME ---
         }
 
         // --- MODALS (Confirmation, Firebase Config, Edit, etc.) ---
@@ -2429,6 +2463,38 @@ html, body { overflow-x: clip !important; max-width: 100%; }
             }
         }
 
+        // ── 2026-10-28: Cloudflare Workers daily limit (100,000 requests) ─────────────────
+        // A refresh used to ask the Worker once PER SYMBOL (~65 requests every 5 minutes, all
+        // night, per open tab). The Worker's /batch route returns up to 25 symbols per request
+        // (the Secure app has used it since Oct 2026), so a whole refresh is now ~3 requests.
+        // Symbols missing from the batch still go through fetchPrice() one by one.
+        async function fetchBatchQuotes401(symbols) {
+            const out = new Map();
+            const isValid = n => typeof n === 'number' && isFinite(n) && n > 0;
+            const syms = [...new Set((symbols || []).map(s => String(s || '').toUpperCase().trim()))].filter(Boolean);
+            for (let i = 0; i < syms.length; i += 25) {
+                const chunk = syms.slice(i, i + 25);
+                try {
+                    const res = await fetchWithTimeout(`${YAHOO_PROXY}/batch?symbols=${encodeURIComponent(chunk.join(','))}`, { cache: 'no-store' }, 15000);
+                    if (!res.ok) { console.warn(`[Batch] HTTP ${res.status}`); continue; }
+                    const j = await res.json();
+                    const list = (j && j.quoteResponse && j.quoteResponse.result) || (j && j.result) || [];
+                    list.forEach(q => {
+                        const sym = String((q && q.symbol) || '').toUpperCase();
+                        const price = q && q.regularMarketPrice;
+                        if (!sym || !isValid(price)) return;
+                        const pc = q.regularMarketPreviousClose ?? q.chartPreviousClose ?? q.previousClose ?? null;
+                        out.set(sym, { currentPrice: price, previousClosePrice: isValid(pc) ? pc : null,
+                                       name: q.shortName || q.longName || null, quoteType: q.quoteType || q.instrumentType || null,
+                                       quoteTime: Number(q.regularMarketTime) || null, source: 'batch' });
+                    });
+                } catch (e) { console.warn('[Batch] chunk failed:', e.message); }
+            }
+            console.log(`[Batch] ${out.size}/${syms.length} symbols in ${Math.ceil(syms.length / 25)} request(s)`);
+            return out;
+        }
+        window.fetchBatchQuotes401 = fetchBatchQuotes401;
+
         async function fetchPrice(holding) {
             if (isCashEquivalentType(holding.type)) {
                 return { currentPrice: 1.0, previousClosePrice: 1.0 };
@@ -2648,6 +2714,12 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 console.log(`Refresh skipped. Initial Load: ${isInitialDataLoaded}, Is Refreshing: ${isRefreshing}`);
                 return;
             }
+            // 2026-10-28: a tab you're not looking at doesn't refresh (it used to keep calling the
+            // Worker all night). Coming back to the tab refreshes at once if prices are overdue.
+            if (document.hidden || window._k401KickedOut) {
+                console.log('Refresh skipped: tab hidden / signed out on this device');
+                return;
+            }
             
             // --- Start Refresh Process ---
             isRefreshing = true;
@@ -2738,6 +2810,9 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     }
                 };
 
+                // One Worker request per 25 symbols; only the ones it misses are fetched one by one
+                const batchQuotes = await fetchBatchQuotes401(fastAssetsToFetch.map(h => h.symbol));
+
                 for (let i = 0; i < totalSymbols; i += BATCH_SIZE) {
                     const batch = fastAssetsToFetch.slice(i, i + BATCH_SIZE);
 
@@ -2746,7 +2821,10 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
                     // Fetch all symbols in this batch concurrently
                     const results = await Promise.allSettled(
-                        batch.map(holding => fetchPrice(holding))
+                        batch.map(holding => {
+                            const q = batchQuotes.get(String(holding.symbol || '').toUpperCase().trim());
+                            return q ? Promise.resolve(q) : fetchPrice(holding);
+                        })
                     );
 
                     // Process each result (including on-demand Finnhub fallback for bad prev close)
@@ -2816,7 +2894,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                         const t   = et.getHours() * 60 + et.getMinutes();
                         const isWeekend    = day === 0 || day === 6;
                         const isMarketOpen = !isWeekend && t >= 570 && t < 960;
-                        return isMarketOpen ? autoRefreshIntervalSeconds : 300;
+                        return isMarketOpen ? autoRefreshIntervalSeconds : 1800;   // closed: every 30 min (was 5)
                     }
 
                     let timeLeft = getSmartIntervalFB();
@@ -5196,7 +5274,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 const isWeekend    = day === 0 || day === 6;
                 const isMarketOpen = !isWeekend && t >= 570 && t < 960; // 9:30-16:00
                 if (isMarketOpen) return autoRefreshIntervalSeconds;
-                return 300; // 5 minutes after hours / weekends
+                return 1800; // 30 minutes after hours / weekends (was 5 — prices barely move)
             }
 
             let timeLeft = getSmartInterval();
@@ -15353,6 +15431,7 @@ window.addEventListener('load', () => setTimeout(injectT62Button, 2600));
 })();
 </script>
 <!-- build: 401(k) contributions without "401(k)" in the plan name + Positions file updates 401(k)/529 prices - 2026-10-19 -->
+<!-- build: one device at a time + no refresh in hidden tabs + batch quotes (25/request) + 30-min refresh when closed - 2026-10-28 -->
 </body>
 </html>
 
