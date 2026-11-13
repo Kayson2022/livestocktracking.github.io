@@ -1,0 +1,66 @@
+/* ============================================================
+   Dark-mode contrast + arrow fixes for Khanh's Portfolio
+   Loaded by index.html via <link rel="stylesheet" href="dark-mode-fix.css">
+   placed just before </body>. To undo: remove that <link> line.
+   ============================================================ */
+
+/* 1. Gain/loss colors: the dark theme reused the light-mode green/red,
+      which are too dim on dark cards. Brighter variants. */
+[data-theme="dark"] {
+  --positive-color: #4ADE80;        /* was #16A34A */
+  --negative-color: #F87171;        /* was #DC2626 */
+  --card-bg-hover-color: #283446;   /* was a saturated purple */
+}
+
+/* 2. Purple accent used as TEXT (arrows, active tab) was 2.1:1 on dark. */
+[data-theme="dark"] .toggle-icon,
+[data-theme="dark"] .tab-link.active {
+  color: #A78BFA;
+}
+[data-theme="dark"] .tab-link.active {
+  border-bottom-color: #A78BFA;
+}
+
+/* 3. Danger zone title/button text. */
+[data-theme="dark"] .k-danger-title,
+[data-theme="dark"] .k-danger-btn {
+  color: #FB7185;
+}
+
+/* 4. Buttons and badges: these apply to BOTH themes. */
+.btn-edit {
+  color: #1F2937;                   /* white on amber was 1.7:1 */
+}
+.btn-danger,
+#signOutBtn {
+  background: #DC2626;              /* white on #EF4444 was 3.8:1 */
+}
+.btn-danger:hover,
+#signOutBtn:hover {
+  background: #B91C1C;
+}
+.account-badge.account-regular {
+  background-color: #1F6FB2;        /* white on #3498DB was 3.2:1 */
+}
+
+/* 5. Collapse/expand arrows. The JS already swaps the character
+      (right-pointing = closed, down-pointing = open) AND two CSS rules
+      rotated it 90deg when expanded, so open sections pointed left and
+      closed histories inside an open account pointed down.
+      Cancel the rotation; the character alone is right. */
+.investment-group.expanded .toggle-icon,
+.transaction-history.expanded .toggle-icon {
+  transform: none;
+}
+
+/* 6. Elements colored by inline style="" (need !important to override). */
+[data-theme="dark"] .header-top-row button[style*="#7c3aed"] {   /* Sync button */
+  color: #A78BFA !important;
+  border-color: #A78BFA !important;
+}
+#k401-stale-banner button {                 /* orange Refresh Now: white text was 2.8:1 */
+  color: #1F2937 !important;
+}
+[data-theme="dark"] [style*="color:#3498db"] { color: #5DADE2 !important; }
+[data-theme="dark"] [style*="color:#e74c3c"] { color: #F87171 !important; }
+[data-theme="dark"] [style*="color:#9b59b6"] { color: #C39BD3 !important; }
