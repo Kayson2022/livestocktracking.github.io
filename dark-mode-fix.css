@@ -64,3 +64,17 @@
 [data-theme="dark"] [style*="color:#3498db"] { color: #5DADE2 !important; }
 [data-theme="dark"] [style*="color:#e74c3c"] { color: #F87171 !important; }
 [data-theme="dark"] [style*="color:#9b59b6"] { color: #C39BD3 !important; }
+
+/* 7. Pill-shaped action buttons (Refresh Now, Snapshot, Alerts, Backup to
+      Telegram, Pause Auto-Backup) to match the price-source toggle. */
+.k-act,
+.k-backup-toggle,
+button[onclick^="sendBackupEmail"] {
+  border-radius: 999px !important;
+}
+.k-split .k-act.k-primary {
+  border-radius: 999px 0 0 999px !important;
+}
+.k-split .k-act.k-caret {
+  border-radius: 0 999px 999px 0 !important;
+}
