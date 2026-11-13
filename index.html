@@ -2894,7 +2894,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                         const t   = et.getHours() * 60 + et.getMinutes();
                         const isWeekend    = day === 0 || day === 6;
                         const isMarketOpen = !isWeekend && t >= 570 && t < 960;
-                        return isMarketOpen ? autoRefreshIntervalSeconds : 1800;   // closed: every 30 min (was 5)
+                        return isMarketOpen ? autoRefreshIntervalSeconds : 300;   // closed: every 5 min
                     }
 
                     let timeLeft = getSmartIntervalFB();
@@ -5276,7 +5276,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 const isWeekend    = day === 0 || day === 6;
                 const isMarketOpen = !isWeekend && t >= 570 && t < 960; // 9:30-16:00
                 if (isMarketOpen) return autoRefreshIntervalSeconds;
-                return 1800; // 30 minutes after hours / weekends (was 5 — prices barely move)
+                return 300; // 5 minutes after hours / weekends
             }
 
             let timeLeft = getSmartInterval();
