@@ -2870,12 +2870,12 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 }
                 updateDataStatus(true);
 
-                // Auto-hide the completion banner after 15 seconds.
+                // Auto-hide the completion banner after 20 seconds.
                 clearTimeout(hideBannerTimeoutId);
                 hideBannerTimeoutId = setTimeout(() => {
                     const _card = document.getElementById('refreshMessageCard');
                     if (_card) _card.style.display = 'none';
-                }, 15000);
+                }, 20000);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
 
                 if (isAutoRefreshEnabled) {
@@ -3120,6 +3120,8 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                 `;
 
                 clearTimeout(hideBannerTimeoutId);
+            // Auto-close the Market Scan result card after 20 seconds.
+            hideBannerTimeoutId = setTimeout(() => { if (window.closeScanCard) window.closeScanCard(); }, 20000);
                 window._isAutoRefreshOn = isAutoRefreshEnabled;
                 if (isAutoRefreshEnabled && timer) timer.style.display = 'block';
             }
