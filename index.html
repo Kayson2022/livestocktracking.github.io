@@ -2901,7 +2901,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     if (refreshStatusBoxEl) refreshStatusBoxEl.style.display = 'block';
                     if (nextUpdateEl) {
                         nextUpdateEl.style.display = 'block';
-                        nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+                        nextUpdateEl.textContent = `Next update in: ${Math.floor(Math.max(0, timeLeft) / 60)}:${String(Math.floor(Math.max(0, timeLeft) % 60)).padStart(2, '0')}`;
                     }
 
                     let lastTargetFB = timeLeft;
@@ -2919,7 +2919,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                             lastTargetFB = timeLeft;
                             deadlineFB = Date.now() + timeLeft * 1000;
                         }
-                        if (nextUpdateEl) nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+                        if (nextUpdateEl) nextUpdateEl.textContent = `Next update in: ${Math.floor(Math.max(0, timeLeft) / 60)}:${String(Math.floor(Math.max(0, timeLeft) % 60)).padStart(2, '0')}`;
                     }, 1000);
                 }
             } // --- End Finally ---
@@ -4520,9 +4520,8 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     <div class="detail-item"><div class="detail-label">Return %</div><div class="detail-value ${totalGainLoss >= 0 ? 'positive' : 'negative'}">${hasLivePrice ? formatPercentage(totalReturnPercentage) : '...'}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L $</div><div class="detail-value ${todayGLLabelClass}">${todayGLAmountDisplay}</div></div>
                     <div class="detail-item"><div class="detail-label">Today's G/L %</div><div class="detail-value ${todayGLLabelClass}">${todayGLPercentDisplay}</div></div>
-                    <div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>
-                    <div class="detail-item"><div class="detail-label">Platform</div><div class="detail-value">${h.platform}</div></div>
+                    ${annualIncome > 0 ? `<div class="detail-item"><div class="detail-label">Annual Income</div><div class="detail-value">${formatCurrency(annualIncome)}</div></div>
+                    <div class="detail-item"><div class="detail-label">Yield on Cost</div><div class="detail-value">${formatPercentage(yieldOnCost)}</div></div>` : ''}
                 `;
             }
             // --- END MODIFIED G/L LOGIC ---
@@ -5283,7 +5282,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
 
             refreshStatusBoxEl.style.display = 'block';
             nextUpdateEl.style.display = 'block';
-            nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+            nextUpdateEl.textContent = `Next update in: ${Math.floor(Math.max(0, timeLeft) / 60)}:${String(Math.floor(Math.max(0, timeLeft) % 60)).padStart(2, '0')}`;
             document.getElementById('refreshMessageCard').style.display = 'none';
 
             let lastTarget = timeLeft;
@@ -5304,7 +5303,7 @@ html, body { overflow-x: clip !important; max-width: 100%; }
                     lastTarget = timeLeft;
                     deadline = Date.now() + timeLeft * 1000;
                 }
-                nextUpdateEl.textContent = `Next update in: ${timeLeft}s`;
+                nextUpdateEl.textContent = `Next update in: ${Math.floor(Math.max(0, timeLeft) / 60)}:${String(Math.floor(Math.max(0, timeLeft) % 60)).padStart(2, '0')}`;
             }, 1000);
 
             updateAutoRefreshButton();
@@ -11568,10 +11567,16 @@ window.addEventListener('load', () => setTimeout(injectPaycheckButton, 2200));
     btn.disabled = false;
   };
 
+  // Market hours check (Mon-Fri 9:30-16:00 ET): prices are not "stale" while the market is closed.
+  function _k401MarketOpen() {
+    const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const day = et.getDay(), mins = et.getHours() * 60 + et.getMinutes();
+    return day >= 1 && day <= 5 && mins >= 570 && mins < 960;
+  }
   function checkAndShowStaleBanner() {
     const age = Date.now() - (window._k401LastRefresh || 0);
     let banner = document.getElementById('k401-stale-banner');
-    if (age > STALE_MS && window._k401LastRefresh) {
+    if (age > STALE_MS && window._k401LastRefresh && _k401MarketOpen()) {
       if (!banner) {
         banner = document.createElement('div');
         banner.id = 'k401-stale-banner';
