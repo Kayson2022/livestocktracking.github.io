@@ -79,19 +79,8 @@ button[onclick^="sendBackupEmail"] {
   border-radius: 0 999px 999px 0 !important;
 }
 
-/* 8. Compact holding cards: denser detail grid so more holdings fit on
-      screen (desktop widths only). */
-@media (min-width: 900px) {
-  .investment-item .investment-header { padding: 12px 18px 8px; }
-  .investment-item .investment-details {
-    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)) !important;
-    gap: 8px 10px !important;
-    padding: 0 18px 12px !important;
-  }
-  .investment-item .detail-label { font-size: 0.78em; }
-  .investment-item .transaction-history-header { padding-top: 6px; padding-bottom: 6px; }
-  .investment-item .transaction-history-header .toggle-icon { font-size: 1.05em; }
-}
+/* 8. (Removed) Compact holding cards: reverted on request; cards use the
+      original roomy layout. */
 
 /* 9. Quiet Edit / Remove / Del buttons inside holdings: outlined until
       hovered, then they take their amber / red color. */
