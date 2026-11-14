@@ -78,3 +78,50 @@ button[onclick^="sendBackupEmail"] {
 .k-split .k-act.k-caret {
   border-radius: 0 999px 999px 0 !important;
 }
+
+/* 8. Compact holding cards: denser detail grid so more holdings fit on
+      screen (desktop widths only). */
+@media (min-width: 900px) {
+  .investment-item .investment-header { padding: 12px 18px 8px; }
+  .investment-item .investment-details {
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)) !important;
+    gap: 8px 10px !important;
+    padding: 0 18px 12px !important;
+  }
+  .investment-item .detail-label { font-size: 0.78em; }
+  .investment-item .transaction-history-header { padding-top: 6px; padding-bottom: 6px; }
+  .investment-item .transaction-history-header .toggle-icon { font-size: 1.05em; }
+}
+
+/* 9. Quiet Edit / Remove / Del buttons inside holdings: outlined until
+      hovered, then they take their amber / red color. */
+.investment-item .btn-edit,
+.investment-item .btn-danger {
+  background: transparent;
+  color: var(--text-color-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: none;
+}
+.investment-item .btn-edit:hover { background: #FBBF24; border-color: #FBBF24; color: #1F2937; }
+.investment-item .btn-danger:hover { background: #DC2626; border-color: #DC2626; color: #fff; }
+
+/* 10. Account Breakdown cards stretch to fill the row. */
+#accountBreakdownGrid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+}
+
+/* 11. "Next update" countdown: small pill in the bottom-right corner instead
+       of floating over the middle of the page. Only applies while the Market
+       Scan card is hidden, so the card itself stays centered. */
+#refreshStatusBox:has(> #refreshMessageCard[style*="display: none"]) {
+  left: auto !important;
+  right: 16px !important;
+  bottom: 12px !important;
+  transform: none !important;
+}
+#refreshStatusBox:has(> #refreshMessageCard[style*="display: none"]) .next-update-timer {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  opacity: 0.9;
+}
